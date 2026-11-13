@@ -1,0 +1,25 @@
+# Секреты и данные установки — никогда (docs/security/secrets.md §4)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+state.json
+id_rsa
+id_ed25519
+
+# Сборка и тесты
+/bin/
+/dist/
+*.test
+*.out
+coverage.*
+
+# Локальное
+.DS_Store
+*.swp
+.idea/
+.vscode/
+.claude/settings.local.json
