@@ -25,7 +25,22 @@
 
 | Имя | Вид | Зачем | Фиксация | Согласовано |
 |---|---|---|---|---|
-| — | — | CI и инструменты проверки не подключены: ждут решения по [tooling.md](tooling.md) §1 | — | — |
+| GitHub Actions | платформа CI | запуск `scripts/check.sh` на PR и `main` | действия — по хэшу коммита, каждое своей строкой при подключении | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
+| Secret scanning и push protection | настройка репозитория GitHub | отказ в отправке распознанных токенов | — | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
+| gitleaks | сканер секретов в CI | рабочее дерево и история | версия; бинарник из релизов `gitleaks/gitleaks`, SHA-256 в workflow | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
+| govulncheck | сканер уязвимостей Go в CI | вызываемые уязвимости модулей и стандартной библиотеки | версия модуля, `sum.golang.org` | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
+| staticcheck | статический анализ Go в CI | ошибки сверх `go vet` | версия модуля, `sum.golang.org` | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
+| shellcheck | анализ Bash в CI | `scripts/`, хуки, `install.sh` | версия; бинарник из релизов `koalaman/shellcheck`, SHA-256 в workflow | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
+| Подтверждение происхождения сборки | шаг конвейера выпуска | свидетельство сборки `xm` из коммита | — | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md); подключается в фазе 4 |
+
+Строка здесь — согласие; подключённым инструмент становится с появлением в workflow. Правила
+конвейера — [policy.md](../security/policy.md) §6. Внешние адреса CI (не `xm`):
+
+| Адрес | Кто обращается | Зачем |
+|---|---|---|
+| `proxy.golang.org`, `sum.golang.org` | `go install` в CI | модули govulncheck и staticcheck с проверкой сумм |
+| `vuln.go.dev` | govulncheck | база уязвимостей Go |
+| `github.com` (релизы `gitleaks/gitleaks`, `koalaman/shellcheck`) | шаги CI | бинарники сканеров |
 
 ## 4. Локальные утилиты разработки
 
