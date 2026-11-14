@@ -73,8 +73,8 @@ SSH-ключи владельца `xm` не читает и не создаёт.
 | Любой прогон проверок | `scripts/guard.sh` | адреса, UUID, ключи, токены, запретные файлы в ветке, индексе и рабочем дереве |
 | Чтение агентом | запреты в `.claude/settings.json` | `.env`, `*.pem`, `*.key` не читаются |
 
-Средства платформы (GitHub secret scanning, push protection) и сторонние сканеры — только с
-согласия владельца ([tooling.md](../dev/tooling.md)).
+Средства платформы (GitHub secret scanning, push protection) и сторонние сканеры — по
+[ADR-0016](../adr/0016-dev-tooling.md) и строкам [реестра](../dev/dependencies.md) §3.
 
 ## 6. Правила для LLM-агентов
 
