@@ -87,6 +87,20 @@ func TestLoadRejects(t *testing.T) {
 		{"неизвестное поле", strings.Replace(cur, `"server"`, `"bogus":1,"server"`, 1), ErrSchema},
 		{"данные после документа", cur + "{}", ErrSchema},
 		{"неверный тип", strings.Replace(cur, `"port": 443`, `"port": "443"`, 1), ErrSchema},
+		{"только версия", `{"schema_version":1}`, ErrSchema},
+		{"null вместо списка", strings.Replace(cur, `"short_ids": [
+          "0123456789abcdef"
+        ]`, `"short_ids": null`, 1), ErrSchema},
+		{"null вместо объекта", strings.Replace(cur, `"params": {
+        "path": "/example"
+      }`, `"params": null`, 1), ErrSchema},
+		{"ключ в другом регистре", strings.Replace(cur, `"private_key"`, `"Private_Key"`, 1), ErrSchema},
+		{"повтор ключа", strings.Replace(cur, `"port": 443`, `"port": 443, "port": 443`, 1), ErrSchema},
+		{"нет поля", strings.Replace(cur, `"hold": false`, `"hold_x": false`, 1), ErrSchema},
+		{"пропущено поле", strings.Replace(cur, `,
+    "hold": false`, ``, 1), ErrSchema},
+		{"порт вне диапазона", strings.Replace(cur, `"port": 443`, `"port": 0`, 1), ErrSchema},
+		{"пустой ключ", strings.Replace(cur, `"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"`, `"private_key": ""`, 1), ErrSchema},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

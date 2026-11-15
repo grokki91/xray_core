@@ -30,20 +30,22 @@ const (
 	URI      Kind = "uri" // шаблон: ссылка клиента вида vless://
 )
 
-// Шаблоны. Ключ — ровно 43 символа base64url (X25519 REALITY); проверяется длиной слова, а не
-// регулярным выражением: в RE2 нет просмотра границ.
+// Шаблоны. Ключ — 43 символа base64url или 43 символа base64 с «=» (X25519 REALITY);
+// проверяется длиной слова: в RE2 нет просмотра границ. Адрес ищется в слове из букв, цифр,
+// «:» и «.» (адрес) — разбором netip на каждом отрезке между двоеточиями, а не регулярным
+// выражением: так «tcp:2001:db8::5» и «203.0.113.5:443» находятся целиком.
 var (
 	uriRe  = regexp.MustCompile(`(?i)\b(?:vless|vmess|trojan|ss|hysteria2|hy2|tuic)://[^\s"'<>]+`)
 	uuidRe = regexp.MustCompile(`(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`)
-	ipv6Re = regexp.MustCompile(`(?i)[0-9a-f]{0,4}(?::[0-9a-f]{0,4}){2,7}(?:\.\d{1,3}){0,3}`)
-	ipv4Re = regexp.MustCompile(`\b\d{1,3}(?:\.\d{1,3}){3}\b`)
-	wordRe = regexp.MustCompile(`[A-Za-z0-9_-]+`)
+	addrRe = regexp.MustCompile(`[0-9A-Za-z:.]+`)
+	ipv4Re = regexp.MustCompile(`^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$`)
+	wordRe = regexp.MustCompile(`[A-Za-z0-9_+/-]+=?`)
 )
 
 // Redactor заменяет чувствительные значения метками. Безопасен для параллельного вызова.
 type Redactor struct {
 	mu     sync.Mutex
-	labels map[string]string // значение → метка
+	labels map[string]string // значение в нижнем регистре → метка
 	count  map[Kind]int
 	exact  *regexp.Regexp // зарегистрированные значения; nil — пересобрать
 	values []string
@@ -62,7 +64,7 @@ func (r *Redactor) Register(kind Kind, value string) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.labels[value]; ok {
+	if _, ok := r.labels[strings.ToLower(value)]; ok {
 		return
 	}
 	r.label(kind, value)
@@ -72,31 +74,33 @@ func (r *Redactor) Register(kind Kind, value string) {
 
 // label возвращает метку значения, назначая новую при первой встрече. Вызывается под mu.
 func (r *Redactor) label(kind Kind, value string) string {
-	if l, ok := r.labels[value]; ok {
+	key := strings.ToLower(value)
+	if l, ok := r.labels[key]; ok {
 		return l
 	}
 	r.count[kind]++
 	l := fmt.Sprintf("<%s:%d>", kind, r.count[kind])
-	r.labels[value] = l
+	r.labels[key] = l
 	return l
 }
 
 // Text возвращает s без зарегистрированных значений и без значений, подходящих под шаблоны.
+// Ссылка заменяется первой и целиком: после замены её частей она бы уже не распозналась.
+// Регистр не важен: домен и hex в другом регистре — то же значение.
 func (r *Redactor) Text(s string) string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	s = uriRe.ReplaceAllStringFunc(s, func(v string) string { return r.label(URI, v) })
 	if len(r.values) > 0 {
 		if r.exact == nil {
 			r.exact = r.compile()
 		}
-		s = r.exact.ReplaceAllStringFunc(s, func(v string) string { return r.labels[v] })
+		s = r.exact.ReplaceAllStringFunc(s, func(v string) string { return r.labels[strings.ToLower(v)] })
 	}
-	s = uriRe.ReplaceAllStringFunc(s, func(v string) string { return r.label(URI, v) })
-	s = uuidRe.ReplaceAllStringFunc(s, func(v string) string { return r.label(UUID, strings.ToLower(v)) })
-	s = ipv6Re.ReplaceAllStringFunc(s, r.ip)
-	s = ipv4Re.ReplaceAllStringFunc(s, r.ip)
+	s = uuidRe.ReplaceAllStringFunc(s, func(v string) string { return r.label(UUID, v) })
+	s = addrRe.ReplaceAllStringFunc(s, r.addrs)
 	return wordRe.ReplaceAllStringFunc(s, func(v string) string {
-		if len(v) == 43 {
+		if len(v) == 43 && !strings.ContainsAny(v, "=") || len(v) == 44 && strings.HasSuffix(v, "=") {
 			return r.label(Key, v)
 		}
 		return v
@@ -111,16 +115,73 @@ func (r *Redactor) compile() *regexp.Regexp {
 	for i, v := range vs {
 		vs[i] = regexp.QuoteMeta(v)
 	}
-	return regexp.MustCompile(strings.Join(vs, "|"))
+	return regexp.MustCompile("(?i)" + strings.Join(vs, "|"))
 }
 
-// ip заменяет публичный адрес; частные, петлевые и служебные адреса — не данные установки.
-func (r *Redactor) ip(v string) string {
-	a, err := netip.ParseAddr(strings.TrimRight(v, ":"))
-	if err != nil || !a.IsGlobalUnicast() || a.IsPrivate() {
-		return v
+// addrs заменяет публичные адреса в слове. Кандидат — отрезок слова от его начала или от
+// двоеточия до его конца или до двоеточия; берётся самый ранний и самый длинный разбираемый.
+// Частные, петлевые и служебные адреса — не данные установки и остаются.
+func (r *Redactor) addrs(w string) string {
+	var out strings.Builder
+	for start := 0; start < len(w); {
+		end, a := longestAddr(w, start)
+		if end < 0 {
+			next := strings.IndexByte(w[start:], ':')
+			if next < 0 {
+				out.WriteString(w[start:])
+				break
+			}
+			out.WriteString(w[start : start+next+1])
+			start += next + 1
+			continue
+		}
+		if a.IsGlobalUnicast() && !a.IsPrivate() {
+			out.WriteString(r.label(IP, a.Unmap().String()))
+		} else {
+			out.WriteString(w[start:end])
+		}
+		start = end
 	}
-	return strings.Replace(v, strings.TrimRight(v, ":"), r.label(IP, a.Unmap().String()), 1)
+	return out.String()
+}
+
+// longestAddr ищет адрес, начинающийся в w[start:]: возвращает его конец или -1.
+func longestAddr(w string, start int) (int, netip.Addr) {
+	ends := []int{len(w)}
+	for i := len(w) - 1; i > start; i-- {
+		if w[i] == ':' {
+			ends = append(ends, i)
+		}
+	}
+	for _, end := range ends {
+		cand := strings.TrimRight(w[start:end], ".")
+		if a, ok := parseAddr(cand); ok {
+			return start + len(cand), a
+		}
+	}
+	return -1, netip.Addr{}
+}
+
+// parseAddr разбирает IPv6 и IPv4, в том числе IPv4 с ведущими нулями в октетах.
+func parseAddr(s string) (netip.Addr, bool) {
+	if a, err := netip.ParseAddr(s); err == nil && a.Zone() == "" {
+		return a, true
+	}
+	if !ipv4Re.MatchString(s) {
+		return netip.Addr{}, false
+	}
+	var b [4]byte
+	for i, part := range strings.Split(s, ".") {
+		n := 0
+		for _, c := range part {
+			n = n*10 + int(c-'0')
+		}
+		if n > 255 {
+			return netip.Addr{}, false
+		}
+		b[i] = byte(n)
+	}
+	return netip.AddrFrom4(b), true
 }
 
 // JSON возвращает копию v, в которой каждая строка — и значения, и ключи — прошла Text.

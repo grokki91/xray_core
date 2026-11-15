@@ -58,13 +58,31 @@ func (x files) ReadFile(path string) ([]byte, error) {
 	if err := x.noSymlinks(p); err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(p, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
+	// O_NONBLOCK: открытие FIFO не ждёт писателя; на обычный файл не влияет.
+	f, err := os.OpenFile(p, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, fmt.Errorf("чтение %s: %w", path, err)
 	}
 	defer f.Close()
-	return io.ReadAll(f)
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("чтение %s: не обычный файл", path)
+	}
+	data, err := io.ReadAll(io.LimitReader(f, MaxFileSize+1))
+	if err != nil {
+		return nil, fmt.Errorf("чтение %s: %w", path, err)
+	}
+	if len(data) > MaxFileSize {
+		return nil, fmt.Errorf("чтение %s: больше %d байт", path, MaxFileSize)
+	}
+	return data, nil
 }
+
+// MaxFileSize — предел ReadFile: файлы xm (состояние, конфигурация) много меньше.
+const MaxFileSize = 16 << 20
 
 func (x files) WriteFile(path string, data []byte, perm fs.FileMode, owner Owner) (err error) {
 	x.trace("write", path)
@@ -132,6 +150,10 @@ func (x files) Mkdir(path string, perm fs.FileMode, owner Owner) error {
 		}
 		if !fi.IsDir() {
 			return fmt.Errorf("каталог %s: на месте каталога другой файл", path)
+		}
+		// Чужие права не исправляются молча: приведение — дело манифеста (security).
+		if fi.Mode().Perm() != perm.Perm() {
+			return fmt.Errorf("каталог %s: права %v, нужны %v", path, fi.Mode().Perm(), perm.Perm())
 		}
 		return nil
 	} else if err != nil {

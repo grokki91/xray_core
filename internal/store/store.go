@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 
 	"github.com/grokki91/xray_core/internal/platform"
 )
@@ -70,6 +71,9 @@ func (s *Store) Load() (State, error) {
 	if dec.More() {
 		return State{}, fmt.Errorf("%w: после документа есть данные", ErrSchema)
 	}
+	if err := canonical(data, st); err != nil {
+		return State{}, err
+	}
 	if err := s.check(st); err != nil {
 		return State{}, err
 	}
@@ -112,9 +116,93 @@ func (s *Store) migrate(data []byte) ([]byte, error) {
 	return json.Marshal(doc)
 }
 
+// canonical требует, чтобы документ совпадал со своей записью из State: encoding/json
+// сопоставляет ключи без учёта регистра и берёт последний из повторов, а пропущенное поле
+// оставляет нулевым. Файл пишет только xm, поэтому любое расхождение — порча, а не вариант
+// формы.
+func canonical(data []byte, st State) error {
+	if err := noDuplicateKeys(data); err != nil {
+		return err
+	}
+	again, err := json.Marshal(st)
+	if err != nil {
+		return err
+	}
+	var a, b any
+	if err := json.Unmarshal(data, &a); err != nil {
+		return fmt.Errorf("%w: %v", ErrSchema, err)
+	}
+	if err := json.Unmarshal(again, &b); err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(a, b) {
+		return fmt.Errorf("%w: поля отсутствуют, null или ключи не в точном написании", ErrSchema)
+	}
+	return nil
+}
+
+// noDuplicateKeys отвергает объект с повтором ключа на любом уровне.
+func noDuplicateKeys(data []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	var walk func() error
+	walk = func() error {
+		tok, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		switch tok {
+		case json.Delim('{'):
+			seen := map[string]bool{}
+			for dec.More() {
+				k, err := dec.Token()
+				if err != nil {
+					return err
+				}
+				if seen[k.(string)] {
+					return fmt.Errorf("%w: повтор ключа %q", ErrSchema, k)
+				}
+				seen[k.(string)] = true
+				if err := walk(); err != nil {
+					return err
+				}
+			}
+			_, err = dec.Token()
+		case json.Delim('['):
+			for dec.More() {
+				if err := walk(); err != nil {
+					return err
+				}
+			}
+			_, err = dec.Token()
+		}
+		return err
+	}
+	return walk()
+}
+
+// check — правила содержимого, которые не выражает форма JSON.
 func (s *Store) check(st State) error {
-	if st.SchemaVersion != s.current {
-		return fmt.Errorf("%w: schema_version %d, нужна %d", ErrSchema, st.SchemaVersion, s.current)
+	bad := func(format string, a ...any) error {
+		return fmt.Errorf("%w: "+format, append([]any{ErrSchema}, a...)...)
+	}
+	switch {
+	case st.SchemaVersion != s.current:
+		return bad("schema_version %d, нужна %d", st.SchemaVersion, s.current)
+	case st.Server.Port < 1 || st.Server.Port > 65535:
+		return bad("порт %d вне 1…65535", st.Server.Port)
+	case st.Server.Addresses == (Addresses{}):
+		return bad("у сервера нет ни адреса, ни домена")
+	case len(st.Inbounds) == 0:
+		return bad("нет входящих")
+	case st.Profiles == nil:
+		return bad("нет списка профилей")
+	}
+	for i, in := range st.Inbounds {
+		r := in.Reality
+		if in.Preset == "" || in.Params == nil || r.Target == "" || len(r.ServerNames) == 0 || r.PrivateKey == "" ||
+			r.PublicKey == "" || len(r.ShortIDs) == 0 {
+			return bad("входящий %d: не заполнены пресет, параметры, цель, имена, ключи или shortId", i)
+		}
 	}
 	return nil
 }

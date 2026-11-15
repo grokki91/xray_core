@@ -62,6 +62,34 @@ func TestStableLabels(t *testing.T) {
 	}
 }
 
+// Ссылка с зарегистрированными частями заменяется целиком: незарегистрированные порт, параметры
+// и имя профиля не остаются в тексте.
+func TestURIWithRegisteredParts(t *testing.T) {
+	r := New()
+	r.Register(UUID, "00000000-0000-4000-8000-000000000001")
+	r.Register(Domain, "example.com")
+	got := r.Text("link vless://00000000-0000-4000-8000-000000000001@example.com:8443?type=xhttp#phone end")
+	if got != "link <uri:1> end" {
+		t.Fatalf("%q", got)
+	}
+}
+
+// Регистр не важен: домен и hex в верхнем регистре — то же значение и та же метка.
+func TestCaseInsensitive(t *testing.T) {
+	c := redacttest.New(t)
+	r := New()
+	register(r, c)
+	in := strings.ToUpper(c.Domain) + " " + strings.ToUpper(c.ShortID) + " " + strings.ToUpper(c.Path)
+	out := r.Text(in)
+	if strings.Contains(strings.ToLower(out), c.Domain) || strings.Contains(strings.ToLower(out), c.ShortID) ||
+		strings.Contains(strings.ToLower(out), c.Path) {
+		t.Fatalf("значение в другом регистре осталось: %q", out)
+	}
+	if r.Text(c.Domain) != r.Text(strings.ToUpper(c.Domain)) {
+		t.Error("метки разных регистров различаются")
+	}
+}
+
 // Значение, содержащее другое, заменяется целиком, а не по частям.
 func TestLongestValueWins(t *testing.T) {
 	r := New()
@@ -84,6 +112,11 @@ func TestPatterns(t *testing.T) {
 		{"local 127.0.0.1 10.0.0.1 192.168.1.1 ::1 fe80::1", "local 127.0.0.1 10.0.0.1 192.168.1.1 ::1 fe80::1"},
 		{"time 12:34:56 version 26.11.9 code preflight.foreign_install", "time 12:34:56 version 26.11.9 code preflight.foreign_install"},
 		{"word " + strings.Repeat("A", 44), "word " + strings.Repeat("A", 44)},
+		{"std " + strings.Repeat("A", 42) + "+=", "std <key:1>"},
+		{"tcp:2001:db8::5 x=2001:db8::6 src:2001:db8::7", "tcp:<ip:1> x=<ip:2> src:<ip:3>"},
+		{"tcp:203.0.113.5:443 ip_203.0.113.6 end 203.0.113.7.", "tcp:<ip:1>:443 ip_<ip:2> end <ip:3>."},
+		{"zeros 203.0.113.005", "zeros <ip:1>"},
+		{"same 203.0.113.5 and 203.0.113.005", "same <ip:1> and <ip:1>"},
 	}
 	for _, tc := range cases {
 		if got := New().Text(tc.in); got != tc.want {

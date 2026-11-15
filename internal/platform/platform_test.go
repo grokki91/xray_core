@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -73,8 +74,11 @@ func TestImplementationsAgree(t *testing.T) {
 			if err := fsys.Mkdir(dir, 0o700, self()); err != nil {
 				t.Fatal(err)
 			}
-			if err := fsys.Mkdir(dir, 0o755, self()); err != nil {
+			if err := fsys.Mkdir(dir, 0o700, self()); err != nil {
 				t.Errorf("повторный Mkdir: %v", err)
+			}
+			if err := fsys.Mkdir(dir, 0o755, self()); err == nil {
+				t.Error("существующий каталог с другими правами принят")
 			}
 			assertPerm(t, onDisk(i, dir), 0o700|fs.ModeDir)
 
@@ -93,6 +97,16 @@ func TestImplementationsAgree(t *testing.T) {
 			}
 			if _, err := fsys.ReadFile(dir + "/missing"); !errors.Is(err, ErrNotFound) {
 				t.Errorf("чтение отсутствующего: %v, нужен ErrNotFound", err)
+			}
+			// FIFO на месте файла: отказ, а не вечное ожидание писателя.
+			if err := syscall.Mkfifo(onDisk(i, dir+"/fifo"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := fsys.ReadFile(dir + "/fifo"); err == nil {
+				t.Error("FIFO прочитан как файл")
+			}
+			if err := os.Remove(onDisk(i, dir+"/fifo")); err != nil {
+				t.Fatal(err)
 			}
 
 			for _, bad := range []string{"etc/state.json", i.base + "/etc/../etc/state.json", i.base + "/etc/"} {
@@ -196,6 +210,10 @@ func TestRealExec(t *testing.T) {
 	// Значения окружения в сообщение не попадают: в нём могут быть данные машины CI.
 	if got := strings.Split(strings.TrimSpace(string(res.Stdout)), "\n"); err != nil || !slices.Equal(got, childEnv) {
 		t.Errorf("процесс получил %d переменных окружения (%v), нужно только %q", len(got), err, childEnv)
+	}
+
+	if _, err := r.Exec(ctx, Command{Program: "cat", Stdin: make([]byte, MaxOutput+1)}); err == nil {
+		t.Error("вывод сверх предела принят")
 	}
 
 	start := time.Now()
