@@ -77,7 +77,6 @@ IPv4 и IPv6; обновление и откат; `xm diag`; панель чер
 
 ## 8. Что покрыто сейчас
 
-Покрыты проверки репозитория, правила workflow CI и хуки (`tests/test-guards.sh`), L0 для Go
-(`gofmt`, `go vet`; в CI — staticcheck, govulncheck, shellcheck, gitleaks) и
-L1 для `cli` и графа импортов. Остальное из L1–L4 вводится вместе с кодом по фазам
+Покрыты проверки репозитория и хуки (`tests/test-guards.sh`); L0 — `gofmt`,
+`go vet`, в CI ещё staticcheck, govulncheck, shellcheck и gitleaks; L1 — для `cli` и графа импортов. Остальное из L1–L4 вводится вместе с кодом по фазам
 [roadmap.md](roadmap.md).

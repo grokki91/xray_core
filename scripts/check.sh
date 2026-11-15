@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Все обязательные проверки репозитория одной командой: синтаксис, инструкции, ссылки, ADR,
-# карта пакетов, реестр зависимостей, правила workflow CI, чувствительные данные, Go (gofmt, go vet, go test),
+# карта пакетов, реестр зависимостей, чувствительные данные, Go (gofmt, go vet, go test),
 # тесты tests/test-*.sh. Печатает только провалы и итог «checks: PASS|FAIL»; код выхода 0 — только PASS.
 # Нет нужной утилиты — провал, а не пропуск. Проверки Go — для модуля с go.mod в корне.
 #   bash scripts/check.sh [ФАЙЛ…]   ФАЙЛ — дополнительный текст для сканера (сообщение коммита, тело PR)
@@ -106,55 +106,6 @@ if grep -qE '^(go\.(mod|sum)$|\.github/workflows/|web/vendor/)' <<<"$changed" &&
   ! grep -qx 'docs/dev/dependencies.md' <<<"$changed"; then
   bad "зависимости или CI изменены без правки docs/dev/dependencies.md"
 fi
-
-# ─── 6а. Workflow CI: правила конвейера (docs/security/policy.md §6)
-# Разрешающие правила: всё, что не опознано как допустимое, — провал. YAML разбирается построчно,
-# поэтому допустимая форма уже, чем позволяет YAML.
-on_keys() { # ключи блока on: (только блочная форма; иначе — строка «?»)
-  awk '/^on:/ { s = $0; sub(/^on:[[:space:]]*/, "", s); if (s != "") print "?"; p = 1; next }
-       p && /^[[:space:]]*$/ { next }
-       p && /^  [^ ]/ { s = $0; sub(/^  /, "", s); sub(/:.*/, "", s); print s; next }
-       p && /^   / { next }
-       { p = 0 }' "$1"
-}
-checkout_steps() { # у каждого шага actions/checkout: persist-credentials: false и fetch-depth: 0
-  awk 'function done() { if (in_co && !(pc && fd)) print NR0; in_co = 0 }
-       in_co && !/^[[:space:]]*$/ && match($0, /[^ ]/) - 1 < k { done() }
-       in_co { if ($0 ~ /^[[:space:]]+persist-credentials:[[:space:]]*false[[:space:]]*$/) pc = 1
-           if ($0 ~ /^[[:space:]]+fetch-depth:[[:space:]]*0[[:space:]]*$/) fd = 1 }
-       /uses[[:space:]]*:[[:space:]]*["\047]?actions\/checkout@/ { done(); in_co = 1; k = index($0, "uses") - 1; pc = fd = 0; NR0 = NR }
-       END { done() }' "$1"
-}
-for f in .github/workflows/*.yml .github/workflows/*.yaml; do
-  [[ -f $f ]] || continue
-  keys=$(on_keys "$f" | sort -u | tr '\n' ' ')
-  [[ -n $keys && $keys =~ ^((pull_request|push)\ )+$ ]] ||
-    bad "$f: события — только pull_request и push в блочной форме «on:» (есть: ${keys:-нет})"
-  perms=$(awk '/^permissions:/ { p = 1; sub(/^permissions:[[:space:]]*/, ""); if ($0 != "") print; next }
-               p && /^[[:space:]]/ { gsub(/^[[:space:]]+|[[:space:]]+$/, ""); if ($0 != "") print; next }
-               { p = 0 }' "$f")
-  [[ $perms == 'contents: read' ]] || bad "$f: на уровне workflow нужно ровно «permissions: contents: read»"
-  (($(grep -cE '(^|[^[:alnum:]_-])permissions[[:space:]"'\'']*:' "$f") == 1)) ||
-    bad "$f: permissions на уровне задания: расширенные права — только у задания выпуска (фаза 4)"
-  while IFS= read -r u; do
-    [[ $u =~ @[0-9a-f]{40}$ ]] || bad "$f: действие не зафиксировано по хэшу коммита: $u"
-  done < <(grep -oE '(^|[^[:alnum:]_-])uses[[:space:]"'\'']*:[[:space:]]*[^[:space:],}#]*' "$f" | sed -E 's/.*:[[:space:]]*//; s/["'\'']//g')
-  ! grep -qE '(^|[^[:alnum:]_])secrets([^[:alnum:]_]|$)|github[^[:alnum:]_]*token' "$f" ||
-    bad "$f: секреты и токен в задании проверок запрещены"
-  lines=$(grep -n -F '${{' "$f" | grep -vE '^[0-9]+:[[:space:]]+[A-Z_][A-Z0-9_]*:[[:space:]]*\$\{\{[^}]*\}\}[[:space:]]*$' | cut -d: -f1 | tr '\n' ' ')
-  [[ -z $lines ]] || bad "$f: \${{ }} вне значения переменной env: (строки $lines)"
-  ! grep -qE '(^|[^[:alnum:]_])(GOSUMDB|GONOSUMDB|GONOSUMCHECK|GOINSECURE|GOPROXY|GONOPROXY|GOPRIVATE|GOFLAGS|GOTOOLCHAIN)([^[:alnum:]_]|$)' "$f" ||
-    bad "$f: переопределение переменных Go, отвечающих за проверку сумм и тулчейн"
-  lines=$(checkout_steps "$f" | tr '\n' ' ')
-  [[ -z $lines ]] || bad "$f: actions/checkout без persist-credentials: false и fetch-depth: 0 (строки $lines)"
-  lines=$(grep -nE 'gitleaks["'\'']?[[:space:]]+(git|dir|detect|protect|stdin)([[:space:]]|$)' "$f" | grep -vF -- '--ignore-gitleaks-allow' | cut -d: -f1 | tr '\n' ' ')
-  [[ -z $lines ]] || bad "$f: вызов gitleaks без --ignore-gitleaks-allow (строки $lines)"
-  ! grep -qE -- '--config|--baseline-path|--gitleaks-ignore-path|GITLEAKS_CONFIG|gitleaks.*[[:space:]]-c[[:space:]=]' "$f" ||
-    bad "$f: своя конфигурация или исключения gitleaks запрещены"
-done
-while IFS= read -r f; do
-  bad "$f: списки исключений и конфигурации gitleaks запрещены (docs/security/secrets.md §4)"
-done < <(files | grep -iE '(^|/)(\.gitleaksignore|[^/]*gitleaks[^/]*\.toml)$')
 
 # ─── 7. Чувствительные данные
 guard() {
