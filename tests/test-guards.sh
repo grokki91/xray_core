@@ -92,7 +92,8 @@ hook() { # hook ИМЯ JSON — вход хука со stdin
 bash_in() { jq -n --arg c "$1" '{session_id: "s1", tool_name: "Bash", tool_input: {command: $c}}'; }
 write_in() { jq -n --arg f "$1" --arg c "$2" '{session_id: "s1", tool_name: "Write", tool_input: {file_path: $f, content: $c}}'; }
 edit_in() { jq -n --arg f "$1" --arg c "$2" '{session_id: "s1", tool_name: "Edit", tool_input: {file_path: $f, old_string: "x", new_string: $c}}'; }
-mcp_in() { jq -n --arg t "$1" --arg b "$2" '{session_id: "s1", tool_name: $t, tool_input: {owner: "o", repo: "r", title: "t", body: $b}}'; }
+mcp_in() { jq -n --arg t "$1" --arg b "$2" '{session_id: "s1", tool_name: $t, tool_input: {owner: "o", repo: "r", title: "t", body: $b, draft: true}}'; }
+pr_in() { jq -n --arg t "$1" --argjson d "$2" '{session_id: "s1", tool_name: $t, tool_input: {owner: "o", repo: "r", pullNumber: 1, draft: $d}}'; }
 
 echo "publish-guard"
 expect 0 "посторонняя команда" hook publish-guard "$(bash_in 'ls -la')"
@@ -102,9 +103,33 @@ expect 2 "git commit с адресом в сообщении" hook publish-guard
 printf '%s\n' "$uuid" >"$copy/leak.txt"
 expect 2 "git push при находке в дереве" hook publish-guard "$(bash_in 'git push -u origin main')"
 rm -f "$copy/leak.txt"
-expect 2 "gh pr create с UUID" hook publish-guard "$(bash_in "gh pr create --title t --body '$uuid'")"
+expect 2 "gh pr create с UUID" hook publish-guard "$(bash_in "gh pr create --draft --title t --body '$uuid'")"
 expect 2 "создание PR с UUID в теле" hook publish-guard "$(mcp_in mcp__github__create_pull_request "client $uuid")"
 expect 0 "создание PR с чистым телом" hook publish-guard "$(mcp_in mcp__github__create_pull_request 'Adds docs')"
+expect 2 "PR не черновиком" hook publish-guard "$(pr_in mcp__github__create_pull_request false)"
+expect 2 "перевод PR в ready" hook publish-guard "$(pr_in mcp__github__update_pull_request false)"
+expect 0 "правка черновика" hook publish-guard "$(pr_in mcp__github__update_pull_request true)"
+expect 2 "слияние PR" hook publish-guard "$(pr_in mcp__github__merge_pull_request true)"
+expect 2 "автослияние PR" hook publish-guard "$(pr_in mcp__github__enable_pr_auto_merge true)"
+expect 2 "gh pr ready" hook publish-guard "$(bash_in 'gh pr ready 1')"
+expect 2 "gh pr merge" hook publish-guard "$(bash_in 'gh pr merge 1 --squash')"
+expect 2 "gh pr create без --draft" hook publish-guard "$(bash_in 'gh pr create --title t --body b')"
+expect 0 "gh pr create --draft" hook publish-guard "$(bash_in 'gh pr create --draft --title t --body b')"
+expect 2 "MCP-создание без draft" hook publish-guard "$(jq -n '{tool_name: "mcp__github__create_pull_request", tool_input: {title: "t"}}')"
+expect 2 "draft строкой" hook publish-guard "$(jq -n '{tool_name: "mcp__github__create_pull_request", tool_input: {title: "t", draft: "true"}}')"
+expect 2 "gh -R … pr merge" hook publish-guard "$(bash_in 'gh -R o/r pr merge 1')"
+expect 2 "gh --repo … pr ready" hook publish-guard "$(bash_in 'gh --repo o/r pr ready 1')"
+expect 0 "gh pr ready --undo" hook publish-guard "$(bash_in 'gh pr ready 1 --undo')"
+expect 0 "gh pr create -d" hook publish-guard "$(bash_in 'gh pr create -d --title t --body b')"
+expect 2 "--draft только в заголовке" hook publish-guard "$(bash_in 'gh pr create --title "fix --draft y" --body b')"
+expect 0 "строка про слияние как данные" hook publish-guard "$(bash_in 'echo "gh pr merge" > f')"
+expect 2 "gh api слияние" hook publish-guard "$(bash_in 'gh api -X PUT repos/o/r/pulls/1/merge')"
+expect 2 "gh api graphql ready" hook publish-guard "$(bash_in 'gh api graphql -f query=markPullRequestReadyForReview')"
+expect 0 "gh api поиск" hook publish-guard "$(bash_in 'gh api -X GET search/issues -f q=is:pr')"
+expect 2 "gh alias" hook publish-guard "$(bash_in 'gh alias set m pr')"
+expect 2 "git push в main" hook publish-guard "$(bash_in 'git push origin HEAD:main')"
+expect 0 "git push в рабочую ветку" hook publish-guard "$(bash_in 'git push -u origin claude/x')"
+expect 2 "запись файла в main через MCP" hook publish-guard "$(jq -n '{tool_name: "mcp__github__push_files", tool_input: {branch: "main", message: "m"}}')"
 expect 0 "читающий инструмент GitHub" hook publish-guard "$(mcp_in mcp__github__list_pull_requests "$uuid")"
 
 echo "write-guard"
@@ -127,13 +152,6 @@ out=$(hook change-notes "$(write_in "$copy/internal/redact/redact.go" x)")
 if jq -e '.hookSpecificOutput.additionalContext | test("security-reviewer")' <<<"$out" >/dev/null 2>&1; then ok "чувствительный модуль → security-reviewer"; else no "чувствительный модуль → security-reviewer"; fi
 out=$(hook change-notes "$(write_in "$copy/README.md" x)")
 if [[ -z $out ]]; then ok "прочие файлы молчат"; else no "прочие файлы молчат"; fi
-
-echo "settings.json"
-for t in mcp__github__create_pull_request mcp__github__update_pull_request mcp__github__merge_pull_request "Bash(gh pr create:*)"; do
-  if jq -e --arg t "$t" '.permissions.ask | index($t)' .claude/settings.json >/dev/null; then
-    ok "подтверждение владельца: $t"
-  else no "подтверждение владельца: $t"; fi
-done
 
 echo "check.sh"
 expect 0 "временная копия проходит" bash "$copy/scripts/check.sh"
