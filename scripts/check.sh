@@ -72,7 +72,7 @@ while IFS= read -r f; do
   done < <(grep -oE '\]\([^)[:space:]]+\)' "$f" | sed -E 's/^\]\(//; s/\)$//' | grep -vE '^(https?:|mailto:|#)|[<>{}]')
   while IFS= read -r t; do
     [[ -e ${t%/} ]] || bad "$f: нет пути $t"
-  done < <(grep -oE '`[^`[:space:]]+`' "$f" | tr -d '`' | grep -E '^(docs|\.claude|scripts)/' | grep -vE '[*<>{}…$]' | sort -u)
+  done < <(grep -oE "\`[^\`[:space:]]+\`" "$f" | tr -d '`' | grep -E '^(docs|\.claude|scripts)/' | grep -vE '[*<>{}…$]' | sort -u)
 done < <(files '*.md')
 
 # ─── 4. ADR: статус, строка в указателе, уникальный номер
