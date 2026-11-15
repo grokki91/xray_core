@@ -24,10 +24,12 @@
 | `xm backup [--list]` | создать снимок или показать список | да |
 | `xm restore <id>` | восстановить из снимка | да |
 | `xm ui [--port <порт>]` | локальный Web UI для SSH-туннеля | нет |
-| `xm version` · `xm help` | версии `xm` и Xray; справка | нет |
+| `xm version` · `xm help` | версии `xm` и Xray (Xray — с фазы 2); справка | нет |
 
 После MVP: `xm ui`, `xm install --reinstall`, перегенерация ключей, группы `xm bridge …` (§5),
 `xm monitor on|off`, `xm harden` (вопрос Q7).
+
+Без команды — справка в stderr и код 2; `xm help` и `xm <команда> -h` — справка в stdout, код 0.
 
 Общие флаги: `--json` — машинный вывод по контракту (§2); `--yes` — не задавать подтверждений.
 Разрушительные действия (`uninstall --purge`, `restore`, `install --reinstall`) требуют явного
