@@ -12,6 +12,7 @@ internal/
   cli/                    команды `version` и `help`
   contract/               конверт, схемы `version` и `error`; эталоны в testdata/
   platform/               порт: `Exec`, `FS`, `Clock`; настоящая и поддельная реализации
+  store/                  состояние `state.json`: схема, миграции, запись, блокировка
 README.md                 коротко: что это, требования, установка, команды
 AGENTS.md                 инструкции для LLM-агентов: единый вход
 CLAUDE.md                 @AGENTS.md и особенности Claude Code

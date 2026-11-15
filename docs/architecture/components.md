@@ -57,13 +57,18 @@ type Platform interface {
 
 ```go
 type Store interface {
-    Load() (State, error)
+    Load() (State, error)                // ErrNoState, ErrSchema, ErrNewerSchema
     Save(State) error                    // только внутри транзакции
     Lock(ctx context.Context) (unlock func(), err error)
 }
 ```
 
 - Структура состояния и права — [data-model.md](data-model.md). Фаза 1.
+- Загрузка: версия схемы → миграции по шагу N → N+1 на разобранном JSON → строгий разбор
+  (неизвестное поле, лишние данные, неверный тип — ошибка). Состояние новее сборки — отказ
+  «обновите xm». Мигрированное состояние пишет следующий `Save`.
+- Запись — `platform.FS.WriteFile` с `0600` и root; блокировка — `flock` файла `/run/xm/lock`
+  (каталог создаётся при необходимости: `/run` — tmpfs).
 
 ### redact
 
