@@ -9,7 +9,7 @@
 | Инструмент | Решение | Когда |
 |---|---|---|
 | GitHub Actions: запуск `scripts/check.sh` | подключить | фаза 1, шаг 3 |
-| Secret scanning и push protection GitHub | включить | сразу (настройка репозитория, владелец) |
+| Secret scanning и push protection GitHub | включено | 2026-11-15, владелец (настройка репозитория) |
 | gitleaks | подключить | фаза 1, шаг 3 |
 | govulncheck | подключить | фаза 1, шаг 3 |
 | staticcheck | подключить | фаза 1, шаг 3 |
