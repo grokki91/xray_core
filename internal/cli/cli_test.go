@@ -2,15 +2,24 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
+	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
-func run(args ...string) (code int, stdout, stderr string) {
+type fixedClock struct{}
+
+func (fixedClock) Now() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) }
+
+func runAs(version string, args ...string) (code int, stdout, stderr string) {
 	var out, errOut bytes.Buffer
-	code = Run(args, &out, &errOut, "1.2.3")
+	code = Run(args, Env{Stdout: &out, Stderr: &errOut, Version: version, Clock: fixedClock{}})
 	return code, out.String(), errOut.String()
 }
+
+func run(args ...string) (code int, stdout, stderr string) { return runAs("1.2.3", args...) }
 
 func TestVersion(t *testing.T) {
 	code, stdout, stderr := run("version")
@@ -40,7 +49,7 @@ func TestUsageErrors(t *testing.T) {
 		{"без команды", nil, []string{"Использование: xm <команда>"}},
 		{"неизвестная команда", []string{"frobnicate"}, []string{"«frobnicate»", "xm help"}},
 		{"лишний аргумент", []string{"version", "extra"}, []string{"«extra»", "xm help"}},
-		{"неизвестный флаг", []string{"version", "--bogus"}, []string{"bogus"}},
+		{"неизвестный флаг", []string{"version", "--bogus"}, []string{"неизвестный флаг «-bogus»"}},
 		{"аргумент у help", []string{"help", "version"}, []string{"«version»"}},
 	}
 	for _, tc := range cases {
@@ -83,6 +92,51 @@ func TestInputIsEscaped(t *testing.T) {
 		code, _, stderr := run(args...)
 		if code != exitUsage || strings.ContainsRune(stderr, 0x1b) || !strings.Contains(stderr, `\x1b[2Jboom`) {
 			t.Errorf("%q: код %d, ввод не экранирован: %q", args, code, stderr)
+		}
+	}
+}
+
+// Вывод xm version --json побайтно совпадает с эталоном схемы version.
+func TestVersionJSONMatchesGolden(t *testing.T) {
+	want, err := os.ReadFile("../contract/testdata/version.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr := runAs("0.1.0", "version", "--json")
+	if code != exitOK || stderr != "" || stdout != string(want) {
+		t.Fatalf("version --json: код %d, stderr %q, stdout:\n%s", code, stderr, stdout)
+	}
+}
+
+// С --json ошибка аргументов — ровно один документ error в stdout и код 2.
+func TestUsageErrorJSON(t *testing.T) {
+	cases := []struct {
+		args []string
+		code string
+	}{
+		{[]string{"frobnicate", "--json"}, codeUnknownCommand},
+		{[]string{"version", "--json", "extra"}, codeBadArguments},
+		{[]string{"version", "--json", "--bogus"}, codeBadArguments},
+		{[]string{"help", "--json"}, codeBadArguments},
+		{[]string{"version", "--bogus", "--json"}, codeBadArguments},
+		{[]string{"version", "extra", "--json"}, codeBadArguments},
+	}
+	for _, tc := range cases {
+		code, stdout, stderr := run(tc.args...)
+		var doc struct {
+			Schema struct{ Name string }
+			Error  struct{ Code, Message, Hint string }
+		}
+		dec := json.NewDecoder(strings.NewReader(stdout))
+		if err := dec.Decode(&doc); err != nil {
+			t.Errorf("%q: stdout не JSON: %v: %q", tc.args, err, stdout)
+			continue
+		}
+		if dec.More() {
+			t.Errorf("%q: в stdout больше одного документа: %q", tc.args, stdout)
+		}
+		if code != exitUsage || doc.Schema.Name != "error" || doc.Error.Code != tc.code || stderr == "" {
+			t.Errorf("%q: код %d, документ %+v, stderr %q", tc.args, code, doc, stderr)
 		}
 	}
 }

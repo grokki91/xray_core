@@ -78,7 +78,12 @@
   «обновите `xm`». Форма конверта совпадает с принятой в `xray_client` (`schema: {name, major, minor}`).
 
 Схемы первой версии: `status`, `profiles`, `profile`, `update`, `diag-report`, `backups`,
-`version`, `error`. Формат отчёта диагностики — [diagnostics.md](../operations/diagnostics.md) §3.
+`version`, `error`. Реализованы `version` (`data: {xm}`; версия Xray — полем с фазы 2) и
+`error`; эталоны — `internal/contract/testdata/`.
+
+Ошибка аргументов при `--json` среди аргументов — документ `error` в stdout (человеку — ещё и
+текст в stderr), код 2; коды `cli.unknown_command` и `cli.bad_arguments`. Команда без
+машинного вывода (`help`) с `--json` — ошибка `cli.bad_arguments`. Формат отчёта диагностики — [diagnostics.md](../operations/diagnostics.md) §3.
 
 ## 3. Локальный HTTP API
 

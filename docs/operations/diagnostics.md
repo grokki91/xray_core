@@ -59,7 +59,7 @@
   "observations": [
     {
       "check": "reach.listen",
-      "target": "<server-ip>:443",
+      "target": "<server-ip:1>:443",
       "status": "ok",
       "value": {"ipv4": true, "ipv6": true},
       "limits": ["порт слушается локально; доступность извне этим не доказана"]

@@ -4,7 +4,6 @@
 # на этот файл не срабатывает. Хуки проверяются на временной копии репозитория.
 set -u
 cd "${BASH_SOURCE[0]%/*}/.." || exit 1
-repo=$PWD
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 export TMPDIR=$work

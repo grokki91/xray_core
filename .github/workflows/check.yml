@@ -35,11 +35,13 @@ jobs:
       - name: scripts/check.sh
         run: bash scripts/check.sh
 
+      # Инструмент собирается тулчейном из go.mod: иначе go run берёт минимальный тулчейн из
+      # go.mod самого инструмента, и тот не разбирает пакеты, требующие более новой версии Go.
       - name: govulncheck
-        run: go run "golang.org/x/vuln/cmd/govulncheck@$GOVULNCHECK_VERSION" ./...
+        run: GOTOOLCHAIN="$(go env GOVERSION)" go run "golang.org/x/vuln/cmd/govulncheck@$GOVULNCHECK_VERSION" ./...
 
       - name: staticcheck
-        run: go run "honnef.co/go/tools/cmd/staticcheck@$STATICCHECK_VERSION" ./...
+        run: GOTOOLCHAIN="$(go env GOVERSION)" go run "honnef.co/go/tools/cmd/staticcheck@$STATICCHECK_VERSION" ./...
 
       - name: shellcheck
         run: |

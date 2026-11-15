@@ -1,0 +1,16 @@
+{
+  "schema": {
+    "name": "error",
+    "major": 1,
+    "minor": 0
+  },
+  "xm": {
+    "version": "0.1.0"
+  },
+  "time": 1767225600,
+  "error": {
+    "code": "cli.unknown_command",
+    "message": "неизвестная команда «frobnicate»",
+    "hint": "список команд: xm help"
+  }
+}

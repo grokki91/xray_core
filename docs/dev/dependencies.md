@@ -30,8 +30,8 @@
 | `actions/checkout` | действие CI | получение репозитория с историей для `check.sh` и gitleaks | v7.0.1, коммит `3d3c42e5aac5ba805825da76410c181273ba90b1` | 2026-11-15, ответ владельца к [PR #67](https://github.com/grokki91/xray_core/pull/67); [ADR-0016](../adr/0016-ci-and-tooling.md) |
 | Secret scanning и push protection | настройка репозитория GitHub | отказ в отправке распознанных токенов | включено владельцем 2026-11-15 | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
 | gitleaks | сканер секретов в CI | рабочее дерево и история | 8.30.1; бинарник из релизов `gitleaks/gitleaks`, SHA-256 в workflow — из `checksums.txt` релиза | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
-| govulncheck | сканер уязвимостей Go в CI | вызываемые уязвимости модулей и стандартной библиотеки | v1.9.0, `sum.golang.org` | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
-| staticcheck | статический анализ Go в CI | ошибки сверх `go vet` | модуль `honnef.co/go/tools` v0.8.2 (выпуск 2026.2.2), `sum.golang.org` | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
+| govulncheck | сканер уязвимостей Go в CI | вызываемые уязвимости модулей и стандартной библиотеки | v1.9.0, `sum.golang.org`; собирается тулчейном из `go.mod` | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
+| staticcheck | статический анализ Go в CI | ошибки сверх `go vet` | модуль `honnef.co/go/tools` v0.8.2 (выпуск 2026.2.2), `sum.golang.org`; собирается тулчейном из `go.mod` | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
 | shellcheck | анализ Bash в CI | все `*.sh` репозитория: `scripts/`, `tests/`, хуки, `install.sh` | 0.11.0; бинарник из релизов `koalaman/shellcheck`, SHA-256 в workflow: upstream сумм не публикует — посчитана 2026-11-15 по двум загрузкам с релиза из одной сети (совпали), независимой сверки нет; при обновлении старая сумма сверяется с новой загрузкой старой версии | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
 | Подтверждение происхождения сборки | шаг конвейера выпуска | свидетельство сборки `xm` из коммита | — | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md); подключается в фазе 4 |
 

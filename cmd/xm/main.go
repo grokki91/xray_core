@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/grokki91/xray_core/internal/cli"
+	"github.com/grokki91/xray_core/internal/platform"
 )
 
 // version подставляется при сборке: -ldflags "-X main.version=<версия>". Пакетная переменная —
@@ -12,5 +13,8 @@ import (
 var version = "dev"
 
 func main() {
-	os.Exit(cli.Run(os.Args[1:], os.Stdout, os.Stderr, version))
+	p := platform.New()
+	os.Exit(cli.Run(os.Args[1:], cli.Env{
+		Stdout: os.Stdout, Stderr: os.Stderr, Version: version, Clock: p.Clock(),
+	}))
 }
