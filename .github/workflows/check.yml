@@ -1,6 +1,6 @@
 # Обязательная проверка PR и main: scripts/check.sh и сканеры ADR-0016.
 # Правила конвейера — docs/security/policy.md §6; версии и суммы — docs/dev/dependencies.md §3.
-# Go — тулчейн версии из go.mod: go на образе раннера скачивает его сам (GOTOOLCHAIN=auto).
+# Go — тулчейн версии из go.mod: go на образе раннера скачивает его сам (режим auto по умолчанию).
 name: check
 
 on:

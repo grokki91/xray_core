@@ -32,7 +32,7 @@
 | gitleaks | сканер секретов в CI | рабочее дерево и история | 8.30.1; бинарник из релизов `gitleaks/gitleaks`, SHA-256 в workflow — из `checksums.txt` релиза | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
 | govulncheck | сканер уязвимостей Go в CI | вызываемые уязвимости модулей и стандартной библиотеки | v1.9.0, `sum.golang.org` | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
 | staticcheck | статический анализ Go в CI | ошибки сверх `go vet` | модуль `honnef.co/go/tools` v0.8.2 (выпуск 2026.2.2), `sum.golang.org` | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
-| shellcheck | анализ Bash в CI | `scripts/`, хуки, `install.sh` | 0.11.0; бинарник из релизов `koalaman/shellcheck`, SHA-256 в workflow — посчитана при подключении: upstream сумм не публикует | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
+| shellcheck | анализ Bash в CI | `scripts/`, хуки, `install.sh` | 0.11.0; бинарник из релизов `koalaman/shellcheck`, SHA-256 в workflow: upstream сумм не публикует — посчитана 2026-11-15 по двум загрузкам с релиза из одной сети (совпали), независимой сверки нет; при обновлении старая сумма сверяется с новой загрузкой старой версии | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
 | Подтверждение происхождения сборки | шаг конвейера выпуска | свидетельство сборки `xm` из коммита | — | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md); подключается в фазе 4 |
 
 Строка здесь — согласие; подключённым инструмент становится с появлением в workflow
@@ -45,6 +45,7 @@ govulncheck, staticcheck, shellcheck подключены 2026-11-15). Прав�
 | `proxy.golang.org`, `sum.golang.org` | `go` локально и в CI; `go install` в CI | тулчейн версии из `go.mod`; модули govulncheck и staticcheck; проверка сумм |
 | `vuln.go.dev` | govulncheck | база уязвимостей Go |
 | `github.com` (релизы `gitleaks/gitleaks`, `koalaman/shellcheck`; `actions/checkout`) | шаги CI, раннер | бинарники сканеров; код действия |
+| `release-assets.githubusercontent.com` | шаги CI | файлы релизов: на него перенаправляет `github.com` |
 
 ## 4. Локальные утилиты разработки
 

@@ -197,6 +197,7 @@ jobs:
     steps:
       - uses: actions/checkout@$sha # v1
         with:
+          fetch-depth: 0
           persist-credentials: false
       - run: echo "\$REF"
       - name: scan
@@ -212,18 +213,34 @@ wf_case() { # wf_case КОД ИМЯ SED-ВЫРАЖЕНИЕ — правильн�
 }
 wf_case 0 "правильный workflow" ''
 wf_case 1 "pull_request_target" 's/^  pull_request:/  pull_request_target:/'
+wf_case 1 "событие в потоковой форме" 's/^on:/on: [pull_request_target]/'
+wf_case 1 "событие issue_comment" 's/^  pull_request:/  pull_request:\n  issue_comment:/'
 wf_case 1 "права шире contents: read" 's/^  contents: read/  contents: read\n  pull-requests: write/'
 wf_case 1 "permissions: read-all" 's/^permissions:/permissions: read-all/; /^  contents: read/d'
+wf_case 1 "права на уровне задания" 's/^  check:/  check:\n    permissions: write-all/'
 wf_case 1 "действие по тегу" "s/@$sha/@v4/"
+wf_case 1 "действие по тегу после «-   »" 's/^      - name: scan/      -   uses: evil\/act@v1\n      - name: scan/'
 wf_case 1 "секрет в задании" 's/^      REF: .*/      T: ${{ secrets.TOKEN }}/'
+wf_case 1 "секрет в скобках" "s/^      REF: .*/      T: \${{ secrets['TOK'] }}/"
+wf_case 1 "secrets: inherit" 's/^    env:/    secrets: inherit\n    env:/'
 wf_case 1 "подстановка в однострочном run" "s/echo \"\\\$REF\"/echo $subst/"
 wf_case 1 "подстановка в блоке run" "s/^          echo one/          echo $subst/"
+wf_case 1 "подстановка в продолжении run" "s/^      - run: echo \"\\\$REF\"/      -   run: echo hi\n          $subst/"
+wf_case 1 "отключение проверки сумм Go" 's/^      REF: .*/      GOSUMDB: off/'
 wf_case 1 "checkout без persist-credentials: false" '/persist-credentials/d'
+wf_case 1 "persist-credentials в чужом шаге" '/persist-credentials/d; s/^          echo one/          echo one\n        with:\n          persist-credentials: false/'
+wf_case 1 "checkout без полной истории" '/fetch-depth/d'
 wf_case 1 "gitleaks без --ignore-gitleaks-allow" 's/ --ignore-gitleaks-allow//'
+wf_case 1 "второй вызов gitleaks без флага" 's/^          echo one/          gitleaks dir ./'
+wf_case 1 "gitleaks со своей конфигурацией" 's/--ignore-gitleaks-allow/--ignore-gitleaks-allow --config x.toml/'
 good >"$wf"
 : >"$copy/.gitleaksignore"
 expect 1 "файл .gitleaksignore" bash "$copy/scripts/check.sh"
-rm -rf "$copy/.gitleaksignore" "$copy/.github"
+rm "$copy/.gitleaksignore"
+mkdir -p "$copy/conf"
+: >"$copy/conf/gitleaks.toml"
+expect 1 "конфигурация gitleaks в подкаталоге" bash "$copy/scripts/check.sh"
+rm -rf "$copy/conf" "$copy/.github"
 
 if ((fails)); then
   echo "FAIL: $fails"
