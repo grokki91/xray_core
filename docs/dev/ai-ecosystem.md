@@ -77,7 +77,8 @@
 | Запись файла | хук `write-guard.sh` (PreToolUse: Write, Edit) | отказ при секрете в тексте и при запретном имени файла |
 | После правки | хук `change-notes.sh` (PostToolUse: Write, Edit) | один раз за сессию напоминает политику по классу файла: архитектура, конфигурация, зависимости, чувствительный модуль, инструкции |
 | Перед коммитом и отправкой | хук `publish-guard.sh` (PreToolUse: Bash) | `git commit`, `git push` — только при зелёном `scripts/check.sh`; текст команды проверяется на секреты |
-| Перед созданием и правкой PR, комментарием | хук `publish-guard.sh` (PreToolUse: инструменты GitHub) | то же для текста PR и комментариев |
+| Перед созданием и правкой PR, комментарием | хук `publish-guard.sh` (PreToolUse: инструменты GitHub) | то же для текста PR и комментариев; в них только «Что сделано», без подписи ассистента |
+| PR, ready, слияние, запись в `main` | хук `publish-guard.sh` (PreToolUse: Bash, инструменты GitHub) | PR — только черновиком; отказ на ready, слияние, автослияние, push и запись в `main` ([ADR-0018](../adr/0018-short-pr-and-draft-only.md)) |
 | Изменение архитектуры | `change-notes.sh` + `scripts/check.sh` | напоминание об ADR; новый пакет `internal/` без строки в `repository.md` — провал |
 | Изменение конфигураций | `change-notes.sh` + правило `config.md` | эталон, `xray run -test`, фиктивные данные |
 | Добавление зависимости | `change-notes.sh` + `scripts/check.sh` | изменение `go.mod`, `go.sum`, `.github/workflows/`, `web/vendor/` без правки реестра — провал |
