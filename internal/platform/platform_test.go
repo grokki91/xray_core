@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io/fs"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -39,7 +40,7 @@ func testPrograms(t *testing.T) map[string]string {
 func impls(t *testing.T) []impl {
 	progs := testPrograms(t)
 	return []impl{
-		{"real", newReal(progs), t.TempDir()},
+		{"real", newReal(progs, http.DefaultTransport), t.TempDir()},
 		{"fake", newFake(t.TempDir(), time.Time{}, progs), ""},
 	}
 }
@@ -185,7 +186,7 @@ func assertPerm(t *testing.T, path string, want fs.FileMode) {
 }
 
 func TestRealExec(t *testing.T) {
-	r := newReal(testPrograms(t))
+	r := newReal(testPrograms(t), http.DefaultTransport)
 	ctx := deadline(t, 5*time.Second)
 
 	// Метасимволы оболочки — просто аргументы: оболочки нет.

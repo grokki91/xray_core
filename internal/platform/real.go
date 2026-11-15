@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"syscall"
@@ -25,19 +26,23 @@ const waitDelay = time.Second
 type Real struct {
 	programs map[string]string
 	files    files
+	net      realNet
 }
 
 // New возвращает настоящую реализацию.
-func New() *Real { return newReal(programs()) }
+func New() *Real { return newReal(programs(), http.DefaultTransport) }
 
-func newReal(progs map[string]string) *Real {
-	return &Real{programs: progs, files: files{
+// newReal принимает транспорт HTTP: тесты подставляют свой с доверием к локальному серверу.
+func newReal(progs map[string]string, transport http.RoundTripper) *Real {
+	return &Real{programs: progs, net: realNet{transport}, files: files{
 		chown: func(f *os.File, _ string, o Owner) error { return f.Chown(o.UID, o.GID) },
 		trace: func(string, string) {},
 	}}
 }
 
 func (r *Real) FS() FS { return r.files }
+
+func (r *Real) Net() Net { return r.net }
 
 func (r *Real) Clock() Clock { return realClock{} }
 

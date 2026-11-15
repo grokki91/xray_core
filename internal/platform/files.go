@@ -81,7 +81,8 @@ func (x files) ReadFile(path string) ([]byte, error) {
 	return data, nil
 }
 
-// MaxFileSize — предел ReadFile: файлы xm (состояние, конфигурация) много меньше.
+// MaxFileSize — предел ReadFile: состояние и конфигурация много меньше; под него же подпадает
+// архив Xray в кэше (update).
 const MaxFileSize = 16 << 20
 
 func (x files) WriteFile(path string, data []byte, perm fs.FileMode, owner Owner) (err error) {

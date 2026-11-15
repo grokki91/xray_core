@@ -58,6 +58,12 @@ govulncheck, staticcheck, shellcheck подключены 2026-11-15). Прав�
 
 ## 5. Внешние адреса, к которым обращается `xm`
 
-Заполняется с кодом (фазы 2–5): адреса релизов GitHub, DoH-серверы по умолчанию, контрольные
-узлы диагностики, адрес для определения внешнего IP, тестовый адрес самопроверки. Каждый адрес — закрытый список в коде и
+Заполняется с кодом (фазы 2–5): DoH-серверы по умолчанию, контрольные узлы диагностики, адрес
+для определения внешнего IP, тестовый адрес самопроверки. Каждый адрес — закрытый список в коде и
 строка здесь.
+
+| Узел | Пакет | Зачем | Согласовано |
+|---|---|---|---|
+| `api.github.com` | `update` | последний стабильный релиз `XTLS/Xray-core` и хэши его файлов | [ADR-0009](../adr/0009-update-source-and-verification.md); [updates.md](../operations/updates.md) §1 |
+| `github.com` | `update` | архив релиза и `.dgst` | [ADR-0009](../adr/0009-update-source-and-verification.md); [updates.md](../operations/updates.md) §1 |
+| `release-assets.githubusercontent.com` | `update` | файлы релиза: на него перенаправляет `github.com` | [ADR-0009](../adr/0009-update-source-and-verification.md); [updates.md](../operations/updates.md) §1 |
