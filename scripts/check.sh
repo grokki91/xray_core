@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Все обязательные проверки репозитория одной командой: синтаксис, инструкции, ссылки, ADR,
-# карта пакетов, реестр зависимостей, чувствительные данные, Go (gofmt, go vet, go test),
+# карта пакетов, реестр зависимостей, правила workflow CI, чувствительные данные, Go (gofmt, go vet, go test),
 # тесты tests/test-*.sh. Печатает только провалы и итог «checks: PASS|FAIL»; код выхода 0 — только PASS.
 # Нет нужной утилиты — провал, а не пропуск. Проверки Go — для модуля с go.mod в корне.
 #   bash scripts/check.sh [ФАЙЛ…]   ФАЙЛ — дополнительный текст для сканера (сообщение коммита, тело PR)
@@ -106,6 +106,36 @@ if grep -qE '^(go\.(mod|sum)$|\.github/workflows/|web/vendor/)' <<<"$changed" &&
   ! grep -qx 'docs/dev/dependencies.md' <<<"$changed"; then
   bad "зависимости или CI изменены без правки docs/dev/dependencies.md"
 fi
+
+# ─── 6а. Workflow CI: правила конвейера (docs/security/policy.md §6)
+run_subst() { # строки run:, где есть подстановка ${{ }}
+  awk 'inrun { if ($0 ~ /^[[:space:]]*$/) next
+               if (match($0, /[^ ]/) - 1 > ri) { if (index($0, "${{")) print NR; next }
+               inrun = 0 }
+       /^[[:space:]]*(- )?run:/ { ri = match($0, /[^ ]/) - 1; s = $0; sub(/^[^:]*run:/, "", s)
+               if (index(s, "${{")) print NR; inrun = (s ~ /^[[:space:]]*[|>]/) }' "$1"
+}
+for f in .github/workflows/*.yml .github/workflows/*.yaml; do
+  [[ -f $f ]] || continue
+  ! grep -qE '^[[:space:]]*(pull_request_target|workflow_run)[[:space:]]*:' "$f" ||
+    bad "$f: событие pull_request_target или workflow_run"
+  perms=$(awk '/^permissions:/ { p = 1; sub(/^permissions:[[:space:]]*/, ""); if ($0 != "") print; next }
+               p && /^[[:space:]]/ { gsub(/^[[:space:]]+|[[:space:]]+$/, ""); if ($0 != "") print; next }
+               { p = 0 }' "$f")
+  [[ $perms == 'contents: read' ]] || bad "$f: на уровне workflow нужно ровно «permissions: contents: read»"
+  ! grep -nE '^[[:space:]]*(- )?uses:' "$f" | grep -vqE 'uses:[[:space:]]*[^@[:space:]]+@[0-9a-f]{40}([[:space:]]|$)' ||
+    bad "$f: действие не зафиксировано по хэшу коммита"
+  ! grep -qE 'secrets\.|github\.token' "$f" || bad "$f: секрет в задании проверок"
+  lines=$(run_subst "$f" | tr '\n' ' ')
+  [[ -z $lines ]] || bad "$f: подстановка \${{ }} в run: (строки $lines) — данные только через env:"
+  co=$(grep -cE 'uses:[[:space:]]*actions/checkout@' "$f")
+  pc=$(grep -cE '^[[:space:]]*persist-credentials:[[:space:]]*false[[:space:]]*$' "$f")
+  ((co == pc)) || bad "$f: actions/checkout без persist-credentials: false"
+  ! grep -q 'gitleaks' "$f" || grep -q -- '--ignore-gitleaks-allow' "$f" || bad "$f: gitleaks без --ignore-gitleaks-allow"
+done
+for f in .gitleaksignore .gitleaks.toml; do
+  [[ ! -e $f ]] || bad "$f: списки исключений gitleaks запрещены (docs/security/secrets.md §4)"
+done
 
 # ─── 7. Чувствительные данные
 guard() {

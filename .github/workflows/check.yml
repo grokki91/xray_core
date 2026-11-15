@@ -1,0 +1,60 @@
+# Обязательная проверка PR и main: scripts/check.sh и сканеры ADR-0016.
+# Правила конвейера — docs/security/policy.md §6; версии и суммы — docs/dev/dependencies.md §3.
+# Go — тулчейн версии из go.mod: go на образе раннера скачивает его сам (GOTOOLCHAIN=auto).
+name: check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GITLEAKS_VERSION: 8.30.1
+      GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+      SHELLCHECK_VERSION: 0.11.0
+      SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+      GOVULNCHECK_VERSION: v1.9.0
+      STATICCHECK_VERSION: v0.8.2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: scripts/check.sh
+        run: bash scripts/check.sh
+
+      - name: govulncheck
+        run: go run "golang.org/x/vuln/cmd/govulncheck@$GOVULNCHECK_VERSION" ./...
+
+      - name: staticcheck
+        run: go run "honnef.co/go/tools/cmd/staticcheck@$STATICCHECK_VERSION" ./...
+
+      - name: shellcheck
+        run: |
+          archive="$RUNNER_TEMP/shellcheck.tar.xz"
+          curl -fsSL --proto '=https' -o "$archive" \
+            "https://github.com/koalaman/shellcheck/releases/download/v$SHELLCHECK_VERSION/shellcheck-v$SHELLCHECK_VERSION.linux.x86_64.tar.xz"
+          echo "$SHELLCHECK_SHA256  $archive" | sha256sum -c -
+          tar -xJf "$archive" -C "$RUNNER_TEMP"
+          git ls-files -z '*.sh' | xargs -0 "$RUNNER_TEMP/shellcheck-v$SHELLCHECK_VERSION/shellcheck"
+
+      - name: gitleaks
+        run: |
+          archive="$RUNNER_TEMP/gitleaks.tar.gz"
+          curl -fsSL --proto '=https' -o "$archive" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v$GITLEAKS_VERSION/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "$GITLEAKS_SHA256  $archive" | sha256sum -c -
+          tar -xzf "$archive" -C "$RUNNER_TEMP" gitleaks
+          "$RUNNER_TEMP/gitleaks" git --ignore-gitleaks-allow --redact --no-banner .

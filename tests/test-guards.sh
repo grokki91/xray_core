@@ -179,6 +179,52 @@ expect 1 "падающий go test" bash "$copy/scripts/check.sh"
 expect 1 "падающий go test при GOFLAGS=-run" env GOFLAGS='-run=^$' bash "$copy/scripts/check.sh"
 rm "$copy/x_test.go"
 
+echo "check.sh: правила workflow"
+mkdir -p "$copy/.github/workflows"
+wf=$copy/.github/workflows/check.yml
+sha=$(printf 'a%.0s' {1..40})
+subst='${{ github.head_ref }}'
+good() {
+  cat <<EOF
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  check:
+    env:
+      REF: $subst
+    steps:
+      - uses: actions/checkout@$sha # v1
+        with:
+          persist-credentials: false
+      - run: echo "\$REF"
+      - name: scan
+        run: |
+          echo one
+
+          gitleaks git --ignore-gitleaks-allow .
+EOF
+}
+wf_case() { # wf_case КОД ИМЯ SED-ВЫРАЖЕНИЕ — правильный workflow, изменённый выражением
+  good | sed -e "$3" >"$wf"
+  expect "$1" "$2" bash "$copy/scripts/check.sh"
+}
+wf_case 0 "правильный workflow" ''
+wf_case 1 "pull_request_target" 's/^  pull_request:/  pull_request_target:/'
+wf_case 1 "права шире contents: read" 's/^  contents: read/  contents: read\n  pull-requests: write/'
+wf_case 1 "permissions: read-all" 's/^permissions:/permissions: read-all/; /^  contents: read/d'
+wf_case 1 "действие по тегу" "s/@$sha/@v4/"
+wf_case 1 "секрет в задании" 's/^      REF: .*/      T: ${{ secrets.TOKEN }}/'
+wf_case 1 "подстановка в однострочном run" "s/echo \"\\\$REF\"/echo $subst/"
+wf_case 1 "подстановка в блоке run" "s/^          echo one/          echo $subst/"
+wf_case 1 "checkout без persist-credentials: false" '/persist-credentials/d'
+wf_case 1 "gitleaks без --ignore-gitleaks-allow" 's/ --ignore-gitleaks-allow//'
+good >"$wf"
+: >"$copy/.gitleaksignore"
+expect 1 "файл .gitleaksignore" bash "$copy/scripts/check.sh"
+rm -rf "$copy/.gitleaksignore" "$copy/.github"
+
 if ((fails)); then
   echo "FAIL: $fails"
   exit 1
