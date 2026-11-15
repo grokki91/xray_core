@@ -27,7 +27,7 @@
 |---|---|---|---|---|
 | Go | компилятор, стандартная библиотека, `gofmt`, `go vet`, `go test` | сборка `xm` и проверки `scripts/check.sh` | строка `go` в `go.mod` (сейчас 1.27.4); тулчейн этой версии `go` скачивает сам (`GOTOOLCHAIN=auto`) с проверкой суммы по `sum.golang.org` | 2026-11-15, ответ владельца в PR шага 2 фазы 1: последняя стабильная версия в `go.mod`, как в [stack.md](../architecture/stack.md) §1; [ADR-0002](../adr/0002-go-single-binary.md) |
 | GitHub Actions | платформа CI | запуск `scripts/check.sh` на PR и `main` | действия — по хэшу коммита, каждое своей строкой при подключении | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
-| Secret scanning и push protection | настройка репозитория GitHub | отказ в отправке распознанных токенов | — | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
+| Secret scanning и push protection | настройка репозитория GitHub | отказ в отправке распознанных токенов | включено владельцем 2026-11-15 | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
 | gitleaks | сканер секретов в CI | рабочее дерево и история | версия; бинарник из релизов `gitleaks/gitleaks`, SHA-256 в workflow | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
 | govulncheck | сканер уязвимостей Go в CI | вызываемые уязвимости модулей и стандартной библиотеки | версия модуля, `sum.golang.org` | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
 | staticcheck | статический анализ Go в CI | ошибки сверх `go vet` | версия модуля, `sum.golang.org` | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
