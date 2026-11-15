@@ -128,6 +128,13 @@ if jq -e '.hookSpecificOutput.additionalContext | test("security-reviewer")' <<<
 out=$(hook change-notes "$(write_in "$copy/README.md" x)")
 if [[ -z $out ]]; then ok "прочие файлы молчат"; else no "прочие файлы молчат"; fi
 
+echo "settings.json"
+for t in mcp__github__create_pull_request mcp__github__update_pull_request mcp__github__merge_pull_request "Bash(gh pr create:*)"; do
+  if jq -e --arg t "$t" '.permissions.ask | index($t)' .claude/settings.json >/dev/null; then
+    ok "подтверждение владельца: $t"
+  else no "подтверждение владельца: $t"; fi
+done
+
 echo "check.sh"
 expect 0 "временная копия проходит" bash "$copy/scripts/check.sh"
 mkdir -p "$copy/internal/ghost"
