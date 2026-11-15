@@ -25,6 +25,7 @@
 
 | Имя | Вид | Зачем | Фиксация | Согласовано |
 |---|---|---|---|---|
+| Go | компилятор, стандартная библиотека, `gofmt`, `go vet`, `go test` | сборка `xm` и проверки `scripts/check.sh` | строка `go` в `go.mod` (сейчас 1.27.4); тулчейн этой версии `go` скачивает сам (`GOTOOLCHAIN=auto`) с проверкой суммы по `sum.golang.org` | 2026-11-15, ответ владельца в PR шага 2 фазы 1: последняя стабильная версия в `go.mod`, как в [stack.md](../architecture/stack.md) §1; [ADR-0002](../adr/0002-go-single-binary.md) |
 | GitHub Actions | платформа CI | запуск `scripts/check.sh` на PR и `main` | действия — по хэшу коммита, каждое своей строкой при подключении | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
 | Secret scanning и push protection | настройка репозитория GitHub | отказ в отправке распознанных токенов | — | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
 | gitleaks | сканер секретов в CI | рабочее дерево и история | версия; бинарник из релизов `gitleaks/gitleaks`, SHA-256 в workflow | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
@@ -34,11 +35,11 @@
 | Подтверждение происхождения сборки | шаг конвейера выпуска | свидетельство сборки `xm` из коммита | — | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md); подключается в фазе 4 |
 
 Строка здесь — согласие; подключённым инструмент становится с появлением в workflow. Правила
-конвейера — [policy.md](../security/policy.md) §6. Внешние адреса CI (не `xm`):
+конвейера — [policy.md](../security/policy.md) §6. Внешние адреса сборки и CI (не `xm`):
 
 | Адрес | Кто обращается | Зачем |
 |---|---|---|
-| `proxy.golang.org`, `sum.golang.org` | `go install` в CI | модули govulncheck и staticcheck с проверкой сумм |
+| `proxy.golang.org`, `sum.golang.org` | `go` локально и в CI; `go install` в CI | тулчейн версии из `go.mod`; модули govulncheck и staticcheck; проверка сумм |
 | `vuln.go.dev` | govulncheck | база уязвимостей Go |
 | `github.com` (релизы `gitleaks/gitleaks`, `koalaman/shellcheck`) | шаги CI | бинарники сканеров |
 
