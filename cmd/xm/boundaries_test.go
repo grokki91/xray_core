@@ -6,6 +6,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"io/fs"
@@ -60,7 +61,7 @@ func checkImports(root, module string) ([]string, error) {
 			bad = append(bad, fmt.Sprintf("%s: Go-код вне cmd/xm и internal/", rel))
 			return nil
 		}
-		f, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
+		f, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.SkipObjectResolution)
 		if err != nil {
 			return err
 		}
@@ -69,11 +70,42 @@ func checkImports(root, module string) ([]string, error) {
 			if why := forbidden(dir, target, module); why != "" {
 				bad = append(bad, fmt.Sprintf("%s: импорт %s — %s", rel, target, why))
 			}
+			if target == module+"/internal/redact/redacttest" {
+				bad = append(bad, fmt.Sprintf("%s: импорт %s — помощник только для _test.go", rel, target))
+			}
+		}
+		if usesFake(f, module) && dir != "internal/platform" {
+			bad = append(bad, fmt.Sprintf("%s: platform.NewFake — только в _test.go", rel))
 		}
 		return nil
 	})
 	sort.Strings(bad)
 	return bad, err
+}
+
+// usesFake сообщает, вызывает ли файл поддельную реализацию platform: она лежит в самом
+// пакете platform (подпакет platform/fake не может импортировать platform по таблице слоёв),
+// поэтому её экспорт закрывается этим правилом, а не границей пакета.
+func usesFake(f *ast.File, module string) bool {
+	name := ""
+	for _, imp := range f.Imports {
+		if p, _ := strconv.Unquote(imp.Path.Value); p == module+"/internal/platform" {
+			name = "platform"
+			if imp.Name != nil {
+				name = imp.Name.Name
+			}
+		}
+	}
+	found := false
+	ast.Inspect(f, func(n ast.Node) bool {
+		if s, ok := n.(*ast.SelectorExpr); ok && name != "" {
+			if x, ok := s.X.(*ast.Ident); ok && x.Name == name && s.Sel.Name == "NewFake" {
+				found = true
+			}
+		}
+		return !found
+	})
+	return found
 }
 
 // forbidden возвращает причину запрета импорта target из каталога dir или пустую строку.
@@ -187,23 +219,46 @@ func TestImportRules(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.dir+" → "+tc.imp, func(t *testing.T) {
-			root := t.TempDir()
 			pkg := filepath.Base(tc.dir)
 			src := fmt.Sprintf("package %s\n\nimport _ %q\n", pkg, tc.imp)
-			path := filepath.Join(root, filepath.FromSlash(tc.dir), "x.go")
-			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
-				t.Fatal(err)
-			}
-			bad, err := checkImports(root, m)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got := len(bad) > 0; got != tc.bad {
-				t.Fatalf("нарушение: %v, ожидалось %v; %v", got, tc.bad, bad)
-			}
+			assertViolation(t, tc.dir, src, m, tc.bad)
 		})
+	}
+}
+
+// Помощники тестов недоступны рабочему коду: redacttest и platform.NewFake.
+func TestTestHelpersOnlyInTests(t *testing.T) {
+	const m = "example.org/xm"
+	cases := []struct {
+		dir, src string
+		bad      bool
+	}{
+		{"internal/core", "package core\n\nimport _ \"" + m + "/internal/redact/redacttest\"\n", true},
+		{"internal/core", "package core\n\nimport \"" + m + "/internal/platform\"\n\nvar _ = platform.New\n", false},
+		{"internal/core", "package core\n\nimport \"" + m + "/internal/platform\"\n\nvar _ = platform.NewFake\n", true},
+		{"internal/core", "package core\n\nimport p \"" + m + "/internal/platform\"\n\nvar _ = p.NewFake\n", true},
+		{"cmd/xm", "package main\n\nimport \"" + m + "/internal/platform\"\n\nvar _ = platform.NewFake\n", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.src, func(t *testing.T) { assertViolation(t, tc.dir, tc.src, m, tc.bad) })
+	}
+}
+
+func assertViolation(t *testing.T, dir, src, m string, want bool) {
+	t.Helper()
+	root := t.TempDir()
+	path := filepath.Join(root, filepath.FromSlash(dir), "x.go")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bad, err := checkImports(root, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(bad) > 0; got != want {
+		t.Fatalf("нарушение: %v, ожидалось %v; %v", got, want, bad)
 	}
 }

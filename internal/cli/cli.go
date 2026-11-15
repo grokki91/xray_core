@@ -73,14 +73,16 @@ func Run(args []string, e Env) int {
 		fs := flag.NewFlagSet("xm "+c.name, flag.ContinueOnError)
 		fs.SetOutput(io.Discard)
 		if c.json {
-			fs.BoolVar(&asJSON, "json", false, "машинный вывод")
+			// Признак JSON уже известен из просмотра аргументов; флаг лишь объявлен, чтобы
+			// Parse его принял.
+			fs.Bool("json", false, "машинный вывод")
 		}
 		if err := fs.Parse(args[1:]); err != nil {
 			if errors.Is(err, flag.ErrHelp) {
 				fmt.Fprintf(e.Stdout, "Использование: %s\n%s\n", c.usage, c.summary)
 				return exitOK
 			}
-			return usageError(e, asJSON, codeBadArguments, quote(err.Error()))
+			return usageError(e, asJSON, codeBadArguments, flagMessage(err))
 		}
 		if fs.NArg() > 0 {
 			return usageError(e, asJSON, codeBadArguments, "лишний аргумент «"+quote(fs.Arg(0))+"»")
@@ -111,6 +113,15 @@ func writeUsage(w io.Writer) {
 	}
 	b.WriteString("\nСправка по команде: xm <команда> -h\n")
 	io.WriteString(w, b.String())
+}
+
+// flagMessage — сообщение об ошибке разбора флагов по-русски; вводимое имя экранировано.
+func flagMessage(err error) string {
+	msg := err.Error()
+	if name, ok := strings.CutPrefix(msg, "flag provided but not defined: "); ok {
+		return "неизвестный флаг «" + quote(name) + "»"
+	}
+	return "неверный флаг: " + quote(msg)
 }
 
 // usageError сообщает об ошибке аргументов: человеку — в stderr, с --json — ещё и документом

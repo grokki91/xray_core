@@ -49,7 +49,7 @@ func TestUsageErrors(t *testing.T) {
 		{"без команды", nil, []string{"Использование: xm <команда>"}},
 		{"неизвестная команда", []string{"frobnicate"}, []string{"«frobnicate»", "xm help"}},
 		{"лишний аргумент", []string{"version", "extra"}, []string{"«extra»", "xm help"}},
-		{"неизвестный флаг", []string{"version", "--bogus"}, []string{"bogus"}},
+		{"неизвестный флаг", []string{"version", "--bogus"}, []string{"неизвестный флаг «-bogus»"}},
 		{"аргумент у help", []string{"help", "version"}, []string{"«version»"}},
 	}
 	for _, tc := range cases {
@@ -118,6 +118,8 @@ func TestUsageErrorJSON(t *testing.T) {
 		{[]string{"version", "--json", "extra"}, codeBadArguments},
 		{[]string{"version", "--json", "--bogus"}, codeBadArguments},
 		{[]string{"help", "--json"}, codeBadArguments},
+		{[]string{"version", "--bogus", "--json"}, codeBadArguments},
+		{[]string{"version", "extra", "--json"}, codeBadArguments},
 	}
 	for _, tc := range cases {
 		code, stdout, stderr := run(tc.args...)
