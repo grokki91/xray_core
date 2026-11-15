@@ -26,22 +26,26 @@
 | Имя | Вид | Зачем | Фиксация | Согласовано |
 |---|---|---|---|---|
 | Go | компилятор, стандартная библиотека, `gofmt`, `go vet`, `go test` | сборка `xm` и проверки `scripts/check.sh` | строка `go` в `go.mod` (сейчас 1.27.4); тулчейн этой версии `go` скачивает сам (`GOTOOLCHAIN=auto`) с проверкой суммы по `sum.golang.org` | 2026-11-15, ответ владельца в PR шага 2 фазы 1: последняя стабильная версия в `go.mod`, как в [stack.md](../architecture/stack.md) §1; [ADR-0002](../adr/0002-go-single-binary.md) |
-| GitHub Actions | платформа CI | запуск `scripts/check.sh` на PR и `main` | действия — по хэшу коммита, каждое своей строкой при подключении | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
+| GitHub Actions | платформа CI | запуск `scripts/check.sh` на PR и `main` | действия — по хэшу коммита, каждое своей строкой при подключении; образ раннера `ubuntu-24.04`; `go` с образа — только загрузчик тулчейна из `go.mod`, `actions/setup-go` не используется | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
+| `actions/checkout` | действие CI | получение репозитория с историей для `check.sh` и gitleaks | v7.0.1, коммит `3d3c42e5aac5ba805825da76410c181273ba90b1` | 2026-11-15, ответ владельца к [PR #67](https://github.com/grokki91/xray_core/pull/67); [ADR-0016](../adr/0016-ci-and-tooling.md) |
 | Secret scanning и push protection | настройка репозитория GitHub | отказ в отправке распознанных токенов | включено владельцем 2026-11-15 | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
-| gitleaks | сканер секретов в CI | рабочее дерево и история | версия; бинарник из релизов `gitleaks/gitleaks`, SHA-256 в workflow | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
-| govulncheck | сканер уязвимостей Go в CI | вызываемые уязвимости модулей и стандартной библиотеки | версия модуля, `sum.golang.org` | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
-| staticcheck | статический анализ Go в CI | ошибки сверх `go vet` | версия модуля, `sum.golang.org` | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
-| shellcheck | анализ Bash в CI | `scripts/`, хуки, `install.sh` | версия; бинарник из релизов `koalaman/shellcheck`, SHA-256 в workflow | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
+| gitleaks | сканер секретов в CI | рабочее дерево и история | 8.30.1; бинарник из релизов `gitleaks/gitleaks`, SHA-256 в workflow — из `checksums.txt` релиза | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
+| govulncheck | сканер уязвимостей Go в CI | вызываемые уязвимости модулей и стандартной библиотеки | v1.9.0, `sum.golang.org` | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
+| staticcheck | статический анализ Go в CI | ошибки сверх `go vet` | модуль `honnef.co/go/tools` v0.8.2 (выпуск 2026.2.2), `sum.golang.org` | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
+| shellcheck | анализ Bash в CI | все `*.sh` репозитория: `scripts/`, `tests/`, хуки, `install.sh` | 0.11.0; бинарник из релизов `koalaman/shellcheck`, SHA-256 в workflow: upstream сумм не публикует — посчитана 2026-11-15 по двум загрузкам с релиза из одной сети (совпали), независимой сверки нет; при обновлении старая сумма сверяется с новой загрузкой старой версии | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
 | Подтверждение происхождения сборки | шаг конвейера выпуска | свидетельство сборки `xm` из коммита | — | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md); подключается в фазе 4 |
 
-Строка здесь — согласие; подключённым инструмент становится с появлением в workflow. Правила
+Строка здесь — согласие; подключённым инструмент становится с появлением в workflow
+([check.yml](../../.github/workflows/check.yml): GitHub Actions, `actions/checkout`, gitleaks,
+govulncheck, staticcheck, shellcheck подключены 2026-11-15). Правила
 конвейера — [policy.md](../security/policy.md) §6. Внешние адреса сборки и CI (не `xm`):
 
 | Адрес | Кто обращается | Зачем |
 |---|---|---|
-| `proxy.golang.org`, `sum.golang.org` | `go` локально и в CI; `go install` в CI | тулчейн версии из `go.mod`; модули govulncheck и staticcheck; проверка сумм |
+| `proxy.golang.org`, `sum.golang.org` | `go` локально и в CI; `go run …@версия` в CI | тулчейн версии из `go.mod`; модули govulncheck и staticcheck; проверка сумм |
 | `vuln.go.dev` | govulncheck | база уязвимостей Go |
-| `github.com` (релизы `gitleaks/gitleaks`, `koalaman/shellcheck`) | шаги CI | бинарники сканеров |
+| `github.com` (релизы `gitleaks/gitleaks`, `koalaman/shellcheck`; `actions/checkout`) | шаги CI, раннер | бинарники сканеров; код действия |
+| `release-assets.githubusercontent.com` | шаги CI | файлы релизов сканеров: на него перенаправляет `github.com` ([ADR-0016](../adr/0016-ci-and-tooling.md)) |
 
 ## 4. Локальные утилиты разработки
 
