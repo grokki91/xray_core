@@ -27,12 +27,20 @@
 
 | Дата проверки | Факт | Источник |
 |---|---|---|
-| 2026-11-13 | Последний тег — v26.11.9 (после v26.10.31, v26.10.21). Помечен ли он стабильным («Latest»), из песочницы не проверено — сверить в фазе 2 | `git ls-remote --tags` |
+| 2026-11-15 | Последний стабильный релиз — v26.11.9 (`prerelease: false`, `draft: false`, он же `/releases/latest`); v26.10.31 и v26.10.21 — тоже стабильные; v26.9.30 и v26.9.9 — предварительные (`prerelease: true`). Признак стабильности — поле `prerelease` в API, по тегу его не видно | API GitHub `/repos/XTLS/Xray-core/releases`, запрос владельца |
+| 2026-11-15 | API GitHub отдаёт у файла релиза поле `digest` вида `sha256:<hex>`; для `Xray-linux-64.zip` v26.11.9 оно совпадает с `SHA2-256=` из `.dgst` и с суммой скачанного архива; SHA2-512 не сверялась | API GitHub `/releases/latest`, запрос владельца; файл `.dgst` релиза |
 | 2026-11-13 | v26.11.9 собирается Go 1.27; REALITY — `xtls/reality` 4bb46b2 (2026-11-08) | `go.mod` тега |
 | 2026-11-13 | REALITY отвергает ClientHello без X25519MLKEM768 перед X25519 (правило действует с v26.9.9): такой клиент уходит к цели и видит таймаут | `XTLS/REALITY` `tls.go`, коммит 8cdf7bf и текущая ветка |
 | 2026-11-13 | `minClientVer` по умолчанию не задан | `infra/conf/transport_security.go` тега v26.11.9 |
 | 2026-11-13 | К архиву релиза прилагается `.dgst` с `MD5=`, `SHA1=`, `SHA2-256=`, `SHA2-512=`; подписей и подтверждений происхождения нет | файл `.dgst` релиза v26.11.9; `.github/workflows/release.yml` |
 | 2026-11-13 | Подкоманды бинарника: `run`, `version`, `uuid`, `x25519`, `mldsa65`, `mlkem768`, `vlessenc`, `tls`, `api` (в том числе `statsquery`) | `main/commands/all` тега v26.11.9 |
+| 2026-11-15 | Пресет `reality-xhttp`, входящий VLESS: `decryption: "none"` обязателен; `clients[].id` — UUID; `flow` — `""` или `xtls-rprx-vision`; пресет Vision не использует, `flow` пустой; `encryption` во входящем запрещён | `infra/conf/vless.go` тега v26.11.9; по исходникам |
+| 2026-11-15 | XHTTP: `network` `"xhttp"` (синоним `"splithttp"`); `mode` по умолчанию `auto` — сервер принимает все режимы; `path` нормализуется (ведущий и завершающий `/`); непустой `host` сверяется с Host запроса; `xPaddingBytes` по умолчанию 100–1000, отключить нельзя; `noSSEHeader` — false. REALITY допускается только с RAW, XHTTP и gRPC | `infra/conf/transport_internet.go`, `transport_method.go`, `transport/internet/splithttp/` тега v26.11.9; по исходникам |
+| 2026-11-15 | `realitySettings` сервера: `target` (синоним `dest`, при обоих побеждает `target`) — признак серверного режима; обязательны непустые `serverNames`, `privateKey` (base64 RawURL, 32 байта) и непустой `shortIds` (hex до 16 символов, пустая строка допустима); `xver` 0; `maxTimeDiff` 0 и пустые `minClientVer`/`maxClientVer` — без проверки; `show` false | `infra/conf/transport_security.go` тега v26.11.9; по исходникам |
+| 2026-11-15 | Между v26.9.9 и v26.11.9 поля и умолчания пресета не менялись; в XHTTP добавлено только `h2Params` | `git diff v26.9.9 v26.11.9` по файлам выше; по исходникам |
+| 2026-11-15 | Входящий VLESS без клиентов (`clients: []` или поля нет) проходит разбор и `xray run -test`; каждое подключение отвергается («invalid request user id») или уходит в `fallbacks`. REALITY и XHTTP на это не влияют | `infra/conf/vless.go`, `proxy/vless/inbound/inbound.go`, `proxy/vless/encoding/encoding.go` тега v26.11.9; по исходникам |
+| 2026-11-15 | Вывод подкоманд (stdout, код 0): `version` — первая строка `Xray 26.11.9 (Xray, Penetrates Everything.) <BUILD> (<GOVERSION> linux/amd64)`, версия — второе поле без `v`; `x25519` — три строки `PrivateKey: `, `Password (PublicKey): `, `Hash32: ` (base64 RawURL); `uuid` — одна строка UUID v4. Ошибка ввода `x25519 -i` и `uuid -i` — текст в stdout с кодом 0. Метки и формат те же, что в v26.9.9 | `main/version.go`, `core/core.go`, `main/commands/all/{x25519,curve25519,uuid}.go` тега v26.11.9; по исходникам, бинарник не запускался |
+| 2026-11-15 | `run -test -c <файл>`: в stdout строки версии и журнала загрузки; успех — последняя строка `Configuration OK.`, код 0; ошибка конфигурации — `Failed to start: …`, код 23; неверный флаг или подкоманда — stderr, код 2. Разбирать по коду выхода, не по журналу | `main/run.go`, `main/commands/base/execute.go` тега v26.11.9; по исходникам, бинарник не запускался |
 
 ## 3. Клиенты
 
@@ -51,9 +59,10 @@
 
 - Требование совместимости с sing-box сегодня выполнимо только через Hiddify 5.x. Upstream
   sing-box к актуальному Xray по REALITY не подключается независимо от транспорта, и настройкой
-  сервера это не исправить. Варианты — вопрос Q2.
+  сервера это не исправить. Решение — принять и показывать несовместимость
+  ([ADR-0008](adr/0008-presets-and-client-compat.md)).
 - Среди целевых клиентов выбор между XHTTP и Vision совместимость не меняет: v2rayN и Hiddify 5.x
-  умеют оба. Выбор пресета по умолчанию — вопрос Q1.
+  умеют оба. Пресет по умолчанию — `reality-xhttp` ([ADR-0008](adr/0008-presets-and-client-compat.md)).
 - Таблица — причина держать совместимость данными: экспорт профиля и `xm status` должны говорить
   «этот клиент этой версии не подключится» до того, как владелец увидит таймаут.
 
