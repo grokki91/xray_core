@@ -21,6 +21,18 @@ case $tool in
   mcp__github__merge_pull_request | mcp__github__enable_pr_auto_merge) owner_only "слияние PR" ;;
   mcp__github__create_pull_request) draft_is true || owner_only "PR не черновиком" ;;
   mcp__github__update_pull_request) draft_is false && owner_only "перевод PR в ready" ;;
+esac
+# Тело PR и комментарии — только «## Что сделано» тезисами, без подписи ассистента (ADR-0018).
+case $tool in
+  mcp__github__create_pull_request | mcp__github__update_pull_request | mcp__github__add_issue_comment | \
+    mcp__github__add_reply_to_pull_request_comment | mcp__github__add_comment_to_pending_review)
+    body=$(jq -r '.tool_input.body // empty' <<<"$input")
+    if grep -qiE 'Generated (with|by) \[?Claude|claude\.ai/code' <<<"$body" ||
+      grep -E '^#' <<<"$body" | grep -qvxF '## Что сделано'; then
+      echo "publish-guard: в PR только «## Что сделано» тезисами, без подписи и ссылки на сессию (ADR-0018)" >&2
+      exit 2
+    fi
+    ;;
   mcp__github__push_files | mcp__github__create_or_update_file | mcp__github__delete_file)
     jq -e '.tool_input.branch == "main"' <<<"$input" >/dev/null && owner_only "запись в main"
     ;;
