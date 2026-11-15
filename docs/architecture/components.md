@@ -79,6 +79,13 @@ type Redactor interface {
 Типы всех машинных выводов (CLI `--json`, HTTP API, мост) и общий конверт со схемой. Только
 данные, без логики; импортируется всеми слоями. Правила версионирования — [interfaces.md](interfaces.md) §2. Фаза 1.
 
+```go
+type Data interface{ Schema() Schema }               // у каждой схемы — имя и версия
+func New(xmVersion string, at time.Time, d Data) Envelope
+func NewError(xmVersion string, at time.Time, e Error) Envelope
+func Encode(w io.Writer, e Envelope) error           // один документ JSON
+```
+
 ---
 
 ## Менеджеры

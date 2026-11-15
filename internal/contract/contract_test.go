@@ -1,0 +1,58 @@
+package contract
+
+import (
+	"bytes"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+)
+
+var at = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+// Эталон схемы меняется только осознанно: расхождение вывода с ним — провал.
+func TestGolden(t *testing.T) {
+	cases := map[string]Envelope{
+		"version": New("0.1.0", at, Version{XM: "0.1.0"}),
+		"error": NewError("0.1.0", at, Error{
+			Code:    "cli.unknown_command",
+			Message: "неизвестная команда «frobnicate»",
+			Hint:    "список команд: xm help",
+		}),
+	}
+	for name, env := range cases {
+		t.Run(name, func(t *testing.T) {
+			if env.Schema.Name != name {
+				t.Fatalf("schema.name %q, нужен %q", env.Schema.Name, name)
+			}
+			var got bytes.Buffer
+			if err := Encode(&got, env); err != nil {
+				t.Fatal(err)
+			}
+			want, err := os.ReadFile(filepath.Join("testdata", name+".json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(got.Bytes(), want) {
+				t.Fatalf("вывод расходится с эталоном testdata/%s.json:\n%s", name, got.Bytes())
+			}
+		})
+	}
+}
+
+// Потребитель прежней версии игнорирует неизвестные поля: добавление поля (minor+1) его не ломает.
+func TestOldConsumerIgnoresNewFields(t *testing.T) {
+	doc := `{"schema":{"name":"version","major":1,"minor":7},"xm":{"version":"0.1.0"},"time":1,` +
+		`"future":true,"data":{"xm":"0.1.0","xray":"26.11.9"}}`
+	var got struct {
+		Schema Schema  `json:"schema"`
+		Data   Version `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(doc), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Schema.Major != 1 || got.Data.XM != "0.1.0" {
+		t.Fatalf("разобрано неверно: %+v", got)
+	}
+}

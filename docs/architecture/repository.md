@@ -10,6 +10,7 @@ go.mod                    модуль Go; версия Go — строкой `g
 cmd/xm/                   точка входа; тест графа импортов (§3)
 internal/
   cli/                    команды `version` и `help`
+  contract/               конверт, схемы `version` и `error`; эталоны в testdata/
 README.md                 коротко: что это, требования, установка, команды
 AGENTS.md                 инструкции для LLM-агентов: единый вход
 CLAUDE.md                 @AGENTS.md и особенности Claude Code

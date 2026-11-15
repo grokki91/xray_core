@@ -3,6 +3,7 @@ package main
 
 import (
 	"os"
+	"time"
 
 	"github.com/grokki91/xray_core/internal/cli"
 )
@@ -11,6 +12,13 @@ import (
 // единственный способ принять значение от компоновщика; после старта она не меняется.
 var version = "dev"
 
+// systemClock — системные часы; заменяются часами platform, когда появится порт.
+type systemClock struct{}
+
+func (systemClock) Now() time.Time { return time.Now() }
+
 func main() {
-	os.Exit(cli.Run(os.Args[1:], os.Stdout, os.Stderr, version))
+	os.Exit(cli.Run(os.Args[1:], cli.Env{
+		Stdout: os.Stdout, Stderr: os.Stderr, Version: version, Clock: systemClock{},
+	}))
 }

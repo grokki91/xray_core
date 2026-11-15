@@ -7,43 +7,63 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/grokki91/xray_core/internal/contract"
 )
 
 // Коды выхода — docs/architecture/interfaces.md §1.
 const (
 	exitOK    = 0
+	exitFail  = 1
 	exitUsage = 2
 )
 
-// env — то, что получает команда: потоки вывода и версия сборки.
-type env struct {
-	stdout, stderr io.Writer
-	version        string
+// Clock — источник времени для поля time машинного вывода; настоящий даёт platform.
+type Clock interface {
+	Now() time.Time
+}
+
+// Env — то, что получает команда: потоки вывода, версия сборки и часы.
+type Env struct {
+	Stdout, Stderr io.Writer
+	Version        string
+	Clock          Clock
 }
 
 type command struct {
 	name    string
+	usage   string
 	summary string
-	run     func(e env) int
+	json    bool // команда поддерживает --json
+	run     func(e Env, asJSON bool) int
 }
 
 // commands — закрытый список команд в порядке справки.
 func commands() []command {
 	return []command{
-		{name: "version", summary: "версия xm", run: runVersion},
-		{name: "help", summary: "эта справка", run: runHelp},
+		{name: "version", usage: "xm version [--json]", summary: "версия xm", json: true, run: runVersion},
+		{name: "help", usage: "xm help", summary: "эта справка", run: runHelp},
 	}
 }
 
+// Коды ошибок аргументов в машинном выводе.
+const (
+	codeUnknownCommand = "cli.unknown_command"
+	codeBadArguments   = "cli.bad_arguments"
+)
+
 // Run выполняет команду из args (без имени программы) и возвращает код выхода.
-func Run(args []string, stdout, stderr io.Writer, version string) int {
-	e := env{stdout: stdout, stderr: stderr, version: version}
+func Run(args []string, e Env) int {
 	if len(args) == 0 {
-		writeUsage(stderr)
+		writeUsage(e.Stderr)
 		return exitUsage
 	}
+	// С --json ошибка аргументов тоже уходит документом: потребитель всегда получает конверт.
+	asJSON := slices.Contains(args, "--json") || slices.Contains(args, "-json")
 	for _, c := range commands() {
 		if c.name != args[0] {
 			continue
@@ -52,28 +72,34 @@ func Run(args []string, stdout, stderr io.Writer, version string) int {
 		// usageError.
 		fs := flag.NewFlagSet("xm "+c.name, flag.ContinueOnError)
 		fs.SetOutput(io.Discard)
+		if c.json {
+			fs.BoolVar(&asJSON, "json", false, "машинный вывод")
+		}
 		if err := fs.Parse(args[1:]); err != nil {
 			if errors.Is(err, flag.ErrHelp) {
-				fmt.Fprintf(stdout, "Использование: xm %s\n%s\n", c.name, c.summary)
+				fmt.Fprintf(e.Stdout, "Использование: %s\n%s\n", c.usage, c.summary)
 				return exitOK
 			}
-			return usageError(stderr, "%s", quote(err.Error()))
+			return usageError(e, asJSON, codeBadArguments, quote(err.Error()))
 		}
 		if fs.NArg() > 0 {
-			return usageError(stderr, "лишний аргумент «%s»", quote(fs.Arg(0)))
+			return usageError(e, asJSON, codeBadArguments, "лишний аргумент «"+quote(fs.Arg(0))+"»")
 		}
-		return c.run(e)
+		return c.run(e, asJSON)
 	}
-	return usageError(stderr, "неизвестная команда «%s»", quote(args[0]))
+	return usageError(e, asJSON, codeUnknownCommand, "неизвестная команда «"+quote(args[0])+"»")
 }
 
-func runVersion(e env) int {
-	fmt.Fprintf(e.stdout, "xm %s\n", e.version)
+func runVersion(e Env, asJSON bool) int {
+	if asJSON {
+		return writeJSON(e, contract.New(e.Version, e.Clock.Now(), contract.Version{XM: e.Version}))
+	}
+	fmt.Fprintf(e.Stdout, "xm %s\n", e.Version)
 	return exitOK
 }
 
-func runHelp(e env) int {
-	writeUsage(e.stdout)
+func runHelp(e Env, _ bool) int {
+	writeUsage(e.Stdout)
 	return exitOK
 }
 
@@ -87,9 +113,25 @@ func writeUsage(w io.Writer) {
 	io.WriteString(w, b.String())
 }
 
-func usageError(stderr io.Writer, format string, a ...any) int {
-	fmt.Fprintf(stderr, "xm: "+format+"\nСписок команд: xm help\n", a...)
+// usageError сообщает об ошибке аргументов: человеку — в stderr, с --json — ещё и документом
+// error в stdout. msg уже экранирован quote.
+func usageError(e Env, asJSON bool, code, msg string) int {
+	fmt.Fprintf(e.Stderr, "xm: %s\nСписок команд: xm help\n", msg)
+	if asJSON {
+		writeJSON(e, contract.NewError(e.Version, e.Clock.Now(), contract.Error{
+			Code: code, Message: msg, Hint: "список команд: xm help",
+		}))
+	}
 	return exitUsage
+}
+
+// writeJSON печатает документ в stdout. Ошибка записи в stdout — провал команды (код 1).
+func writeJSON(e Env, env contract.Envelope) int {
+	if err := contract.Encode(e.Stdout, env); err != nil {
+		fmt.Fprintf(e.Stderr, "xm: не удалось вывести результат: %v\n", err)
+		return exitFail
+	}
+	return exitOK
 }
 
 // quote экранирует управляющие символы ввода, чтобы он не управлял терминалом при выводе.
