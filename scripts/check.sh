@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Все обязательные проверки репозитория одной командой: синтаксис, инструкции, ссылки, ADR,
-# карта пакетов, реестр зависимостей, чувствительные данные, тесты tests/test-*.sh.
-# Печатает только провалы и итог «checks: PASS|FAIL»; код выхода 0 — только PASS.
-# Нет нужной утилиты — провал, а не пропуск. С появлением кода сюда добавляются gofmt, go vet, go test.
+# карта пакетов, реестр зависимостей, чувствительные данные, Go (gofmt, go vet, go test),
+# тесты tests/test-*.sh. Печатает только провалы и итог «checks: PASS|FAIL»; код выхода 0 — только PASS.
+# Нет нужной утилиты — провал, а не пропуск. Проверки Go — для модуля с go.mod в корне.
 #   bash scripts/check.sh [ФАЙЛ…]   ФАЙЛ — дополнительный текст для сканера (сообщение коммита, тело PR)
 set -u
 export LC_ALL=C.UTF-8
@@ -120,7 +120,22 @@ guard() {
 guard --branch
 ((${#extra[@]})) && guard --text "${extra[@]}"
 
-# ─── 8. Тесты; внутри теста (CHECK_NESTED) — без них, иначе check.sh запустит сам себя
+# ─── 8. Go: форматирование, go vet, тесты (в них и тест графа импортов)
+# Переменные окружения Go, которые отключают тесты или проверку сумм, сбрасываются: иначе PASS ложный.
+if [[ -f go.mod ]]; then
+  export GOFLAGS='' GOSUMDB=sum.golang.org GONOSUMDB='' GONOSUMCHECK='' GOINSECURE='' GOPRIVATE=''
+  if command -v go >/dev/null; then
+    mapfile -t gofiles < <(files '*.go')
+    unformatted=$( ((${#gofiles[@]})) && gofmt -l "${gofiles[@]}" 2>&1)
+    [[ -z $unformatted ]] || bad "gofmt: $(tr '\n' ' ' <<<"$unformatted")"
+    out=$(go vet ./... 2>&1) || bad "go vet: $(head -n 5 <<<"$out")"
+    out=$(go test ./... 2>&1) || bad "go test: $(grep -m 5 -E 'FAIL|panic|error' <<<"$out" || tail -n 5 <<<"$out")"
+  else
+    bad "нет утилиты go"
+  fi
+fi
+
+# ─── 9. Тесты; внутри теста (CHECK_NESTED) — без них, иначе check.sh запустит сам себя
 if [[ -z ${CHECK_NESTED:-} ]]; then
   export CHECK_NESTED=1
   for t in tests/test-*.sh; do
