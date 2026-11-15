@@ -3,22 +3,18 @@ package main
 
 import (
 	"os"
-	"time"
 
 	"github.com/grokki91/xray_core/internal/cli"
+	"github.com/grokki91/xray_core/internal/platform"
 )
 
 // version подставляется при сборке: -ldflags "-X main.version=<версия>". Пакетная переменная —
 // единственный способ принять значение от компоновщика; после старта она не меняется.
 var version = "dev"
 
-// systemClock — системные часы; заменяются часами platform, когда появится порт.
-type systemClock struct{}
-
-func (systemClock) Now() time.Time { return time.Now() }
-
 func main() {
+	p := platform.New()
 	os.Exit(cli.Run(os.Args[1:], cli.Env{
-		Stdout: os.Stdout, Stderr: os.Stderr, Version: version, Clock: systemClock{},
+		Stdout: os.Stdout, Stderr: os.Stderr, Version: version, Clock: p.Clock(),
 	}))
 }
