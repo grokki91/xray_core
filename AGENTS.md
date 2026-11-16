@@ -97,6 +97,9 @@ bash scripts/check.sh   # синтаксис, инструкции, ссылки
 Открыто:  вопросы владельцу и нерешённое
 ```
 
+Нужна проверка на реальной интеграции — в конце ответа блок субагента `integration-check`
+дословно; не нужна — блока нет. Поле «Готово к Pull Request» — по `docs/dev/integration-check.md` §5.
+
 Подтверждённое, предположение и непроверенное — раздельно. Команда, вывода которой нет, не
 считается выполненной. Нужны данные от владельца — одним списком: что, зачем и какой командой
 получить.
@@ -113,6 +116,7 @@ bash scripts/check.sh   # синтаксис, инструкции, ссылки
 | правка файлов компонента | правило по пути — таблица `docs/dev/ai-ecosystem.md` §3 |
 | ревью перед PR | субагенты `security-reviewer`, `architecture-reviewer` — `docs/dev/code-review.md` §1 |
 | факт об upstream, которого нет в `docs/compatibility.md` | субагент `upstream-researcher` |
+| PR создан; владелец прислал строку результата проверки | субагент `integration-check` — `docs/dev/integration-check.md` |
 
 Скилы — `.claude/skills/<имя>/SKILL.md`, правила — `.claude/rules/`, субагенты —
 `.claude/agents/`: обычные Markdown-файлы, пригодные любому агенту.

@@ -41,7 +41,7 @@
 | `diag.md` | `internal/diag/**`, `internal/monitor/**` | классы выводов диагностики |
 | `interfaces.md` | `internal/cli/**`, `internal/api/**`, `internal/webui/**`, `internal/bridge/**`, `internal/contract/**`, `web/**` | адаптеры, контракт, панель |
 | `tests.md` | `**/*_test.go`, `tests/**` | что считается тестом |
-| `shell.md` | `install.sh`, `scripts/**`, `.claude/hooks/**` | скрипты на Bash |
+| `shell.md` | `install.sh`, `scripts/**`, `.claude/hooks/**` | скрипты на Bash и PowerShell |
 
 Общие правила — в `AGENTS.md`; правила компонентов — здесь, по путям. Правило — короткая
 выжимка «что делать при правке этих файлов» со ссылкой на политику в `docs/`, а не её копия.
@@ -66,6 +66,7 @@
 | `security-reviewer` | проверить изменение по политикам безопасности и секретов | только чтение | список замечаний по форме |
 | `architecture-reviewer` | проверить границы модулей и соответствие ADR | только чтение | список нарушений по форме |
 | `upstream-researcher` | установить факт об Xray или клиенте по первичным источникам | чтение, клонирование во временный каталог | факт, дата, источник, способ проверки |
+| `integration-check` | решить, нужна ли проверка владельцем на реальной интеграции; выдать скрипт и сверить его результат ([integration-check.md](integration-check.md)) | чтение, проверка скрипта во временном каталоге | «не нужна», или скрипт с ожидаемой строкой, или «Готово к Pull Request» |
 
 Субагент нужен там, где работа требует много чтения, а основному контексту нужен короткий
 итог: ревью большого изменения, чтение чужих исходников.
@@ -96,6 +97,7 @@
 | Спецификация компонента | [templates/component-spec.md](../templates/component-spec.md) |
 | ADR | [adr/0000-template.md](../adr/0000-template.md) |
 | Описание PR | `.github/PULL_REQUEST_TEMPLATE.md` |
+| Скрипт проверки на реальной интеграции | `scripts/integration/vps.sh`, `scripts/integration/win11.ps1` |
 | Обращение об ошибке | `.github/ISSUE_TEMPLATE/bug.md` |
 | Политики: безопасность, секреты | [policy.md](../security/policy.md), [secrets.md](../security/secrets.md) |
 | Политики: тестирование, документация, ревью | [testing.md](../testing.md), [documentation.md](documentation.md), [code-review.md](code-review.md) |
