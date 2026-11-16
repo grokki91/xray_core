@@ -14,6 +14,7 @@ import (
 	"github.com/grokki91/xray_core/internal/config"
 	"github.com/grokki91/xray_core/internal/core"
 	"github.com/grokki91/xray_core/internal/logging"
+	"github.com/grokki91/xray_core/internal/security"
 	"github.com/grokki91/xray_core/internal/server"
 	"github.com/grokki91/xray_core/internal/store"
 )
@@ -40,8 +41,12 @@ type Services struct {
 	Core    *core.Manager
 	Server  *server.Manager
 	Logging *logging.Manager
-	XM      string           // версия xm — в манифест снимка
-	Now     func() time.Time // часы платформы
+	// Security — базовая защита в начале каждой транзакции и ключи установки.
+	Security *security.Manager
+	// Releases — источник релизов Xray для установки.
+	Releases Releases
+	XM       string           // версия xm — в манифест снимка
+	Now      func() time.Time // часы платформы
 	// ControlTimeout — срок контроля после перезапуска; ноль — 30 секунд.
 	ControlTimeout time.Duration
 }
@@ -65,16 +70,22 @@ type Change struct {
 	Core   core.Version     // пусто — ядро не меняется; иначе версия уже выложена (core.Stage)
 }
 
-// Apply выполняет изменение транзакцией: блокировка → (откат незавершённой) → отрисовка →
-// снимок → журнал → проверка `xray run -test` → ядро, юнит, конфигурация, состояние →
+// Apply выполняет изменение транзакцией: блокировка → базовая защита → (откат незавершённой) →
+// отрисовка → снимок → журнал → проверка `xray run -test` → ядро, юнит, конфигурация, состояние →
 // перезапуск → контроль → фиксация. Сбой после журнала — откат; результат отката проверяется.
-// Срок у ctx обязателен (его требует platform).
+// Службу, которую владелец остановил, транзакция не запускает: изменение вступит в силу после
+// `xm start` (ADR-0025). Срок у ctx обязателен (его требует platform).
 func (a *App) Apply(ctx context.Context, ch Change) error {
 	unlock, err := a.s.Store.Lock(ctx)
 	if err != nil {
 		return fmt.Errorf("блокировка: %w", err)
 	}
 	defer unlock()
+	// Каталоги и права по манифесту нужны снимку и журналу; чужие права не исправляются молча,
+	// поэтому сбой здесь — отказ до всякого изменения (docs/security/policy.md §2).
+	if err := a.s.Security.EnsureBaseline(ctx); err != nil {
+		return err
+	}
 	if _, err := a.recover(ctx); err != nil {
 		return err
 	}
@@ -111,6 +122,8 @@ func (a *App) Apply(ctx context.Context, ch Change) error {
 		return err
 	}
 	tx := store.Tx{CoreBefore: string(coreBefore), UnitBefore: unitBefore, WasActive: status.Active == "active", Started: a.s.Now().UTC()}
+	// Запускаем службу, что работала, и службу новой установки; остановленную владельцем — нет.
+	run := tx.WasActive || unitBefore == nil
 	if hadState {
 		tx.PortBefore = prev.Server.Port
 	}
@@ -124,7 +137,7 @@ func (a *App) Apply(ctx context.Context, ch Change) error {
 		return fmt.Errorf("журнал транзакции: %w", err)
 	}
 
-	if err := a.change(ctx, ch, st, rendered, version, coreBefore); err != nil {
+	if err := a.change(ctx, ch, st, rendered, version, coreBefore, run); err != nil {
 		return a.fail(ctx, tx, err)
 	}
 	if err := a.s.Store.ClearTx(); err != nil {
@@ -134,7 +147,7 @@ func (a *App) Apply(ctx context.Context, ch Change) error {
 }
 
 // change — шаги 4–7 ADR-0005: после журнала любой сбой откатывается вызывающим.
-func (a *App) change(ctx context.Context, ch Change, st store.State, r config.Rendered, version, coreBefore core.Version) error {
+func (a *App) change(ctx context.Context, ch Change, st store.State, r config.Rendered, version, coreBefore core.Version, run bool) error {
 	path, err := a.s.Config.Stage(r)
 	if err != nil {
 		return err
@@ -162,6 +175,9 @@ func (a *App) change(ctx context.Context, ch Change, st store.State, r config.Re
 	}
 	if err := a.s.Store.Save(st); err != nil {
 		return err
+	}
+	if !run {
+		return nil
 	}
 	svc := a.s.Server.Service()
 	if err := svc.Restart(ctx); err != nil {

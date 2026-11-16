@@ -15,6 +15,13 @@ var at = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 func TestGolden(t *testing.T) {
 	cases := map[string]Envelope{
 		"version": New("0.1.0", at, Version{XM: "0.1.0"}),
+		"status": New("0.1.0", at, Status{
+			Installed: true,
+			Service:   ServiceState{Loaded: true, Active: "active", Sub: "running", Enabled: true},
+			Versions:  Versions{XM: "0.1.0", Xray: "26.11.9"},
+			Addresses: ServerAddress{IPv4: "203.0.113.10"},
+			Port:      443,
+		}),
 		"error": NewError("0.1.0", at, Error{
 			Code:    "cli.unknown_command",
 			Message: "неизвестная команда «frobnicate»",

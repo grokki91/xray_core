@@ -47,6 +47,15 @@ type HostFacts struct {
 	MemMiB int64
 }
 
+// CheckRoot — единственное предусловие команд, которым не нужна вся проверка машины (`status`,
+// `start`, `stop`, `restart`): состояние и systemd доступны только root.
+func (m *Manager) CheckRoot() (Issue, bool) {
+	if m.p.Users().Effective() != platform.Root() {
+		return Issue{CodeNotRoot, "нужен root: команды xm запускаются от root"}, true
+	}
+	return Issue{}, false
+}
+
 // Preflight проверяет машину: root, ОС, архитектуру, память, systemd, время, чужую установку.
 // Проверки независимы: возвращаются все найденные проблемы.
 func (m *Manager) Preflight(ctx context.Context) (HostFacts, []Issue) {
@@ -54,8 +63,8 @@ func (m *Manager) Preflight(ctx context.Context) (HostFacts, []Issue) {
 	var issues []Issue
 	add := func(code, format string, a ...any) { issues = append(issues, Issue{code, fmt.Sprintf(format, a...)}) }
 
-	if m.p.Users().Effective() != (platform.Root()) {
-		add(CodeNotRoot, "нужен root: изменяющие команды запускаются от root")
+	if issue, bad := m.CheckRoot(); bad {
+		issues = append(issues, issue)
 	}
 
 	id, ver, err := m.osRelease()

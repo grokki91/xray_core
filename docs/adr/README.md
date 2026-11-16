@@ -40,3 +40,4 @@
 | [0022](0022-journald-from-platform.md) | Журнал `xm` — запись в journald через `platform` | Принято |
 | [0023](0023-transaction-control-and-rollback-scope.md) | Контроль и границы отката транзакции | Принято |
 | [0024](0024-health-verdict-and-shared-checks.md) | Вердикт здоровья и один набор проверок | Ждёт решения (Q13) |
+| [0025](0025-stopped-service-and-install-scenario.md) | Остановленная служба в транзакции и сценарий `xm install` фазы 2 | Принято |

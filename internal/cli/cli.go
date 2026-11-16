@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -12,14 +13,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/grokki91/xray_core/internal/app"
 	"github.com/grokki91/xray_core/internal/contract"
 )
 
 // Коды выхода — docs/architecture/interfaces.md §1.
 const (
-	exitOK    = 0
-	exitFail  = 1
-	exitUsage = 2
+	exitOK        = 0
+	exitFail      = 1
+	exitUsage     = 2
+	exitPreflight = 3
+	exitRollback  = 5
 )
 
 // Clock — источник времени для поля time машинного вывода; настоящий даёт platform.
@@ -27,24 +31,42 @@ type Clock interface {
 	Now() time.Time
 }
 
-// Env — то, что получает команда: потоки вывода, версия сборки и часы.
+// App — сценарии, которые вызывают команды; настоящий — app.App.
+type App interface {
+	Install(ctx context.Context, o app.InstallOptions) (app.InstallResult, error)
+	Service(ctx context.Context, a app.Action) error
+	Status(ctx context.Context) (contract.Status, error)
+}
+
+// Env — то, что получает команда: потоки вывода, версия сборки, часы и прикладной слой. Ctx
+// отменяется по сигналу; сроки операций задаёт сам прикладной слой.
 type Env struct {
+	Ctx            context.Context
 	Stdout, Stderr io.Writer
 	Version        string
 	Clock          Clock
+	App            App
 }
 
 type command struct {
 	name    string
 	usage   string
 	summary string
-	json    bool // команда поддерживает --json
-	run     func(e Env, asJSON bool) int
+	json    bool                   // команда поддерживает --json
+	flags   func(fs *flag.FlagSet) // объявление собственных флагов
+	run     func(e Env, fs *flag.FlagSet, asJSON bool) int
 }
 
 // commands — закрытый список команд в порядке справки.
 func commands() []command {
 	return []command{
+		{name: "install", usage: "xm install --sni <домен> --address <адрес> [--port <порт>]",
+			summary: "установить Xray и запустить службу", flags: installFlags, run: runInstall},
+		{name: "start", usage: "xm start", summary: "запустить службу Xray", run: service(app.Start)},
+		{name: "stop", usage: "xm stop", summary: "остановить службу Xray", run: service(app.Stop)},
+		{name: "restart", usage: "xm restart", summary: "перезапустить службу Xray", run: service(app.Restart)},
+		{name: "status", usage: "xm status [--json]", summary: "состояние службы, версии, адреса, порт",
+			json: true, run: runStatus},
 		{name: "version", usage: "xm version [--json]", summary: "версия xm", json: true, run: runVersion},
 		{name: "help", usage: "xm help", summary: "эта справка", run: runHelp},
 	}
@@ -72,6 +94,9 @@ func Run(args []string, e Env) int {
 		// usageError.
 		fs := flag.NewFlagSet("xm "+c.name, flag.ContinueOnError)
 		fs.SetOutput(io.Discard)
+		if c.flags != nil {
+			c.flags(fs)
+		}
 		if c.json {
 			// Признак JSON уже известен из просмотра аргументов; флаг лишь объявлен, чтобы
 			// Parse его принял.
@@ -87,12 +112,12 @@ func Run(args []string, e Env) int {
 		if fs.NArg() > 0 {
 			return usageError(e, asJSON, codeBadArguments, "лишний аргумент «"+quote(fs.Arg(0))+"»")
 		}
-		return c.run(e, asJSON)
+		return c.run(e, fs, asJSON)
 	}
 	return usageError(e, asJSON, codeUnknownCommand, "неизвестная команда «"+quote(args[0])+"»")
 }
 
-func runVersion(e Env, asJSON bool) int {
+func runVersion(e Env, _ *flag.FlagSet, asJSON bool) int {
 	if asJSON {
 		return writeJSON(e, contract.New(e.Version, e.Clock.Now(), contract.Version{XM: e.Version}))
 	}
@@ -100,7 +125,7 @@ func runVersion(e Env, asJSON bool) int {
 	return exitOK
 }
 
-func runHelp(e Env, _ bool) int {
+func runHelp(e Env, _ *flag.FlagSet, _ bool) int {
 	writeUsage(e.Stdout)
 	return exitOK
 }

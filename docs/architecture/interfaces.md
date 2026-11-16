@@ -10,7 +10,7 @@
 
 | Команда | Что делает | Меняет систему |
 |---|---|---|
-| `xm install [--sni <домен>] [--address <адрес>] [--port <порт>]` | установка и донастройка, идемпотентно | да |
+| `xm install --sni <домен> --address <адрес> [--port <порт>]` | установка на чистую машину; повторный запуск на своей установке — отказ (фаза 2). С фазы 4: параметры необязательны, запуск идемпотентен | да |
 | `xm uninstall [--purge]` | убрать службу и бинарники; `--purge` — ещё состояние и снимки | да |
 | `xm start` · `xm stop` · `xm restart` | управление службой Xray | да |
 | `xm status` | служба, версии, адреса и порт, число профилей, дрейф, доступное обновление | нет |
@@ -24,10 +24,14 @@
 | `xm backup [--list]` | создать снимок или показать список | да |
 | `xm restore <id>` | восстановить из снимка | да |
 | `xm ui [--port <порт>]` | локальный Web UI для SSH-туннеля | нет |
-| `xm version` · `xm help` | версии `xm` и Xray (Xray — с фазы 2); справка | нет |
+| `xm version` · `xm help` | версия `xm`; справка (версия Xray в `version` — отдельной правкой, сейчас её показывает `status`) | нет |
 
 После MVP: `xm ui`, `xm install --reinstall`, перегенерация ключей, группы `xm bridge …` (§5),
 `xm monitor on|off`, `xm harden` (вопрос Q7).
+
+Команды `install`, `start`, `stop`, `restart` и `status` требуют root (код 3 `preflight.not_root`).
+`start`, `stop`, `restart` — не транзакции: служба, остановленная `xm stop`, остаётся остановленной после
+любого изменения ([ADR-0025](../adr/0025-stopped-service-and-install-scenario.md)).
 
 Без команды — справка в stderr и код 2; `xm help` и `xm <команда> -h` — справка в stdout, код 0.
 
@@ -78,8 +82,11 @@
   «обновите `xm`». Форма конверта совпадает с принятой в `xray_client` (`schema: {name, major, minor}`).
 
 Схемы первой версии: `status`, `profiles`, `profile`, `update`, `diag-report`, `backups`,
-`version`, `error`. Реализованы `version` (`data: {xm}`; версия Xray — полем с фазы 2) и
-`error`; эталоны — `internal/contract/testdata/`.
+`version`, `error`. Реализованы `version` (`data: {xm}`), `status` и
+`error`; эталоны — `internal/contract/testdata/`. `status`: `installed`, `service`
+(`loaded`, `active`, `sub`, `enabled`, `restarts`), `versions` (`xm`, `xray`), `addresses`
+(`ipv4`, `ipv6`, `domain`), `port`, `drift`; не установлено — `installed: false`. Число профилей,
+доступное обновление и вердикт здоровья добавятся полями (`minor + 1`).
 
 Ошибка аргументов при `--json` среди аргументов — документ `error` в stdout (человеку — ещё и
 текст в stderr), код 2; коды `cli.unknown_command` и `cli.bad_arguments`. Команда без

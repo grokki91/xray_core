@@ -1,0 +1,32 @@
+{
+  "schema": {
+    "name": "status",
+    "major": 1,
+    "minor": 0
+  },
+  "xm": {
+    "version": "0.1.0"
+  },
+  "time": 1767225600,
+  "data": {
+    "installed": true,
+    "service": {
+      "loaded": true,
+      "active": "active",
+      "sub": "running",
+      "enabled": true,
+      "restarts": 0
+    },
+    "versions": {
+      "xm": "0.1.0",
+      "xray": "26.11.9"
+    },
+    "addresses": {
+      "ipv4": "203.0.113.10",
+      "ipv6": "",
+      "domain": ""
+    },
+    "port": 443,
+    "drift": false
+  }
+}
