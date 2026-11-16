@@ -32,9 +32,9 @@
 type Platform interface {
     Exec(ctx context.Context, c Command) (Result, error) // Command{Program, Args, Stdin}; без оболочки
     FS() FS            // ReadFile, WriteFile (temp + fchown + fchmod + fsync + rename), Mkdir, Remove, Symlink, Readlink, Lock (flock)
-    Systemd() Systemd  // юниты: установить, включить, start/stop/restart, состояние
+    Systemd() Systemd  // только xray.service: Running, Reload, Enable/Disable, Start/Stop/Restart, Status
     Net() Net          // Get по HTTPS (фаза 2); интерфейсы, маршруты, слушающие сокеты — фаза 4
-    Users() Users      // системный пользователь службы
+    Users() Users      // системный пользователь службы; Effective — владелец процесса xm
     Journal() Journal  // запись в journald, идентификатор xm (ADR-0022)
     Clock() Clock
 }
@@ -73,8 +73,15 @@ type Platform interface {
 - `Users.Ensure(ctx, имя)` — владелец пользователя; нет такого — создаёт системного без оболочки и
   домашнего каталога через `useradd` из закрытого списка. Допустимо одно имя, `ServiceUser`
   (`xray`): политика §3 не разрешает менять других пользователей; иное имя — `ErrName`. Поддельные пользователи получают идентификаторы с 990.
-- Фаза 1 — `Exec`, `FS`, `Clock`; фаза 2 — `Net.Get`, `xray` по версии, `Remove`, `Symlink`, `Readlink`, `Users`; `Systemd`, остальное `Net` —
-  вместе с первым потребителем (фазы 2 и 4).
+- `Systemd` управляет одним юнитом `xray.service` (имя не параметр, как у `Users`): работает через
+  `Exec` с `systemctl` из закрытого списка, одна реализация у `Real` и `Fake`; подделка отвечает на
+  `Handle("systemctl", …)`. `Running` — `is-system-running`: `running` и `degraded` годятся, прочее —
+  `ErrNoSystemd`. `Status` разбирает `systemctl show` строго: нет свойства или число не число — ошибка;
+  юнита нет — `Loaded=false`, не ошибка. Ненулевой код глагола — ошибка с кодом, без вывода процесса.
+- `Users.Effective()` — эффективные uid и gid процесса `xm`; у подделки root, пока тест не назначил
+  другого (`SetEffective`).
+- Фаза 1 — `Exec`, `FS`, `Clock`; фаза 2 — `Net.Get`, `xray` по версии, `Remove`, `Symlink`, `Readlink`, `Users`, `Systemd`;
+  остальное `Net` — вместе с первым потребителем (фаза 4).
 
 ### store
 
@@ -252,7 +259,23 @@ type Manager interface {
 }
 ```
 
-- Чужая установка — `xray.service` или конфигурация Xray без метки `xm`: остановка с объяснением.
+- Чужая установка — `xray.service` без метки `xm` или конфигурация Xray при отсутствии юнита `xm`:
+  остановка с объяснением, код выхода 3. Метка — первая строка юнита `# managed-by: xm`; конфигурация
+  JSON метки не несёт, поэтому своя установка всегда определяется юнитом с меткой.
+- `New(p, configPath)` — путь конфигурации приносит `cmd/xm` (`config.Path`): менеджеры друг друга не
+  импортируют. `Preflight` возвращает все найденные `Issue{Code, Message}` сразу, любая останавливает
+  установку: `preflight.not_root`, `.os_unsupported` (Ubuntu 22.04 и 24.04; прочее — до решения Q8),
+  `.arch_unsupported` (только x86_64; архитектура — `runtime.GOARCH` самого `xm`), `.resources`
+  (память `MemTotal` не меньше 512 МиБ; порог — по замеру фазы 2; диск не проверяется — в порте нет
+  вызова `statfs`), `.no_systemd`, `.clock` (часы раньше 2026-11-01), `.foreign_install`.
+- Юнит строится из фиксированной части и директив изоляции, которые приносит вызывающий
+  (`security.UnitHardening`); директива, переопределяющая запуск (`Type`, `User`, `ExecStart`,
+  `Restart`, `RestartSec`), перевод строки в значении или путь вне `[A-Za-z0-9._/-]` — `ErrSpec`
+  до всякой записи. `ExecStart` идёт через ссылку `current` (ADR-0019). `InstallUnit` пишет файл
+  `root:root 0644`, `daemon-reload`, `enable`; службу не запускает. `RemoveUnit` — `disable`, удаление,
+  `daemon-reload`; юнита нет — не ошибка; чужой юнит не трогают оба (`ErrForeign`).
+- `Service()` — `Start`, `Stop`, `Restart`, `Status` (`platform.UnitStatus`: загружен, состояние,
+  автозапуск, число перезапусков, PID). Контроль «без цикла перезапусков» строит `app` по `Restarts`.
 - Расширение «несколько VPS»: реестр узлов (алиас SSH, без учётных данных) и исполнитель,
   вызывающий на узле тот же `xm … --json`. Фаза 2; реестр — после MVP.
 

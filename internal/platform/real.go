@@ -15,9 +15,9 @@ import (
 )
 
 // programs — закрытый список программ: имя → абсолютный путь. Пополняется вместе с первым
-// потребителем (systemctl, xray — фаза 2).
+// потребителем.
 func programs() map[string]string {
-	return map[string]string{useradd: "/usr/sbin/useradd"}
+	return map[string]string{useradd: "/usr/sbin/useradd", systemctl: "/usr/bin/systemctl"}
 }
 
 // childEnv — окружение процесса: ничего от родителя, секретов через окружение не передаём.
