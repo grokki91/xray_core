@@ -17,6 +17,7 @@ import (
 	"github.com/grokki91/xray_core/internal/logging"
 	"github.com/grokki91/xray_core/internal/platform"
 	"github.com/grokki91/xray_core/internal/redact"
+	"github.com/grokki91/xray_core/internal/security"
 	"github.com/grokki91/xray_core/internal/server"
 	"github.com/grokki91/xray_core/internal/store"
 )
@@ -66,6 +67,8 @@ type sys struct {
 	f   *platform.Fake
 	fs  *armedFS
 	app *App
+	rel *fakeReleases
+	reg *redact.Redactor
 
 	active             bool
 	failVerb           string // глагол systemctl, который отказывает
@@ -75,29 +78,50 @@ type sys struct {
 	restarts, nRestart int
 }
 
-func newSys(t *testing.T) *sys {
+// newSys — машина с готовой установкой: базовая защита выполнена, выложены две версии Xray,
+// current указывает на первую.
+func newSys(t *testing.T) *sys { return build(t, true) }
+
+// newFresh — чистая Ubuntu: есть только то, что есть на любой машине.
+func newFresh(t *testing.T) *sys { return build(t, false) }
+
+func build(t *testing.T, installed bool) *sys {
 	t.Helper()
 	root := t.TempDir()
-	for _, d := range []string{"/etc/xm", "/usr/local/etc/xray", "/var/lib/xm/backups", "/var/lib/xm/tx", "/etc/systemd/system", "/usr/local/lib/xm/core", "/run"} {
+	for _, d := range []string{"/etc/systemd/system", "/usr/local/lib", "/usr/local/etc", "/var/lib", "/run", "/proc"} {
 		if err := os.MkdirAll(root+d, 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
 	f := platform.NewFake(root, time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC))
-	s := &sys{f: f}
+	s := &sys{f: f, rel: &fakeReleases{}}
 	s.fs = &armedFS{FS: f.FS()}
 	p := armedPlatform{f, s.fs}
-	for _, v := range []string{v1, v2} {
-		d := platform.CoreDir + "/" + v
-		if err := os.MkdirAll(root+d, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := f.FS().WriteFile(d+"/xray", []byte("не настоящий бинарник"), 0o755, platform.Root()); err != nil {
+	host := map[string]string{
+		"/etc/os-release": "NAME=\"Ubuntu\"\nVERSION_ID=\"24.04\"\nID=ubuntu\n",
+		"/proc/meminfo":   "MemTotal:        2008064 kB\n",
+	}
+	for path, data := range host {
+		if err := f.FS().WriteFile(path, []byte(data), 0o644, platform.Root()); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := f.FS().Symlink(platform.CoreDir+"/current", v1); err != nil {
-		t.Fatal(err)
+	if installed {
+		if err := security.New(p).EnsureBaseline(ctx(t)); err != nil {
+			t.Fatal(err)
+		}
+		for _, v := range []string{v1, v2} {
+			d := platform.CoreDir + "/" + v
+			if err := os.MkdirAll(root+d, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.FS().WriteFile(d+"/xray", []byte("не настоящий бинарник"), 0o755, platform.Root()); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := f.FS().Symlink(platform.CoreDir+"/current", v1); err != nil {
+			t.Fatal(err)
+		}
 	}
 	f.Handle("xray", func(c platform.Command) (platform.Result, error) {
 		if c.Args[0] == "version" {
@@ -111,6 +135,9 @@ func newSys(t *testing.T) *sys {
 	})
 	f.Handle("systemctl", func(c platform.Command) (platform.Result, error) {
 		verb := c.Args[2]
+		if verb == "is-system-running" {
+			return platform.Result{Stdout: []byte("running\n")}, nil
+		}
 		if verb == s.failVerb {
 			s.failVerb = "" // отказ одноразовый: откат должен мочь выполнить тот же глагол
 			return platform.Result{ExitCode: 1}, nil
@@ -144,10 +171,12 @@ func newSys(t *testing.T) *sys {
 		return platform.Result{}, nil
 	})
 	reg := redact.New()
+	s.reg = reg
 	cfgPath := config.Path
 	s.app = New(Services{
 		Store: store.New(p.FS()), Backup: backup.New(p), Config: config.New(p), Core: core.New(p),
 		Server: server.New(p, cfgPath), Logging: logging.New(p, reg, slog.LevelInfo),
+		Security: security.New(p), Releases: s.rel, Redactor: regAdapter{reg},
 		XM: "0.1.0", Now: f.Clock().Now, ControlTimeout: 150 * time.Millisecond,
 	})
 	return s

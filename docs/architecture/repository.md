@@ -9,8 +9,8 @@
 go.mod                    модуль Go; версия Go — строкой `go`
 cmd/xm/                   точка входа; тест графа импортов (§3)
 internal/
-  cli/                    команды `version` и `help`
-  contract/               конверт, схемы `version` и `error`; эталоны в testdata/
+  cli/                    команды `install`, `start`, `stop`, `restart`, `status`, `version`, `help`
+  contract/               конверт, схемы `version`, `status` и `error`; эталоны в testdata/
   platform/               порт: `Exec` (`xray` по версии), `FS`, `Net` (загрузка по HTTPS), `Users`, `Systemd` (`xray.service`), `Journal` (journald), `Clock`; настоящая и поддельная реализации; xraytest/ — стенд L3
   core/                   бинарник Xray: распаковка, ELF и версия, каталоги версий, ссылка `current`, `run -test`
   update/                 источник релизов Xray: последний стабильный, загрузка со сверкой сумм, кэш
@@ -20,7 +20,7 @@ internal/
   server/                 предусловия узла, юнит `xray.service`, управление службой
   logging/                журнал `xm` (journald, через редактор), раздел `log` Xray
   backup/                 снимок состояния и конфигурации, чтение снимка с проверкой
-  app/                    транзакция с откатом и восстановление незавершённой
+  app/                    транзакция с откатом и восстановление незавершённой; сценарии `Install`, `Service`, `Status`
   redact/                 редактор; redacttest/ — канареечный помощник тестов
 README.md                 коротко: что это, требования, установка, команды
 AGENTS.md                 инструкции для LLM-агентов: единый вход

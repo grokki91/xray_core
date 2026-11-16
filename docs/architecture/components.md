@@ -179,7 +179,7 @@ type Manager interface {
   128 МиБ; файлов в архиве не больше 32. Проверяется, что бинарник — исполняемый ELF64 x86-64 и
   `xray version` называет ожидаемую версию; `Activate` повторяет проверку версии.
 - Предусловие `Stage`: суммы архива сверены (`update.Fetch`) — `Stage` запускает бинарник; связку
-  проверяет сценарий `app`. Выложенная версия не перезаписывается (`ErrStaged`): на неё может
+  проверяет сценарий `app`. Выложенная версия не перезаписывается: другое содержимое — `ErrStaged`, тот же проверенный архив — успех без записи (повтор установки после отката); на неё может
   указывать `current`. Бинарник, не прошедший проверку, удаляется.
 - Закрытый список подкоманд `core` — `version` и `run`; `x25519` и `uuid` не запускаются: секреты
   создаёт только `security`. Вывод `run -test` в ошибку не попадает — решение по коду выхода
@@ -263,6 +263,7 @@ type Compat interface {    // profile/compat — таблица данных с 
 ```go
 type Manager interface {
     Preflight(ctx context.Context) (HostFacts, []Issue) // ОС, архитектура, ресурсы, systemd, время, чужая установка
+    CheckRoot() (Issue, bool)                            // только root: для status, start, stop, restart
     InstallUnit(ctx context.Context, spec UnitSpec) error
     RemoveUnit(ctx context.Context) error
     Service() Service                                    // Start, Stop, Restart, Status, CheckRunning, CheckStopped
@@ -496,11 +497,19 @@ type App interface {
 }
 ```
 
-- Транзакция `Apply(ctx, Change)`: блокировка → откат незавершённой → отрисовка → снимок → журнал →
+- Транзакция `Apply(ctx, Change)`: блокировка → базовая защита → откат незавершённой → отрисовка → снимок → журнал →
   `xray run -test` → ядро, юнит, конфигурация, состояние → перезапуск → контроль → фиксация или
   откат ([ADR-0005](../adr/0005-transactions-and-rollback.md), [ADR-0023](../adr/0023-transaction-control-and-rollback-scope.md)).
+  Базовая защита (`security.EnsureBaseline`) — первый шаг после блокировки. Службу, которую
+  владелец остановил, транзакция не запускает ([ADR-0025](../adr/0025-stopped-service-and-install-scenario.md)).
   Ошибки: `ErrRolledBack` (код 1) и `ErrRollbackFailed` (код 5). `Recover` откатывает незавершённую
-  транзакцию при следующем запуске. Сценарии `Install`, `Service` и прочие — шаг 10 и далее.
+  транзакцию при следующем запуске.
+- Сценарии фазы 2 ([ADR-0025](../adr/0025-stopped-service-and-install-scenario.md)): `Install` —
+  проверка ввода, предусловия, загрузка и сверка релиза, `core.Stage`, ключи, транзакция; `Service` —
+  `start`, `stop`, `restart` под блокировкой, после отката незавершённой транзакции, с контролем, но не
+  транзакцией; `Status` — служба, версии, адреса, порт, дрейф (схема `status`). Сроки операций задаёт
+  `app`. Ошибки сценариев: `ErrInput` (код 2), `ErrPreflight` с перечнем причин, `ErrInstalled`,
+  `ErrNotInstalled` (код 3). Остальные сценарии — следующие фазы.
 - Возвращает типы `contract`; о терминале и HTTP не знает. Фаза 2 и далее.
 
 ---

@@ -15,7 +15,7 @@ func (fixedClock) Now() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, tim
 
 func runAs(version string, args ...string) (code int, stdout, stderr string) {
 	var out, errOut bytes.Buffer
-	code = Run(args, Env{Stdout: &out, Stderr: &errOut, Version: version, Clock: fixedClock{}})
+	code = Run(args, Env{Stdout: &out, Stderr: &errOut, Version: version, Clock: fixedClock{}, Redact: func(s string) string { return s }})
 	return code, out.String(), errOut.String()
 }
 
