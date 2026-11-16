@@ -105,9 +105,10 @@ func (m *Manager) Preflight(ctx context.Context) (HostFacts, []Issue) {
 	return facts, issues
 }
 
-// osRelease разбирает /etc/os-release: ID и VERSION_ID.
+// osRelease разбирает /usr/lib/os-release: ID и VERSION_ID. /etc/os-release на Ubuntu — ссылка
+// на него, а platform ссылки не читает (os-release(5) допускает оба пути).
 func (m *Manager) osRelease() (id, version string, err error) {
-	data, err := m.p.FS().ReadFile("/etc/os-release")
+	data, err := m.p.FS().ReadFile("/usr/lib/os-release")
 	if err != nil {
 		return "", "", err
 	}
