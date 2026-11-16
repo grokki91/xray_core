@@ -23,6 +23,9 @@ func TestEncodeJournal(t *testing.T) {
 	if !bytes.Equal(b, wantBin) {
 		t.Errorf("с переводом строки: %q, нужно %q", b, wantBin)
 	}
+	if nul := encodeJournal(PriInfo, "a\x00b"); !bytes.Contains(nul, []byte("MESSAGE\n")) {
+		t.Errorf("NUL должен идти двоичной формой: %q", nul)
+	}
 	long := encodeJournal(PriInfo, strings.Repeat("я", maxJournalMessage))
 	if len(long) > maxJournalMessage+64 || !strings.HasSuffix(string(long), "\n") {
 		t.Errorf("длинное сообщение не обрезано: %d байт", len(long))

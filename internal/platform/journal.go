@@ -44,7 +44,7 @@ func encodeJournal(p Priority, message string) []byte {
 	var b []byte
 	b = append(b, "SYSLOG_IDENTIFIER="+JournalIdentifier+"\n"...)
 	b = append(b, fmt.Sprintf("PRIORITY=%d\n", int(p))...)
-	if strings.Contains(message, "\n") {
+	if strings.ContainsAny(message, "\n\x00") {
 		b = append(b, "MESSAGE\n"...)
 		b = binary.LittleEndian.AppendUint64(b, uint64(len(message)))
 		b = append(b, message...)
