@@ -18,6 +18,7 @@ type Platform interface {
 	FS() FS
 	Net() Net
 	Users() Users
+	Journal() Journal
 	Clock() Clock
 }
 

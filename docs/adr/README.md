@@ -37,3 +37,4 @@
 | [0019](0019-versioned-xray-exec-and-current-link.md) | Запуск Xray по версии и ссылка `current` | Принято |
 | [0020](0020-l3-stand.md) | Стенд L3 с настоящим Xray | Принято |
 | [0021](0021-owner-integration-check.md) | Проверка владельцем на реальной интеграции | Принято |
+| [0022](0022-journald-from-platform.md) | Журнал `xm` — запись в journald через `platform` | Принято |
