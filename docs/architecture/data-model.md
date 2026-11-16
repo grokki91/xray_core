@@ -78,7 +78,7 @@
 
 ## 4. Снимки
 
-`/var/lib/xm/backups/<UTC-время>-<причина>.tar.gz`: `state.json`, `config.json`, `manifest.json`
+`/var/lib/xm/backups/<UTC-время>-<причина>.tar.gz` (время `ГГГГММДДTччммссZ`, причина `[a-z0-9-]`): `state.json`, `config.json`, `manifest.json`
 (версии `xm` и Xray, версия схемы, SHA-256 каждого файла).
 
 | Вид | Когда создаётся | Хранится |
