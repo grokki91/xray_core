@@ -32,6 +32,7 @@
 | 2026-11-13 | v26.11.9 собирается Go 1.27; REALITY — `xtls/reality` 4bb46b2 (2026-11-08) | `go.mod` тега |
 | 2026-11-13 | REALITY отвергает ClientHello без X25519MLKEM768 перед X25519 (правило действует с v26.9.9): такой клиент уходит к цели и видит таймаут | `XTLS/REALITY` `tls.go`, коммит 8cdf7bf и текущая ветка |
 | 2026-11-13 | `minClientVer` по умолчанию не задан | `infra/conf/transport_security.go` тега v26.11.9 |
+| 2026-11-16 | `Xray-linux-64.zip` v26.11.9 — 16 754 078 байт; `github.com/XTLS/Xray-core/releases/download/…` перенаправляет на `release-assets.githubusercontent.com` (подписанный временный адрес). Предел архива в `xm` — 64 МиБ (`platform.MaxFileSize`) | `curl -sSIL` адреса загрузки, запрос владельца |
 | 2026-11-13 | К архиву релиза прилагается `.dgst` с `MD5=`, `SHA1=`, `SHA2-256=`, `SHA2-512=`; подписей и подтверждений происхождения нет | файл `.dgst` релиза v26.11.9; `.github/workflows/release.yml` |
 | 2026-11-13 | Подкоманды бинарника: `run`, `version`, `uuid`, `x25519`, `mldsa65`, `mlkem768`, `vlessenc`, `tls`, `api` (в том числе `statsquery`) | `main/commands/all` тега v26.11.9 |
 | 2026-11-15 | Пресет `reality-xhttp`, входящий VLESS: `decryption: "none"` обязателен; `clients[].id` — UUID; `flow` — `""` или `xtls-rprx-vision`; пресет Vision не использует, `flow` пустой; `encryption` во входящем запрещён | `infra/conf/vless.go` тега v26.11.9; по исходникам |

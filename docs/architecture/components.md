@@ -33,7 +33,7 @@ type Platform interface {
     Exec(ctx context.Context, c Command) (Result, error) // Command{Program, Args, Stdin}; без оболочки
     FS() FS            // ReadFile, WriteFile (temp + fchown + fchmod + fsync + rename), Mkdir, Lock (flock)
     Systemd() Systemd  // юниты: установить, включить, start/stop/restart, состояние
-    Net() Net          // интерфейсы, маршруты, слушающие сокеты, исходящие соединения
+    Net() Net          // Get по HTTPS (фаза 2); интерфейсы, маршруты, слушающие сокеты — фаза 4
     Users() Users      // системный пользователь службы
     Clock() Clock
 }
@@ -44,7 +44,8 @@ type Platform interface {
   ненулевой код выхода — не ошибка, а `Result.ExitCode`.
 - Срок обязателен: `Exec` и `Lock` без дедлайна в контексте — ошибка `ErrDeadline`. Процесс
   запускается в своей группе: по сроку завершается вся группа. Вывод — не больше `MaxOutput`.
-- `ReadFile` читает только обычный файл не больше `MaxFileSize`; `Mkdir` на существующем
+- `ReadFile` читает только обычный файл не больше `MaxFileSize` (64 МиБ: его задаёт архив Xray в кэше
+  `update`, общий предел выбран владельцем 2026-11-16 вместо отдельного); `Mkdir` на существующем
   каталоге с другими правами — ошибка, а не молчаливое исправление.
 - Пути — только абсолютные и очищенные; символическая ссылка в любом элементе пути — ошибка
   `ErrSymlink`; файл создаётся сразу с правами и владельцем, без окна с чужими правами.
@@ -54,7 +55,14 @@ type Platform interface {
   путей, ссылок и блокировок совпадают; общий тест это проверяет. Поддельная реализация лежит в
   самом пакете: подпакет `platform/fake` не мог бы импортировать `platform` по таблице слоёв;
   вызов `NewFake` вне `_test.go` запрещает тест границ.
-- Фаза 1 — `Exec`, `FS`, `Clock`; `Systemd`, `Users`, `Net` — вместе с первым потребителем (фазы 2 и 4).
+- `Net.Get(ctx, Request{URL, Hosts, Max})` — тело ответа 200: адрес и каждое перенаправление —
+  только `https` и узел из закрытого списка потребителя (`Hosts`, точное совпадение с портом),
+  иначе `ErrURL`; без учётных данных в адресе; не больше 5 перенаправлений; тело больше `Max` —
+  `ErrTooLarge`; в ошибке — только узел, без параметров адреса; прокси — из окружения
+  (`HTTPS_PROXY`), список сверяется с узлом назначения; срок обязателен. Поддельная сеть отвечает заданными телами и перенаправлениями
+  (`Serve`, `Redirect`) по тем же правилам.
+- Фаза 1 — `Exec`, `FS`, `Clock`; фаза 2 — `Net.Get`; `Systemd`, `Users`, остальное `Net` —
+  вместе с первым потребителем (фазы 2 и 4).
 
 ### store
 
@@ -311,9 +319,9 @@ type Manager interface {
 Откуда брать релизы и что именно обновлять. Само переключение версии — транзакция `app`.
 
 ```go
-type Source interface {  // единственная реализация: релизы GitHub XTLS/Xray-core
-    Latest(ctx context.Context, ch Channel) (Release, error)
-    Fetch(ctx context.Context, r Release, arch Arch) (zip io.ReadCloser, d Digests, err error)
+type Source interface {  // единственная реализация GitHub: релизы XTLS/Xray-core
+    Latest(ctx context.Context) (Release, error)                   // канал один — стабильные
+    Fetch(ctx context.Context, r Release, a Arch) (Archive, error) // Archive{Data, Digests}, сверенный
 }
 
 type Manager interface {
@@ -323,8 +331,13 @@ type Manager interface {
 ```
 
 - Проверка целостности, диапазон проверенных версий, откат — [updates.md](../operations/updates.md).
+- `Fetch` скачивает `.dgst` каждый раз; архив берёт из кэша ([data-model.md](data-model.md) §1),
+  если он читается и проходит ту же сверку, иначе скачивает и кладёт в кэш; каталоги кэша
+  создаёт сам: загрузка идёт до базовой защиты ([overview.md](overview.md) §6). Предел архива —
+  `platform.MaxFileSize`: кэш читается через `FS.ReadFile`. Архитектура — только `amd64`.
 - Тем же механизмом обновляется сам `xm` (источник — релизы этого репозитория). Фаза 2 (установка),
-  5 (обновление и откат).
+  5 (обновление и откат). Реализация фазы 2 знает только `XTLS/Xray-core`; источник релизов `xm`
+  (свой репозиторий, сверка SHA-256) добавляется в фазе 5.
 
 ### backup
 

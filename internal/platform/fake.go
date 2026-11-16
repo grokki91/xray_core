@@ -11,7 +11,8 @@ import (
 
 // Fake — поддельная реализация для тестов: файлы — под временным каталогом root, владельцы
 // записываются, а не меняются (root не нужен), процессы отвечают обработчиками, все вызовы
-// записываются. Правила путей, ссылок, блокировок и запуска — те же, что у Real.
+// записываются, сеть отвечает заданными телами и перенаправлениями. Правила путей, ссылок,
+// блокировок, запуска и адресов — те же, что у Real.
 type Fake struct {
 	programs map[string]string
 	files    files
@@ -21,12 +22,13 @@ type Fake struct {
 	calls    []Call
 	owners   map[string]Owner
 	handlers map[string]func(Command) (Result, error)
+	routes   map[string]fakeRoute
 }
 
 // Call — записанный вызов: операция и путь или программа с аргументами.
 type Call struct {
-	Op   string // read, write, mkdir, lock, exec
-	Path string // путь файла или имя программы
+	Op   string // read, write, mkdir, lock, exec, get
+	Path string // путь файла, имя программы или адрес
 	Args []string
 }
 
@@ -34,7 +36,7 @@ type Call struct {
 func NewFake(root string, now time.Time) *Fake { return newFake(root, now, programs()) }
 
 func newFake(root string, now time.Time, progs map[string]string) *Fake {
-	f := &Fake{programs: progs, now: now, owners: map[string]Owner{}, handlers: map[string]func(Command) (Result, error){}}
+	f := &Fake{programs: progs, now: now, owners: map[string]Owner{}, handlers: map[string]func(Command) (Result, error){}, routes: map[string]fakeRoute{}}
 	f.files = files{root: root, chown: f.recordOwner, trace: f.trace}
 	return f
 }
@@ -53,6 +55,22 @@ func (f *Fake) trace(op, path string) {
 }
 
 func (f *Fake) FS() FS { return f.files }
+
+func (f *Fake) Net() Net { return fakeNet{f} }
+
+// Serve задаёт тело ответа 200 на адрес.
+func (f *Fake) Serve(url string, body []byte) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.routes[url] = fakeRoute{body: slices.Clone(body)}
+}
+
+// Redirect задаёт перенаправление с адреса from на to.
+func (f *Fake) Redirect(from, to string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.routes[from] = fakeRoute{location: to}
+}
 
 func (f *Fake) Clock() Clock { return fakeClock{f} }
 
