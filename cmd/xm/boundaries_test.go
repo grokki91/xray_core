@@ -70,7 +70,7 @@ func checkImports(root, module string) ([]string, error) {
 			if why := forbidden(dir, target, module); why != "" {
 				bad = append(bad, fmt.Sprintf("%s: импорт %s — %s", rel, target, why))
 			}
-			if target == module+"/internal/redact/redacttest" {
+			if target == module+"/internal/redact/redacttest" || target == module+"/internal/platform/xraytest" {
 				bad = append(bad, fmt.Sprintf("%s: импорт %s — помощник только для _test.go", rel, target))
 			}
 		}
@@ -226,7 +226,7 @@ func TestImportRules(t *testing.T) {
 	}
 }
 
-// Помощники тестов недоступны рабочему коду: redacttest и platform.NewFake.
+// Помощники тестов недоступны рабочему коду: redacttest, xraytest и platform.NewFake.
 func TestTestHelpersOnlyInTests(t *testing.T) {
 	const m = "example.org/xm"
 	cases := []struct {
@@ -234,6 +234,7 @@ func TestTestHelpersOnlyInTests(t *testing.T) {
 		bad      bool
 	}{
 		{"internal/core", "package core\n\nimport _ \"" + m + "/internal/redact/redacttest\"\n", true},
+		{"internal/core", "package core\n\nimport _ \"" + m + "/internal/platform/xraytest\"\n", true},
 		{"internal/core", "package core\n\nimport \"" + m + "/internal/platform\"\n\nvar _ = platform.New\n", false},
 		{"internal/core", "package core\n\nimport \"" + m + "/internal/platform\"\n\nvar _ = platform.NewFake\n", true},
 		{"internal/core", "package core\n\nimport p \"" + m + "/internal/platform\"\n\nvar _ = p.NewFake\n", true},

@@ -259,3 +259,37 @@ func TestFakeRecordsCallsAndOwners(t *testing.T) {
 		t.Errorf("часы: %v", now)
 	}
 }
+
+// RunUnderRoot запускает настоящий файл программы из корня подделки (стенд L3): тот же путь
+// запуска, что у Real, абсолютные пути в аргументах — под корнем.
+func TestFakeRunUnderRoot(t *testing.T) {
+	root := t.TempDir()
+	f := NewFake(root, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	echo, err := os.ReadFile("/usr/bin/echo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := root + CoreDir + "/1.2.3"
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dir+"/xray", echo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f.RunUnderRoot("xray")
+	c := Command{Program: "xray", Version: "1.2.3", Args: []string{"run", "-c", "/etc/xm/x.json", "a/b"}}
+	res, err := f.Exec(deadline(t, 5*time.Second), c)
+	if want := "run -c " + root + "/etc/xm/x.json a/b\n"; err != nil || res.ExitCode != 0 || string(res.Stdout) != want {
+		t.Errorf("запуск: %q, %v; нужно %q", res.Stdout, err, want)
+	}
+	calls := f.Calls()
+	if last := calls[len(calls)-1]; last.Op != "exec" || !slices.Equal(last.Args, c.Args) {
+		t.Errorf("записан вызов %+v, нужны аргументы как на VPS %q", last, c.Args)
+	}
+	if _, err := f.Exec(deadline(t, 5*time.Second), Command{Program: "xray", Version: "1.2.3", Args: []string{"/../../x"}}); !errors.Is(err, ErrPath) {
+		t.Errorf("путь из корня: %v, нужно ErrPath", err)
+	}
+	if _, err := f.Exec(deadline(t, 5*time.Second), Command{Program: "xray", Version: "1.2.4"}); !errors.Is(err, ErrNotFound) {
+		t.Errorf("версия без бинарника: %v, нужно ErrNotFound", err)
+	}
+}

@@ -44,8 +44,8 @@ govulncheck, staticcheck, shellcheck подключены 2026-11-15). Прав�
 |---|---|---|
 | `proxy.golang.org`, `sum.golang.org` | `go` локально и в CI; `go run …@версия` в CI | тулчейн версии из `go.mod`; модули govulncheck и staticcheck; проверка сумм |
 | `vuln.go.dev` | govulncheck | база уязвимостей Go |
-| `github.com` (релизы `gitleaks/gitleaks`, `koalaman/shellcheck`; `actions/checkout`) | шаги CI, раннер | бинарники сканеров; код действия |
-| `release-assets.githubusercontent.com` | шаги CI | файлы релизов сканеров: на него перенаправляет `github.com` ([ADR-0016](../adr/0016-ci-and-tooling.md)) |
+| `github.com` (релизы `gitleaks/gitleaks`, `koalaman/shellcheck`, `XTLS/Xray-core`; `actions/checkout`) | шаги CI, раннер; тесты L3 локально и в CI | бинарники сканеров; архивы Xray для стенда L3 ([ADR-0020](../adr/0020-l3-stand.md)); код действия |
+| `release-assets.githubusercontent.com` | шаги CI; тесты L3 | файлы релизов сканеров и Xray: на него перенаправляет `github.com` ([ADR-0016](../adr/0016-ci-and-tooling.md)) |
 
 ## 4. Локальные утилиты разработки
 
