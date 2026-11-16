@@ -13,9 +13,9 @@ import (
 
 // unit — подменяемое состояние службы для systemctl show.
 type unit struct {
-	loaded         bool
-	active, sub    string
-	restarts, port int
+	loaded      bool
+	active, sub string
+	restarts    int
 }
 
 func controlEnv(t *testing.T, u *unit, onSleep func()) (*platform.Fake, Service) {

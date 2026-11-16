@@ -67,7 +67,7 @@ type sys struct {
 	fs  *armedFS
 	app *App
 
-	active, loaded     bool
+	active             bool
 	failVerb           string // глагол systemctl, который отказывает
 	testExit           int    // код `xray run -test`
 	badVersion         string // версия, которую xray называет неверно
