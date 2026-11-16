@@ -32,7 +32,13 @@ port=443
 # 1. Установка
 "$xm" install --sni "$sni" --address "$addr" --port "$port" >"$out/install" 2>&1
 rc=$?
-[[ $rc == 0 ]] && ok "install: код 0" || bad "install: код $rc"
+if [[ $rc == 0 ]]; then
+	ok "install: код 0"
+else
+	bad "install: код $rc"
+	# Состояния нет — ключей нет: вывод отказа (он и так проходит редактор xm) печатается целиком.
+	[[ -e /etc/xm/state.json ]] || sed 's/^/     | /' "$out/install"
+fi
 
 # 2. Служба и процесс
 check "служба активна" systemctl is-active --quiet xray.service
