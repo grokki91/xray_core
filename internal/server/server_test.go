@@ -47,7 +47,7 @@ func newHost(t *testing.T) *host {
 	if err := os.MkdirAll(h.f.Path("/etc/systemd/system"), 0o755); err != nil { // есть на любой Ubuntu
 		t.Fatal(err)
 	}
-	h.write(t, "/etc/os-release", "NAME=\"Ubuntu\"\nVERSION_ID=\"24.04\"\nID=ubuntu\n")
+	h.write(t, "/usr/lib/os-release", "NAME=\"Ubuntu\"\nVERSION_ID=\"24.04\"\nID=ubuntu\n")
 	h.write(t, "/proc/meminfo", "MemTotal:        2008064 kB\nMemFree: 1 kB\n")
 	return h
 }
@@ -90,16 +90,16 @@ func TestPreflightFindsEachProblem(t *testing.T) {
 	}{
 		"не root": {func(_ *testing.T, h *host) { h.f.SetEffective(platform.Owner{UID: 1000, GID: 1000}) }, CodeNotRoot},
 		"Ubuntu 20.04": {func(t *testing.T, h *host) {
-			h.write(t, "/etc/os-release", "ID=ubuntu\nVERSION_ID=\"20.04\"\n")
+			h.write(t, "/usr/lib/os-release", "ID=ubuntu\nVERSION_ID=\"20.04\"\n")
 		}, CodeOS},
 		"Ubuntu 26.04 до решения Q8": {func(t *testing.T, h *host) {
-			h.write(t, "/etc/os-release", "ID=ubuntu\nVERSION_ID=\"26.04\"\n")
+			h.write(t, "/usr/lib/os-release", "ID=ubuntu\nVERSION_ID=\"26.04\"\n")
 		}, CodeOS},
 		"Debian": {func(t *testing.T, h *host) {
-			h.write(t, "/etc/os-release", "ID=debian\nVERSION_ID=\"24.04\"\n")
+			h.write(t, "/usr/lib/os-release", "ID=debian\nVERSION_ID=\"24.04\"\n")
 		}, CodeOS},
 		"нет os-release": {func(t *testing.T, h *host) {
-			if err := os.Remove(h.f.Path("/etc/os-release")); err != nil {
+			if err := os.Remove(h.f.Path("/usr/lib/os-release")); err != nil {
 				t.Fatal(err)
 			}
 		}, CodeOS},

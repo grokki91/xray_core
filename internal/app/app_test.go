@@ -88,7 +88,7 @@ func newFresh(t *testing.T) *sys { return build(t, false) }
 func build(t *testing.T, installed bool) *sys {
 	t.Helper()
 	root := t.TempDir()
-	for _, d := range []string{"/etc/systemd/system", "/usr/local/lib", "/usr/local/etc", "/var/lib", "/run", "/proc"} {
+	for _, d := range []string{"/etc/systemd/system", "/usr/lib", "/usr/local/lib", "/usr/local/etc", "/var/lib", "/run", "/proc"} {
 		if err := os.MkdirAll(root+d, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -98,8 +98,8 @@ func build(t *testing.T, installed bool) *sys {
 	s.fs = &armedFS{FS: f.FS()}
 	p := armedPlatform{f, s.fs}
 	host := map[string]string{
-		"/etc/os-release": "NAME=\"Ubuntu\"\nVERSION_ID=\"24.04\"\nID=ubuntu\n",
-		"/proc/meminfo":   "MemTotal:        2008064 kB\n",
+		"/usr/lib/os-release": "NAME=\"Ubuntu\"\nVERSION_ID=\"24.04\"\nID=ubuntu\n",
+		"/proc/meminfo":       "MemTotal:        2008064 kB\n",
 	}
 	for path, data := range host {
 		if err := f.FS().WriteFile(path, []byte(data), 0o644, platform.Root()); err != nil {
