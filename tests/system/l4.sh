@@ -38,7 +38,7 @@ port=443
 timeout 120 systemctl is-system-running --wait >/dev/null 2>&1
 echo "env  is-system-running: $(systemctl is-system-running 2>&1 | head -1)"
 echo "env  PID 1: $(ps -p 1 -o comm= 2>&1)"
-echo "env  ОС: $(. /usr/lib/os-release && echo "$ID $VERSION_ID"), память: $(awk '/^MemTotal:/ {print int($2/1024)}' /proc/meminfo) МиБ"
+echo "env  ОС: $(sed -n 's/^PRETTY_NAME=//p' /usr/lib/os-release), память: $(awk '/^MemTotal:/ {print int($2/1024)}' /proc/meminfo) МиБ"
 
 # 1. Установка
 "$xm" install --sni "$sni" --address "$addr" --port "$port" >"$out/install" 2>&1
