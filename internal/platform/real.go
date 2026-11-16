@@ -15,7 +15,9 @@ import (
 
 // programs — закрытый список программ: имя → абсолютный путь. Пополняется вместе с первым
 // потребителем (systemctl, xray — фаза 2).
-func programs() map[string]string { return map[string]string{} }
+func programs() map[string]string {
+	return map[string]string{useradd: "/usr/sbin/useradd"}
+}
 
 // childEnv — окружение процесса: ничего от родителя, секретов через окружение не передаём.
 var childEnv = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL=C"}
@@ -44,6 +46,8 @@ func newReal(progs map[string]string, transport http.RoundTripper) *Real {
 func (r *Real) FS() FS { return r.files }
 
 func (r *Real) Net() Net { return r.net }
+
+func (r *Real) Users() Users { return realUsers{r} }
 
 func (r *Real) Clock() Clock { return realClock{} }
 

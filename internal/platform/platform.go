@@ -10,13 +10,14 @@ import (
 	"time"
 )
 
-// Platform — порт целиком. Systemd и Users добавляются с первым потребителем (фазы 2 и 4).
+// Platform — порт целиком. Systemd добавляется с первым потребителем (фаза 2).
 type Platform interface {
 	// Exec запускает программу из закрытого списка без оболочки. Ненулевой код выхода — не
 	// ошибка: он в Result.ExitCode. Контекст обязан нести срок.
 	Exec(ctx context.Context, c Command) (Result, error)
 	FS() FS
 	Net() Net
+	Users() Users
 	Clock() Clock
 }
 
@@ -61,7 +62,15 @@ type FS interface {
 	Lock(ctx context.Context, path string) (unlock func(), err error)
 }
 
-// Owner — числовые идентификаторы владельца. Имена разрешает Users (фаза 4).
+// Users — системные пользователи. Единственный пользователь, которого создаёт xm, — служба.
+type Users interface {
+	// Ensure возвращает владельца пользователя name; нет такого — создаёт системного без
+	// оболочки и домашнего каталога (группа с тем же именем). Имя вне [a-z_][a-z0-9_-]{0,31} —
+	// ErrName. Контекст обязан нести срок.
+	Ensure(ctx context.Context, name string) (Owner, error)
+}
+
+// Owner — числовые идентификаторы владельца. Имена разрешает Users.
 type Owner struct {
 	UID, GID int
 }
@@ -99,5 +108,6 @@ var (
 	ErrDeadline = errors.New("у операции нет срока: контекст без дедлайна")
 	ErrPath     = errors.New("путь не абсолютный или не очищенный")
 	ErrSymlink  = errors.New("на пути символическая ссылка")
+	ErrName     = errors.New("недопустимое имя пользователя")
 	ErrNotFound = fs.ErrNotExist
 )
