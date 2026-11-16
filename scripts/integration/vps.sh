@@ -22,8 +22,10 @@ checks() {
   step files test -f "$src/go.mod"
 }
 
-box='' src='' step_name=start result='' new_pkgs=() got_sudo=0
+box='' src='' step_name=start result='' got_sudo=0
+new_pkgs=() before='' planned='' installing=0
 base=${TMPDIR:-/tmp}
+exec 3>&1 # строка ответа — в исходный stdout, даже если ловушка сработала внутри шага
 box_env=() # окружение песочницы; as_root передаёт его явно: sudo сбрасывает окружение
 as_root() { if ((EUID == 0)); then "$@"; else sudo env "${box_env[@]}" "$@"; fi; }
 step() {
@@ -31,10 +33,15 @@ step() {
   shift
   "$@" >>"$box/log" 2>&1 || exit 1
 }
-installed() { dpkg-query -W -f='${db:Status-Abbrev} ${Package}\n' 2>/dev/null | awk '$1 == "ii" { print $2 }' | sort; }
+pkgs_in() { # pkgs_in СОСТОЯНИЕ — пакеты в этом состоянии dpkg (ii, rc), по алфавиту
+  dpkg-query -W -f='${db:Status-Abbrev} ${Package}\n' 2>/dev/null | awk -v st="$1" '$1 == st { print $2 }' | sort
+}
+# Поставленное скриптом — появилось среди установленных и было в плане apt как новое.
+count_new() { mapfile -t new_pkgs < <(comm -13 <(printf '%s\n' "$before") <(pkgs_in ii) | comm -12 - <(printf '%s\n' "$planned")); }
 
 # Удаляются только пакеты, поставленные скриптом, и только если apt не тронет ничего сверх них.
 purge_new() {
+  ((installing)) && count_new
   ((${#new_pkgs[@]})) || return 0
   local plan want
   plan=$(as_root apt-get -s purge "${new_pkgs[@]}" 2>/dev/null | awk '$1 == "Purg" || $1 == "Remv" { print $2 }' | sort)
@@ -53,25 +60,29 @@ cleanup() {
   fi
   [[ -n $box && -e $box ]] && state=dirty
   ((got_sudo)) && sudo -k
-  printf 'XM-CHECK %s %s %s %s\n' "$CHECK_ID" "${COMMIT:0:7}" "${result:-FAIL $step_name}" "$state"
+  printf 'XM-CHECK %s %s %s %s\n' "$CHECK_ID" "${COMMIT:0:7}" "${result:-FAIL $step_name}" "$state" >&3
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM HUP
 
-# Пакеты, которые поставил скрипт, — разница списков установленных до и после. Установка
-# отказывает, если apt собирается удалить или обновить уже стоящий пакет.
+# Установка отказывает, если apt удалил бы или обновил стоящий пакет, или поставил бы пакет,
+# от которого у владельца остались файлы настроек (состояние rc): purge стёр бы их.
 install_missing() {
-  local t missing=() before rc
+  local t missing=() rc plan
   for t in "${TOOLS[@]}"; do command -v "${t%%:*}" >/dev/null || missing+=("${t#*:}"); done
   ((${#missing[@]})) || return 0
   command -v apt-get >/dev/null || return 1
   as_root apt-get update -qq || return 1
-  as_root apt-get -s install --no-install-recommends "${missing[@]}" | awk '
-    $1 == "Remv" || ($1 == "Inst" && $3 ~ /^\[/) { bad = 1 } END { exit bad }' || return 1
-  before=$(installed)
+  plan=$(as_root apt-get -s install --no-install-recommends "${missing[@]}") || return 1
+  awk '$1 == "Remv" || ($1 == "Inst" && $3 ~ /^\[/) { bad = 1 } END { exit bad }' <<<"$plan" || return 1
+  planned=$(awk '$1 == "Inst" { print $2 }' <<<"$plan" | sort)
+  [[ -n $planned && -z $(comm -12 <(printf '%s\n' "$planned") <(pkgs_in rc)) ]] || return 1
+  before=$(pkgs_in ii)
+  installing=1
   as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --no-remove "${missing[@]}"
   rc=$?
-  mapfile -t new_pkgs < <(comm -13 <(printf '%s\n' "$before") <(installed))
+  count_new
+  installing=0
   return "$rc"
 }
 

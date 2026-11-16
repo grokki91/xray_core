@@ -27,7 +27,8 @@ sha=$(git -C "$work/seed" rev-parse HEAD)
 
 # Поддельные apt-get, dpkg-query и sudo: список установленных — файл $FAKE_DB, «установка»
 # пакета кладёт одноимённую команду в $FAKE_BIN. FAKE_REMV — apt хочет удалить чужой пакет при
-# установке; FAKE_EXTRA — лишний пакет в плане удаления; FAKE_DEP — зависимость при установке.
+# установке; FAKE_UPG — apt хочет обновить стоящий пакет; FAKE_EXTRA — лишний пакет в плане
+# удаления; FAKE_DEP — зависимость при установке; FAKE_SLOW — секунды «установки».
 export FAKE_BIN=$work/bin FAKE_DB=$work/db PATH=$work/bin:$PATH
 mkdir -p "$FAKE_BIN"
 cat >"$FAKE_BIN/apt-get" <<'FAKE'
@@ -42,11 +43,13 @@ case $cmd in
 update) ;;
 install)
   if ((sim)); then
-    for p in "${pkgs[@]}"; do echo "Inst $p (1.0 fake)"; done
+    for p in "${pkgs[@]}" ${FAKE_DEP:-}; do echo "Inst $p (1.0 fake)"; done
     [[ -n ${FAKE_REMV:-} ]] && echo "Remv $FAKE_REMV [1.0]"
+    [[ -n ${FAKE_UPG:-} ]] && echo "Inst $FAKE_UPG [1.0] (2.0 fake)"
     exit 0
   fi
   for p in "${pkgs[@]}" ${FAKE_DEP:-}; do
+    sleep "${FAKE_SLOW:-0}"
     echo "$p" >>"$FAKE_DB"
     printf '#!/bin/sh\n' >"$FAKE_BIN/$p"
     chmod +x "$FAKE_BIN/$p"
@@ -67,7 +70,7 @@ FAKE
 cat >"$FAKE_BIN/dpkg-query" <<'FAKE'
 #!/bin/sh
 sed 's/^/ii  /' "$FAKE_DB"
-printf 'rc  removed-long-ago\n'
+printf 'rc  xmfake-old\n'
 FAKE
 cat >"$FAKE_BIN/sudo" <<'FAKE'
 #!/bin/sh
@@ -148,6 +151,22 @@ FAKE_EXTRA=owner-pkg run "лишний пакет в плане удаления
 db "owner-pkg xmfake "
 printf 'owner-pkg\n' >"$FAKE_DB"
 rm -f "$FAKE_BIN/xmfake"
+FAKE_UPG=owner-pkg run "apt обновил бы стоящий пакет → отказ до установки" \
+  "XM-CHECK t-1 ${sha:0:7} FAIL tools clean" "$sha" 'step use xmfake'
+db "owner-pkg "
+FAKE_DEP=xmfake-old run "пакет с оставшимися настройками (rc) → отказ до установки" \
+  "XM-CHECK t-1 ${sha:0:7} FAIL tools clean" "$sha" 'step use xmfake'
+db "owner-pkg "
+
+echo "каркас VPS: окружение песочницы"
+tools='(git)'
+GOPROXY=off GOFLAGS=-mod=mod GIT_CONFIG_GLOBAL=$work/owner.gitconfig run "конфигурация владельца не читается" \
+  "XM-CHECK t-1 ${sha:0:7} PASS clean" "$sha" \
+  'step home test "$HOME" = "$box/home"' \
+  'step tmp test "$TMPDIR" = "$box/tmp"' \
+  'step git test "$GIT_CONFIG_GLOBAL" = /dev/null' \
+  'step go test -z "${GOPROXY:-}${GOFLAGS:-}" -a "$GOENV" = off' \
+  'step root as_root sh -c "test \"\$HOME\" = \"$box/home\" -a \"\$GOENV\" = off"'
 
 # Фоновый процесс неинтерактивного bash игнорирует SIGINT, поэтому — TERM: ловушка та же.
 echo "каркас VPS: прерывание"
@@ -164,6 +183,21 @@ want="XM-CHECK t-1 ${sha:0:7} FAIL wait clean"
 if [[ $got != "$want" ]]; then no "прерывание: «$got», ожидалось «$want»"
 elif [[ -n $(find "$work/tmp" -mindepth 1 -print -quit) ]]; then no "прерывание: песочница не удалена"
 else ok "прерывание → строка и уборка"; fi
+rm -rf "$work/tmp"
+
+tools='(git xmfake)'
+fill "$work/s.sh" "$sha" 'step use xmfake'
+mkdir -p "$work/tmp"
+FAKE_SLOW=2 TMPDIR="$work/tmp" bash "$work/s.sh" >"$work/out" 2>/dev/null </dev/null &
+pid=$!
+sleep 1
+kill -TERM "$pid"
+wait "$pid"
+got=$(cat "$work/out")
+want="XM-CHECK t-1 ${sha:0:7} FAIL tools clean"
+if [[ $got != "$want" ]]; then no "прерывание установки: «$got», ожидалось «$want»"
+else ok "прерывание установки → строка, поставленное удалено"; fi
+db "owner-pkg "
 rm -rf "$work/tmp"
 
 if ((fails)); then

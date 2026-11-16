@@ -20,7 +20,7 @@ function Invoke-Checks {
 }
 
 $ErrorActionPreference = 'Continue' # 'Stop' в Windows PowerShell 5.1 обрывает git на первой строке stderr
-$log = $null; $src = $null; $stepName = 'start'; $result = $null; $installed = @(); $saved = @{}
+$log = $null; $src = $null; $stepName = 'start'; $result = $null; $installed = @(); $saved = @{}; $unknown = $false
 $tempRoot = [IO.Path]::GetTempPath()
 Set-Variable -Name box -Scope Script -Value $null
 
@@ -40,7 +40,20 @@ function Test-Admin {
 function Test-Package([string]$Id) { # установлен ли пакет — по winget, а не по PATH
     $global:LASTEXITCODE = 0
     winget list --id $Id --exact --accept-source-agreements --disable-interactivity *> $null
-    $LASTEXITCODE -eq 0
+    if ($LASTEXITCODE -eq 0) { return $true }
+    if ($LASTEXITCODE -eq -1978335212) { return $false } # 0x8A150014: пакет не найден
+    throw 'tools' # сбой winget — неизвестно, стоит ли пакет; ничего не ставить и не удалять
+}
+function Remove-Tree([string]$Path) { # без оболочки; ссылки и точки соединения — удалить саму ссылку
+    foreach ($i in ([IO.DirectoryInfo]$Path).GetFileSystemInfos()) {
+        if ($i.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            if ($i -is [IO.DirectoryInfo]) { [IO.Directory]::Delete($i.FullName, $false) } else { $i.Delete() }
+        } elseif ($i -is [IO.DirectoryInfo]) { Remove-Tree $i.FullName } else {
+            $i.Attributes = [IO.FileAttributes]::Normal
+            $i.Delete()
+        }
+    }
+    [IO.Directory]::Delete($Path, $false)
 }
 function Set-BoxEnv([hashtable]$Vars) { # прежние значения — в $saved, возвращаются в finally
     foreach ($k in $Vars.Keys) {
@@ -68,9 +81,10 @@ try {
         try {
             Step 'tools' { winget install --id $t.Winget --exact --silent --no-upgrade --accept-package-agreements --accept-source-agreements --disable-interactivity }
         } finally {
-            if (Test-Package $t.Winget) { $installed += $t.Winget }
+            $stepName = 'tools'
+            try { if (Test-Package $t.Winget) { $installed += $t.Winget } } catch { $unknown = $true }
         }
-        $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
+        Set-BoxEnv @{ Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User') }
         Step 'tools' { [bool](Get-Command $t.Cmd -ErrorAction SilentlyContinue) }
     }
 
@@ -93,7 +107,7 @@ try {
 } catch {
     # Причина — имя шага в $stepName; текст ошибки остаётся в журнале и удаляется с песочницей.
 } finally {
-    $state = 'clean'
+    $state = if ($unknown) { 'dirty' } else { 'clean' }
     foreach ($k in $saved.Keys) { [Environment]::SetEnvironmentVariable($k, $saved[$k], 'Process') }
     foreach ($id in $installed) {
         $global:LASTEXITCODE = 0
@@ -101,7 +115,7 @@ try {
         if ($LASTEXITCODE -ne 0) { $state = 'dirty' }
     }
     if ($box -and $box -like (Join-Path $tempRoot 'xm-check-*') -and (Test-Path -LiteralPath $box)) {
-        cmd.exe /d /c rmdir /s /q $box *> $null # rmdir не проходит по ссылкам и точкам соединения
+        try { Remove-Tree $box } catch { }
     }
     if ($box -and (Test-Path -LiteralPath $box)) { $state = 'dirty' }
     if (-not $result) { $result = "FAIL $stepName" }
