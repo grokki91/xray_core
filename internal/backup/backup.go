@@ -19,13 +19,15 @@ import (
 	"time"
 
 	"github.com/grokki91/xray_core/internal/platform"
+	"github.com/grokki91/xray_core/internal/store"
 )
 
 // Dir — каталог снимков; создаёт и закрывает правами security.EnsureBaseline.
 const Dir = "/var/lib/xm/backups"
 
 const (
-	statePath  = "/etc/xm/state.json"
+	statePath = store.StatePath
+	// Путь живёт в config.Path; менеджеры друг друга не импортируют (repository.md §3).
 	configPath = "/usr/local/etc/xray/config.json"
 
 	stateName    = "state.json"
