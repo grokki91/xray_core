@@ -5,17 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"os/user"
-	"regexp"
 	"strconv"
 )
 
-var nameRe = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
+// ServiceUser — единственный пользователь, которого создаёт xm (docs/security/policy.md §3).
+const ServiceUser = "xray"
 
 // useradd — программа создания системного пользователя; путь — в закрытом списке programs.
 const useradd = "useradd"
 
 func checkName(name string) error {
-	if !nameRe.MatchString(name) {
+	if name != ServiceUser {
 		return fmt.Errorf("%w: %q", ErrName, name)
 	}
 	return nil
@@ -43,6 +43,9 @@ type realUsers struct{ r *Real }
 func (u realUsers) Ensure(ctx context.Context, name string) (Owner, error) {
 	if err := checkName(name); err != nil {
 		return Owner{}, err
+	}
+	if _, ok := ctx.Deadline(); !ok {
+		return Owner{}, ErrDeadline
 	}
 	if o, ok, err := lookup(name); err != nil || ok {
 		return o, err

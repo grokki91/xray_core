@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/exec"
@@ -39,6 +40,12 @@ func New() *Real { return newReal(programs(), http.DefaultTransport) }
 func newReal(progs map[string]string, transport http.RoundTripper) *Real {
 	return &Real{programs: progs, net: realNet{transport}, files: files{
 		chown: func(f *os.File, _ string, o Owner) error { return f.Chown(o.UID, o.GID) },
+		ownerOf: func(_ string, fi fs.FileInfo) Owner {
+			if st, ok := fi.Sys().(*syscall.Stat_t); ok {
+				return Owner{UID: int(st.Uid), GID: int(st.Gid)}
+			}
+			return Owner{UID: -1, GID: -1}
+		},
 		trace: func(string, string) {},
 	}}
 }

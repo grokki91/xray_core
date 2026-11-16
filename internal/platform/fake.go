@@ -3,6 +3,7 @@ package platform
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"slices"
 	"strings"
@@ -41,7 +42,7 @@ func NewFake(root string, now time.Time) *Fake { return newFake(root, now, progr
 
 func newFake(root string, now time.Time, progs map[string]string) *Fake {
 	f := &Fake{programs: progs, now: now, owners: map[string]Owner{}, handlers: map[string]func(Command) (Result, error){}, underRoot: map[string]bool{}, routes: map[string]fakeRoute{}, users: map[string]Owner{}}
-	f.files = files{root: root, chown: f.recordOwner, trace: f.trace}
+	f.files = files{root: root, chown: f.recordOwner, ownerOf: f.ownerOf, trace: f.trace}
 	return f
 }
 
@@ -50,6 +51,13 @@ func (f *Fake) recordOwner(_ *os.File, path string, o Owner) error {
 	defer f.mu.Unlock()
 	f.owners[path] = o
 	return nil
+}
+
+// ownerOf — владелец пути у подделки: назначенный Mkdir или WriteFile, иначе root.
+func (f *Fake) ownerOf(path string, _ fs.FileInfo) Owner {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.owners[path]
 }
 
 func (f *Fake) trace(op, path string) {

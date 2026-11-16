@@ -62,11 +62,11 @@ type FS interface {
 	Lock(ctx context.Context, path string) (unlock func(), err error)
 }
 
-// Users — системные пользователи. Единственный пользователь, которого создаёт xm, — служба.
+// Users — системные пользователи; xm создаёт только ServiceUser.
 type Users interface {
 	// Ensure возвращает владельца пользователя name; нет такого — создаёт системного без
-	// оболочки и домашнего каталога (группа с тем же именем). Имя вне [a-z_][a-z0-9_-]{0,31} —
-	// ErrName. Контекст обязан нести срок.
+	// оболочки и домашнего каталога (группа с тем же именем). Допустимо только ServiceUser,
+	// иначе ErrName. Контекст обязан нести срок.
 	Ensure(ctx context.Context, name string) (Owner, error)
 }
 

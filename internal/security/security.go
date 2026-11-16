@@ -16,7 +16,7 @@ import (
 )
 
 // ServiceUser — системный пользователь, от которого работает Xray.
-const ServiceUser = "xray"
+const ServiceUser = platform.ServiceUser
 
 // RealityKeys — пара X25519 в формате Xray: base64 RawURL, 32 байта.
 type RealityKeys struct {

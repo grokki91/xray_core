@@ -5,6 +5,7 @@ import (
 	"crypto/ecdh"
 	"encoding/base64"
 	"io/fs"
+	"maps"
 	"os"
 	"regexp"
 	"testing"
@@ -119,7 +120,26 @@ func TestEnsureBaselineRejectsWrongPerms(t *testing.T) {
 	}
 }
 
-func TestUnitHardeningHasPolicySet(t *testing.T) {
+func TestEnsureBaselineRejectsWrongOwner(t *testing.T) {
+	f := fakeHost(t)
+	if err := f.FS().Mkdir("/etc/xm", 0o700, platform.Owner{UID: 1000, GID: 1000}); err != nil {
+		t.Fatal(err)
+	}
+	if err := New(f).EnsureBaseline(ctx(t)); err == nil {
+		t.Fatal("каталог с чужим владельцем принят")
+	}
+}
+
+func TestUnitHardeningMatchesPolicy(t *testing.T) {
+	// Таблица — docs/security/policy.md §3; ослабление директивы должно ронять тест.
+	want := map[string]string{
+		"NoNewPrivileges": "true", "ProtectSystem": "strict", "ProtectHome": "true", "PrivateTmp": "true",
+		"PrivateDevices": "true", "ProtectKernelTunables": "true", "ProtectKernelModules": "true",
+		"ProtectControlGroups": "true", "RestrictAddressFamilies": "AF_INET AF_INET6 AF_UNIX",
+		"RestrictNamespaces": "true", "LockPersonality": "true", "MemoryDenyWriteExecute": "true",
+		"SystemCallArchitectures": "native", "CapabilityBoundingSet": "CAP_NET_BIND_SERVICE",
+		"AmbientCapabilities": "CAP_NET_BIND_SERVICE",
+	}
 	got := map[string]string{}
 	for _, o := range New(nil).UnitHardening() {
 		if _, dup := got[o.Key]; dup {
@@ -127,14 +147,7 @@ func TestUnitHardeningHasPolicySet(t *testing.T) {
 		}
 		got[o.Key] = o.Value
 	}
-	for _, k := range []string{"NoNewPrivileges", "ProtectSystem", "ProtectHome", "PrivateTmp", "PrivateDevices",
-		"ProtectKernelTunables", "ProtectKernelModules", "ProtectControlGroups", "RestrictAddressFamilies",
-		"RestrictNamespaces", "LockPersonality", "MemoryDenyWriteExecute", "SystemCallArchitectures"} {
-		if got[k] == "" {
-			t.Errorf("нет директивы %s", k)
-		}
-	}
-	if got["CapabilityBoundingSet"] != "CAP_NET_BIND_SERVICE" || got["AmbientCapabilities"] != "CAP_NET_BIND_SERVICE" {
-		t.Errorf("возможности: %v", got)
+	if !maps.Equal(got, want) {
+		t.Errorf("директивы: %v, нужны %v", got, want)
 	}
 }
