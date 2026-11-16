@@ -94,7 +94,8 @@ type Manager struct {
 
 func New(p platform.Platform) *Manager { return &Manager{p: p} }
 
-// Create снимает state.json и config.json. Отсутствующий файл (ErrNotFound) — не ошибка:
+// Create снимает state.json и config.json. Единственность идентификатора обеспечивает блокировка
+// транзакции в app: проверка «снимка нет» и запись не атомарны. Идентификатор точен до секунды. Отсутствующий файл (ErrNotFound) — не ошибка:
 // снимок чистой установки пуст; любая другая ошибка чтения прерывает снимок.
 func (m *Manager) Create(ctx context.Context, reason string, meta Meta) (Snapshot, error) {
 	if err := ctx.Err(); err != nil {
@@ -123,10 +124,11 @@ func (m *Manager) Create(ctx context.Context, reason string, meta Meta) (Snapsho
 		var head struct {
 			SchemaVersion int `json:"schema_version"`
 		}
-		if err := json.Unmarshal(data, &head); err != nil {
-			return Snapshot{}, fmt.Errorf("%w: state.json не JSON", ErrInput)
+		// Повреждённое состояние снимается как есть: автоснимок и нужен, чтобы его вернуть.
+		// Версия схемы тогда 0.
+		if json.Unmarshal(data, &head) == nil {
+			schema = head.SchemaVersion
 		}
-		schema = head.SchemaVersion
 	}
 
 	now := m.p.Clock().Now().UTC().Truncate(time.Second)
@@ -154,7 +156,7 @@ func (m *Manager) Create(ctx context.Context, reason string, meta Meta) (Snapsho
 		name string
 		data []byte
 	}{{stateName, files[stateName]}, {configName, files[configName]}, {manifestName, mdata}} {
-		if e.data == nil {
+		if _, ok := files[e.name]; !ok && e.name != manifestName {
 			continue
 		}
 		h := &tar.Header{Name: e.name, Mode: 0o600, Size: int64(len(e.data)), ModTime: now, Typeflag: tar.TypeReg}

@@ -162,6 +162,7 @@ func TestCreateReadFailurePropagates(t *testing.T) {
 type tarEntry struct {
 	name string
 	data []byte
+	typ  byte // 0 — обычный файл
 }
 
 // craft пишет снимок вручную — так строятся испорченные архивы.
@@ -171,11 +172,20 @@ func craft(t *testing.T, f *platform.Fake, id string, entries ...tarEntry) {
 	zw := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(zw)
 	for _, e := range entries {
-		if err := tw.WriteHeader(&tar.Header{Name: e.name, Mode: 0o600, Size: int64(len(e.data)), Typeflag: tar.TypeReg}); err != nil {
+		typ, size, link := e.typ, int64(len(e.data)), ""
+		if typ == 0 {
+			typ = tar.TypeReg
+		}
+		if typ != tar.TypeReg {
+			size, link = 0, "target"
+		}
+		if err := tw.WriteHeader(&tar.Header{Name: e.name, Mode: 0o600, Size: size, Typeflag: typ, Linkname: link}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := tw.Write(e.data); err != nil {
-			t.Fatal(err)
+		if typ == tar.TypeReg {
+			if _, err := tw.Write(e.data); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	if err := tw.Close(); err != nil {
@@ -211,19 +221,25 @@ func TestReadRejectsBadArchives(t *testing.T) {
 		name    string
 		entries []tarEntry
 	}{
-		{"сумма не совпала", []tarEntry{{"state.json", []byte(`{"a":2}`)}, {"manifest.json", good}}},
-		{"файла из манифеста нет", []tarEntry{{"manifest.json", good}}},
-		{"файл не из манифеста", []tarEntry{{"state.json", st}, {"config.json", []byte("{}")}, {"manifest.json", good}}},
-		{"нет манифеста", []tarEntry{{"state.json", st}}},
-		{"выход пути", []tarEntry{{"../state.json", st}, {"manifest.json", good}}},
-		{"абсолютный путь", []tarEntry{{"/etc/xm/state.json", st}, {"manifest.json", good}}},
-		{"чужое имя", []tarEntry{{"evil", st}, {"manifest.json", good}}},
-		{"лишняя запись с выходом пути", []tarEntry{{"state.json", st}, {"../evil", st}, {"manifest.json", good}}},
-		{"лишняя запись с абсолютным путём", []tarEntry{{"state.json", st}, {"/etc/evil", st}, {"manifest.json", good}}},
-		{"лишняя запись с чужим именем", []tarEntry{{"state.json", st}, {"evil", st}, {"manifest.json", good}}},
-		{"повтор записи", []tarEntry{{"state.json", st}, {"state.json", st}, {"manifest.json", good}}},
-		{"запись больше предела", []tarEntry{{"state.json", big}, {"manifest.json", good}}},
-		{"манифест не JSON", []tarEntry{{"state.json", st}, {"manifest.json", []byte("не json")}}},
+		{"сумма не совпала", []tarEntry{{name: "state.json", data: []byte(`{"a":2}`)}, {name: "manifest.json", data: good}}},
+		{"файла из манифеста нет", []tarEntry{{name: "manifest.json", data: good}}},
+		{"файл не из манифеста", []tarEntry{{name: "state.json", data: st}, {name: "config.json", data: []byte("{}")}, {name: "manifest.json", data: good}}},
+		{"нет манифеста", []tarEntry{{name: "state.json", data: st}}},
+		{"выход пути", []tarEntry{{name: "../state.json", data: st}, {name: "manifest.json", data: good}}},
+		{"абсолютный путь", []tarEntry{{name: "/etc/xm/state.json", data: st}, {name: "manifest.json", data: good}}},
+		{"чужое имя", []tarEntry{{name: "evil", data: st}, {name: "manifest.json", data: good}}},
+		{"лишняя запись с выходом пути", []tarEntry{{name: "state.json", data: st}, {name: "../evil", data: st}, {name: "manifest.json", data: good}}},
+		{"лишняя запись с абсолютным путём", []tarEntry{{name: "state.json", data: st}, {name: "/etc/evil", data: st}, {name: "manifest.json", data: good}}},
+		{"лишняя запись с чужим именем", []tarEntry{{name: "state.json", data: st}, {name: "evil", data: st}, {name: "manifest.json", data: good}}},
+		{"state.json — симлинк", []tarEntry{{name: "state.json", typ: tar.TypeSymlink}, {name: "manifest.json", data: manifestOf(t, map[string][]byte{"state.json": nil})}}},
+		{"state.json — жёсткая ссылка", []tarEntry{{name: "state.json", typ: tar.TypeLink}, {name: "manifest.json", data: manifestOf(t, map[string][]byte{"state.json": nil})}}},
+		{"state.json — каталог", []tarEntry{{name: "state.json", typ: tar.TypeDir}, {name: "manifest.json", data: manifestOf(t, map[string][]byte{"state.json": nil})}}},
+		{"манифест с неизвестным полем", []tarEntry{{name: "state.json", data: st}, {name: "manifest.json", data: []byte(`{"version":1,"reason":"auto","xm":"0.1.0","xray":"","state_schema":0,"files":{"state.json":"` + sum(st) + `"},"extra":1}`)}}},
+		{"версия манифеста не 1", []tarEntry{{name: "manifest.json", data: []byte(`{"version":2,"reason":"auto","xm":"0.1.0","xray":"","state_schema":0,"files":{}}`)}}},
+		{"манифест перечисляет себя", []tarEntry{{name: "manifest.json", data: []byte(`{"version":1,"reason":"auto","xm":"0.1.0","xray":"","state_schema":0,"files":{"manifest.json":"00"}}`)}}},
+		{"повтор записи", []tarEntry{{name: "state.json", data: st}, {name: "state.json", data: st}, {name: "manifest.json", data: good}}},
+		{"запись больше предела", []tarEntry{{name: "state.json", data: big}, {name: "manifest.json", data: good}}},
+		{"манифест не JSON", []tarEntry{{name: "state.json", data: st}, {name: "manifest.json", data: []byte("не json")}}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -250,7 +266,7 @@ func TestReadRejectsBadArchives(t *testing.T) {
 	})
 	t.Run("исправный, собранный вручную", func(t *testing.T) {
 		f, m := env(t)
-		craft(t, f, goodID, tarEntry{"state.json", st}, tarEntry{"manifest.json", good})
+		craft(t, f, goodID, tarEntry{name: "state.json", data: st}, tarEntry{name: "manifest.json", data: good})
 		if _, err := m.Read(ctx(t), goodID); err != nil {
 			t.Fatal(err)
 		}
@@ -270,12 +286,54 @@ func TestReadRejectsBadID(t *testing.T) {
 func TestErrorsDoNotLeakContent(t *testing.T) {
 	f, m := env(t)
 	st, _ := canary()
-	craft(t, f, goodID, tarEntry{"state.json", st}, tarEntry{"manifest.json", manifestOf(t, map[string][]byte{"state.json": []byte("другое")})})
+	craft(t, f, goodID, tarEntry{name: "state.json", data: st}, tarEntry{name: "manifest.json", data: manifestOf(t, map[string][]byte{"state.json": []byte("другое")})})
 	_, err := m.Read(ctx(t), goodID)
 	if err == nil {
 		t.Fatal("ожидалась ошибка")
 	}
 	if strings.Contains(err.Error(), "canary") {
 		t.Fatalf("ошибка содержит данные снимка: %v", err)
+	}
+}
+
+func TestCreateCorruptStateIsSnapshotted(t *testing.T) {
+	f, m := env(t)
+	bad := []byte("не json " + strings.Repeat("Q", 8) + "-canary")
+	put(t, f, statePath, bad)
+	s, err := m.Create(ctx(t), "auto", Meta{XM: "0.1.0"})
+	if err != nil {
+		t.Fatalf("повреждённое состояние должно сниматься: %v", err)
+	}
+	a, err := m.Read(ctx(t), s.ID)
+	if err != nil || !bytes.Equal(a.State, bad) || a.Manifest.StateSchema != 0 || a.Manifest.Xray != "" {
+		t.Fatalf("%v %+v", err, a.Manifest)
+	}
+}
+
+func TestEmptyFileDiffersFromAbsent(t *testing.T) {
+	f, m := env(t)
+	put(t, f, statePath, []byte{})
+	s, err := m.Create(ctx(t), "auto", meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := m.Read(ctx(t), s.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.State == nil || len(a.State) != 0 || a.Config != nil {
+		t.Fatalf("state=%v config=%v", a.State, a.Config)
+	}
+}
+
+func TestCancelledContext(t *testing.T) {
+	_, m := env(t)
+	c, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := m.Create(c, "auto", meta); !errors.Is(err, context.Canceled) {
+		t.Errorf("Create: %v", err)
+	}
+	if _, err := m.Read(c, goodID); !errors.Is(err, context.Canceled) {
+		t.Errorf("Read: %v", err)
 	}
 }
