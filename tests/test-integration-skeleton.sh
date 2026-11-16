@@ -28,9 +28,12 @@ sha=$(git -C "$work/seed" rev-parse HEAD)
 # Поддельные apt-get, dpkg-query и sudo: список установленных — файл $FAKE_DB, «установка»
 # пакета кладёт одноимённую команду в $FAKE_BIN. FAKE_REMV — apt хочет удалить чужой пакет при
 # установке; FAKE_UPG — apt хочет обновить стоящий пакет; FAKE_EXTRA — лишний пакет в плане
-# удаления; FAKE_DEP — зависимость при установке; FAKE_SLOW — секунды «установки».
+# удаления; FAKE_DEP — зависимость при установке; FAKE_SLOW — секунды «установки»; FAKE_HALF —
+# установка падает, зависимость остаётся недоустановленной (iU); FAKE_SIMFAIL — пробный прогон
+# падает после части плана; FAKE_ARCH — имена в плане с архитектурой (foo:i386).
 export FAKE_BIN=$work/bin FAKE_DB=$work/db PATH=$work/bin:$PATH
 mkdir -p "$FAKE_BIN"
+: >"$FAKE_DB.half"
 cat >"$FAKE_BIN/apt-get" <<'FAKE'
 #!/usr/bin/env bash
 sim=0
@@ -43,10 +46,16 @@ case $cmd in
 update) ;;
 install)
   if ((sim)); then
-    for p in "${pkgs[@]}" ${FAKE_DEP:-}; do echo "Inst $p (1.0 fake)"; done
+    for p in "${pkgs[@]}" ${FAKE_DEP:-}; do echo "Inst $p${FAKE_ARCH:-} (1.0 fake)"; done
     [[ -n ${FAKE_REMV:-} ]] && echo "Remv $FAKE_REMV [1.0]"
     [[ -n ${FAKE_UPG:-} ]] && echo "Inst $FAKE_UPG [1.0] (2.0 fake)"
+    [[ -n ${FAKE_SIMFAIL:-} ]] && exit 100
     exit 0
+  fi
+  if [[ -n ${FAKE_HALF:-} ]]; then
+    echo "${pkgs[0]}" >>"$FAKE_DB"
+    echo "$FAKE_HALF" >>"$FAKE_DB.half"
+    exit 100
   fi
   for p in "${pkgs[@]}" ${FAKE_DEP:-}; do
     sleep "${FAKE_SLOW:-0}"
@@ -60,8 +69,10 @@ purge)
     exit 0
   fi
   for p in "${pkgs[@]}"; do
-    grep -vx "$p" "$FAKE_DB" >"$FAKE_DB.new"
-    mv "$FAKE_DB.new" "$FAKE_DB"
+    for f in "$FAKE_DB" "$FAKE_DB.half"; do
+      grep -vx "$p" "$f" >"$f.new"
+      mv "$f.new" "$f"
+    done
     rm -f "$FAKE_BIN/$p"
   done ;;
 *) exit 100 ;;
@@ -70,7 +81,8 @@ FAKE
 cat >"$FAKE_BIN/dpkg-query" <<'FAKE'
 #!/bin/sh
 sed 's/^/ii  /' "$FAKE_DB"
-printf 'rc  xmfake-old\n'
+sed 's/^/iU  /' "$FAKE_DB.half"
+printf 'rc  xmfake-old\nun  xmfake-never\n'
 FAKE
 cat >"$FAKE_BIN/sudo" <<'FAKE'
 #!/bin/sh
@@ -126,10 +138,10 @@ run "вывод шага не попадает в ответ" "XM-CHECK t-1 ${sh
 run "чужой коммит → FAIL fetch" "XM-CHECK t-1 0000000 FAIL fetch clean" \
   0000000000000000000000000000000000000000 'step files true'
 
-# db ОЖИДАЕМОЕ — список «установленных» пакетов после прогона
+# db ОЖИДАЕМОЕ — список «установленных» и недоустановленных пакетов после прогона
 db() {
   local got
-  got=$(tr '\n' ' ' <"$FAKE_DB")
+  got=$(cat "$FAKE_DB" "$FAKE_DB.half" | tr '\n' ' ')
   if [[ $got == "$1" ]]; then ok "  пакеты: «$1»"; else no "  пакеты: «$got», ожидалось «$1»"; fi
 }
 
@@ -155,6 +167,17 @@ FAKE_UPG=owner-pkg run "apt обновил бы стоящий пакет → о
   "XM-CHECK t-1 ${sha:0:7} FAIL tools clean" "$sha" 'step use xmfake'
 db "owner-pkg "
 FAKE_DEP=xmfake-old run "пакет с оставшимися настройками (rc) → отказ до установки" \
+  "XM-CHECK t-1 ${sha:0:7} FAIL tools clean" "$sha" 'step use xmfake'
+db "owner-pkg "
+FAKE_SIMFAIL=1 run "сбой пробного прогона → отказ до установки" \
+  "XM-CHECK t-1 ${sha:0:7} FAIL tools clean" "$sha" 'step use xmfake'
+db "owner-pkg "
+FAKE_ARCH=:i386 run "учёт не сошёлся с планом apt → dirty" \
+  "XM-CHECK t-1 ${sha:0:7} PASS dirty" "$sha" 'step use xmfake'
+db "owner-pkg xmfake "
+printf 'owner-pkg\n' >"$FAKE_DB"
+rm -f "$FAKE_BIN/xmfake"
+FAKE_DEP=xmfake-lib FAKE_HALF=xmfake-lib run "сбой apt посреди установки → недоустановленное тоже удалено" \
   "XM-CHECK t-1 ${sha:0:7} FAIL tools clean" "$sha" 'step use xmfake'
 db "owner-pkg "
 

@@ -53,6 +53,7 @@ function Remove-Tree([string]$Path) { # без оболочки; ссылки и
             $i.Delete()
         }
     }
+    ([IO.DirectoryInfo]$Path).Attributes = [IO.FileAttributes]::Directory # снять ReadOnly с каталога
     [IO.Directory]::Delete($Path, $false)
 }
 function Set-BoxEnv([hashtable]$Vars) { # прежние значения — в $saved, возвращаются в finally

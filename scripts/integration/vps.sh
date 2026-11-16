@@ -17,13 +17,13 @@ TOOLS=(git)                                            # команда или �
 
 # Шаги проверки: step <имя> <команда> <аргументы…>. Имя попадает в ответ при провале.
 # Доступно: $src — проверяемый коммит, $box — песочница, as_root — команда от root с окружением
-# песочницы. Ссылок из песочницы наружу шаги не создают.
+# песочницы. Ссылок из песочницы наружу шаги не создают, в дескриптор 3 (строка ответа) не пишут.
 checks() {
   step files test -f "$src/go.mod"
 }
 
 box='' src='' step_name=start result='' got_sudo=0
-new_pkgs=() before='' planned='' installing=0
+new_pkgs=() before='' planned='' installing=0 unaccounted=0
 base=${TMPDIR:-/tmp}
 exec 3>&1 # строка ответа — в исходный stdout, даже если ловушка сработала внутри шага
 box_env=() # окружение песочницы; as_root передаёт его явно: sudo сбрасывает окружение
@@ -33,11 +33,12 @@ step() {
   shift
   "$@" >>"$box/log" 2>&1 || exit 1
 }
-pkgs_in() { # pkgs_in СОСТОЯНИЕ — пакеты в этом состоянии dpkg (ii, rc), по алфавиту
-  dpkg-query -W -f='${db:Status-Abbrev} ${Package}\n' 2>/dev/null | awk -v st="$1" '$1 == st { print $2 }' | sort
+pkgs_in() { # pkgs_in ШАБЛОН — пакеты, чьё состояние dpkg (ii, rc, iU…) подходит под шаблон awk
+  dpkg-query -W -f='${db:Status-Abbrev} ${Package}\n' 2>/dev/null | awk -v re="$1" '$1 ~ re { print $2 }' | sort
 }
-# Поставленное скриптом — появилось среди установленных и было в плане apt как новое.
-count_new() { mapfile -t new_pkgs < <(comm -13 <(printf '%s\n' "$before") <(pkgs_in ii) | comm -12 - <(printf '%s\n' "$planned")); }
+# Поставленное скриптом — было в плане apt как новое, до установки отсутствовало, теперь есть в
+# любом состоянии, кроме «не установлен»: недоустановленное после сбоя apt тоже убирается.
+count_new() { mapfile -t new_pkgs < <(comm -13 <(printf '%s\n' "$before") <(pkgs_in '^.[^n]') | comm -12 - <(printf '%s\n' "$planned")); }
 
 # Удаляются только пакеты, поставленные скриптом, и только если apt не тронет ничего сверх них.
 purge_new() {
@@ -52,6 +53,7 @@ purge_new() {
 cleanup() {
   local state=clean
   purge_new || state=dirty
+  ((unaccounted)) && state=dirty
   if [[ -n $box && -d $box && $box == "$base"/xm-check.?????? ]]; then
     if ((NEED_ROOT)); then as_root rm -rf "$box"; else
       chmod -R u+w "$box" 2>/dev/null
@@ -76,13 +78,15 @@ install_missing() {
   plan=$(as_root apt-get -s install --no-install-recommends "${missing[@]}") || return 1
   awk '$1 == "Remv" || ($1 == "Inst" && $3 ~ /^\[/) { bad = 1 } END { exit bad }' <<<"$plan" || return 1
   planned=$(awk '$1 == "Inst" { print $2 }' <<<"$plan" | sort)
-  [[ -n $planned && -z $(comm -12 <(printf '%s\n' "$planned") <(pkgs_in rc)) ]] || return 1
-  before=$(pkgs_in ii)
+  [[ -n $planned && -z $(comm -12 <(printf '%s\n' "$planned") <(pkgs_in '^rc$')) ]] || return 1
+  before=$(pkgs_in '^.[^n]')
   installing=1
   as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --no-remove "${missing[@]}"
   rc=$?
   count_new
   installing=0
+  # Установка прошла, а учёт не сошёлся с планом (например, имена с архитектурой) — уборка неполна.
+  ((rc == 0)) && [[ $(printf '%s\n' "${new_pkgs[@]}") != "$planned" ]] && unaccounted=1
   return "$rc"
 }
 
