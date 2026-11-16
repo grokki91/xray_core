@@ -33,6 +33,9 @@ addr=192.0.2.10 # документационный адрес RFC 5737: пров
 port=443
 
 # 0. Среда: факты о машине для разбора провалов (секретов здесь нет)
+# На свежем раннере systemd — PID 1, но загрузка ещё идёт (starting): xm в этом состоянии
+# отказывает по предусловию, поэтому тест сначала дожидается конца загрузки (не дольше 2 минут).
+timeout 120 systemctl is-system-running --wait >/dev/null 2>&1
 echo "env  is-system-running: $(systemctl is-system-running 2>&1 | head -1)"
 echo "env  PID 1: $(ps -p 1 -o comm= 2>&1)"
 echo "env  ОС: $(. /usr/lib/os-release && echo "$ID $VERSION_ID"), память: $(awk '/^MemTotal:/ {print int($2/1024)}' /proc/meminfo) МиБ"
