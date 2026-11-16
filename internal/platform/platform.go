@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// Platform — порт целиком. Systemd добавляется с первым потребителем (фаза 2).
+// Platform — порт целиком.
 type Platform interface {
 	// Exec запускает программу из закрытого списка без оболочки. Ненулевой код выхода — не
 	// ошибка: он в Result.ExitCode. Контекст обязан нести срок.
@@ -18,6 +18,7 @@ type Platform interface {
 	FS() FS
 	Net() Net
 	Users() Users
+	Systemd() Systemd
 	Journal() Journal
 	Clock() Clock
 }
@@ -69,6 +70,8 @@ type Users interface {
 	// оболочки и домашнего каталога (группа с тем же именем). Допустимо только ServiceUser,
 	// иначе ErrName. Контекст обязан нести срок.
 	Ensure(ctx context.Context, name string) (Owner, error)
+	// Effective — владелец процесса xm (эффективные uid и gid): по нему server проверяет root.
+	Effective() Owner
 }
 
 // Owner — числовые идентификаторы владельца. Имена разрешает Users.

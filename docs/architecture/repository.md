@@ -11,12 +11,13 @@ cmd/xm/                   точка входа; тест графа импор�
 internal/
   cli/                    команды `version` и `help`
   contract/               конверт, схемы `version` и `error`; эталоны в testdata/
-  platform/               порт: `Exec` (`xray` по версии), `FS`, `Net` (загрузка по HTTPS), `Users`, `Journal` (journald), `Clock`; настоящая и поддельная реализации; xraytest/ — стенд L3
+  platform/               порт: `Exec` (`xray` по версии), `FS`, `Net` (загрузка по HTTPS), `Users`, `Systemd` (`xray.service`), `Journal` (journald), `Clock`; настоящая и поддельная реализации; xraytest/ — стенд L3
   core/                   бинарник Xray: распаковка, ELF и версия, каталоги версий, ссылка `current`, `run -test`
   update/                 источник релизов Xray: последний стабильный, загрузка со сверкой сумм, кэш
   store/                  состояние `state.json`: схема, миграции, запись, блокировка
   config/                 конфигурация Xray: отрисовка состояния, запись, дрейф; preset/ — пресеты (`reality-xhttp`)
   security/               ключи REALITY, идентификаторы, каталоги по манифесту, изоляция юнита
+  server/                 предусловия узла, юнит `xray.service`, управление службой
   logging/                журнал `xm` (journald, через редактор), раздел `log` Xray
   redact/                 редактор; redacttest/ — канареечный помощник тестов
 README.md                 коротко: что это, требования, установка, команды

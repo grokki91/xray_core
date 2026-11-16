@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/user"
 	"strconv"
 )
@@ -40,6 +41,8 @@ func lookup(name string) (Owner, bool, error) {
 
 type realUsers struct{ r *Real }
 
+func (realUsers) Effective() Owner { return Owner{UID: os.Geteuid(), GID: os.Getegid()} }
+
 func (u realUsers) Ensure(ctx context.Context, name string) (Owner, error) {
 	if err := checkName(name); err != nil {
 		return Owner{}, err
@@ -68,8 +71,22 @@ func (u realUsers) Ensure(ctx context.Context, name string) (Owner, error) {
 	return o, nil
 }
 
-// fakeUsers — поддельные пользователи: идентификаторы выдаются по порядку с 990.
+// fakeUsers — поддельные пользователи: идентификаторы выдаются по порядку с 990; процесс xm —
+// root, пока тест не назначил другого (SetEffective).
 type fakeUsers struct{ f *Fake }
+
+func (u fakeUsers) Effective() Owner {
+	u.f.mu.Lock()
+	defer u.f.mu.Unlock()
+	return u.f.effective
+}
+
+// SetEffective назначает владельца процесса xm, которого вернёт Users().Effective().
+func (f *Fake) SetEffective(o Owner) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.effective = o
+}
 
 func (u fakeUsers) Ensure(ctx context.Context, name string) (Owner, error) {
 	if err := checkName(name); err != nil {
