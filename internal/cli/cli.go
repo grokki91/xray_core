@@ -46,6 +46,9 @@ type Env struct {
 	Version        string
 	Clock          Clock
 	App            App
+	// Redact убирает данные установки из текстов ошибок: они приходят из системы. Нужен везде,
+	// где печатается ошибка сценария — в stderr и в документе error.
+	Redact func(string) string
 }
 
 type command struct {

@@ -109,8 +109,10 @@ func checkInstall(o InstallOptions) (sni string, addr store.Addresses, err error
 	}
 	if ip, perr := netip.ParseAddr(o.Address); perr == nil {
 		switch {
-		case ip.Zone() != "":
-			return "", addr, bad("--address: адрес с зоной не поддерживается")
+		case ip.Zone() != "" || ip.Is4In6():
+			return "", addr, bad("--address: адрес с зоной и IPv4-в-IPv6 не поддерживаются")
+		case ip.IsLoopback() || ip.IsUnspecified() || ip.IsMulticast() || ip.IsLinkLocalUnicast():
+			return "", addr, bad("--address: нужен адрес, по которому клиенты достанут сервер, а не служебный")
 		case ip.Is4():
 			addr.IPv4 = ip.String()
 		default:
@@ -139,6 +141,11 @@ func (a *App) Install(ctx context.Context, o InstallOptions) (InstallResult, err
 	if _, issues := a.s.Server.Preflight(ctx); len(issues) > 0 {
 		return InstallResult{}, &PreflightError{issues}
 	}
+	// Незавершённая транзакция откатывается до проверки: состояние, оставшееся от оборванной
+	// установки, не должно выглядеть как готовая. Решающая проверка — в Apply, под блокировкой.
+	if _, err := a.Recover(ctx); err != nil {
+		return InstallResult{}, err
+	}
 	if _, ok, err := a.installed(); err != nil {
 		return InstallResult{}, err
 	} else if ok {
@@ -157,9 +164,9 @@ func (a *App) Install(ctx context.Context, o InstallOptions) (InstallResult, err
 	if err != nil {
 		return InstallResult{}, err
 	}
-	// Версия, выложенная прошлой неудачной установкой, уже прошла проверки Stage; Activate
-	// проверит её ответ ещё раз.
-	if err := a.s.Core.Stage(ctx, version, arch.Data); err != nil && !errors.Is(err, core.ErrStaged) {
+	// Версия, выложенная прошлой установкой из того же архива, повторно принимается; другое
+	// содержимое под тем же номером — ErrStaged.
+	if err := a.s.Core.Stage(ctx, version, arch.Data); err != nil {
 		return InstallResult{}, err
 	}
 
@@ -189,7 +196,7 @@ func (a *App) Install(ctx context.Context, o InstallOptions) (InstallResult, err
 	for _, o := range a.s.Security.UnitHardening() {
 		spec.Hardening = append(spec.Hardening, server.UnitOption{Key: o.Key, Value: o.Value})
 	}
-	if err := a.Apply(ctx, Change{Reason: "install", State: st, Unit: &spec, Core: version}); err != nil {
+	if err := a.Apply(ctx, Change{Reason: "install", State: st, Unit: &spec, Core: version, Create: true}); err != nil {
 		return InstallResult{}, err
 	}
 	return InstallResult{Xray: string(version), Address: o.Address, Port: o.Port}, nil

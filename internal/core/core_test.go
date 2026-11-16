@@ -232,10 +232,12 @@ func TestStageKeepsStaged(t *testing.T) {
 	*reply = func(platform.Command) (platform.Result, error) {
 		return platform.Result{Stdout: []byte("Xray 26.9.9\n")}, nil
 	}
-	for _, b := range [][]byte{other, bin} {
-		if err := m.Stage(ctx(t), v1, release(t, b)); !errors.Is(err, ErrStaged) {
-			t.Errorf("повторный Stage: %v, нужен ErrStaged", err)
-		}
+	if err := m.Stage(ctx(t), v1, release(t, other)); !errors.Is(err, ErrStaged) {
+		t.Errorf("Stage с другим содержимым: %v, нужен ErrStaged", err)
+	}
+	// Тот же проверенный архив — повтор установки после отката: не ошибка, запись не нужна.
+	if err := m.Stage(ctx(t), v1, release(t, bin)); err != nil {
+		t.Errorf("повторный Stage того же архива: %v", err)
 	}
 	if got, _ := os.ReadFile(f.Path(platform.CoreDir + "/" + string(v1) + "/xray")); !bytes.Equal(got, bin) {
 		t.Error("бинарник активной версии подменён")

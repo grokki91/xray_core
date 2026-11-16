@@ -33,7 +33,8 @@ func (f *fakeApp) Status(context.Context) (contract.Status, error) { return f.st
 
 func runWith(a App, args ...string) (code int, stdout, stderr string) {
 	var out, errOut bytes.Buffer
-	code = Run(args, Env{Ctx: context.Background(), Stdout: &out, Stderr: &errOut, Version: "0.1.0", Clock: fixedClock{}, App: a})
+	code = Run(args, Env{Ctx: context.Background(), Stdout: &out, Stderr: &errOut, Version: "0.1.0", Clock: fixedClock{}, App: a,
+		Redact: func(s string) string { return strings.ReplaceAll(s, "CANARY", "[секрет]") }})
 	return code, out.String(), errOut.String()
 }
 
@@ -135,5 +136,17 @@ func TestStatusHuman(t *testing.T) {
 	none := contract.Status{Versions: contract.Versions{XM: "0.1.0"}}
 	if code, stdout, _ := runWith(&fakeApp{status: none}, "status"); code != exitOK || !strings.Contains(stdout, "не установлен") {
 		t.Fatalf("не установлено: код %d, stdout %q", code, stdout)
+	}
+}
+
+// Текст ошибки идёт через редактор и в stderr, и в документе error в stdout.
+func TestFailureMessageGoesThroughRedactor(t *testing.T) {
+	f := &fakeApp{err: errors.New("не прочитать CANARY")}
+	_, _, stderr := runWith(f, "start")
+	_, stdout, _ := runWith(f, "status", "--json")
+	for name, out := range map[string]string{"stderr": stderr, "stdout": stdout} {
+		if strings.Contains(out, "CANARY") || !strings.Contains(out, "[секрет]") {
+			t.Errorf("%s: %q", name, out)
+		}
 	}
 }

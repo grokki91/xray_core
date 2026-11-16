@@ -11,7 +11,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/grokki91/xray_core/internal/core"
 	"github.com/grokki91/xray_core/internal/platform"
+	"github.com/grokki91/xray_core/internal/redact"
 	"github.com/grokki91/xray_core/internal/server"
 	"github.com/grokki91/xray_core/internal/store"
 	"github.com/grokki91/xray_core/internal/update"
@@ -23,6 +25,7 @@ type fakeReleases struct {
 	archive              []byte
 	latestErr            error
 	latestCalls, fetches int
+	onFetch              func() // что произойдёт между проверкой «состояния нет» и транзакцией
 }
 
 func (r *fakeReleases) Latest(context.Context) (update.Release, error) {
@@ -32,6 +35,9 @@ func (r *fakeReleases) Latest(context.Context) (update.Release, error) {
 
 func (r *fakeReleases) Fetch(context.Context, update.Release, update.Arch) (update.Archive, error) {
 	r.fetches++
+	if r.onFetch != nil {
+		r.onFetch()
+	}
 	return update.Archive{Data: r.archive}, nil
 }
 
@@ -135,17 +141,25 @@ func TestInstallAddressKinds(t *testing.T) {
 // Неверный ввод отвергается до первого обращения к сети и системе.
 func TestInstallRejectsBadInputBeforeAnyChange(t *testing.T) {
 	cases := map[string]InstallOptions{
-		"нет --sni":          {Address: "203.0.113.10", Port: 443},
-		"нет --address":      {SNI: "example.com", Port: 443},
-		"порт 0":             {SNI: "example.com", Address: "203.0.113.10", Port: 0},
-		"порт больше 65535":  {SNI: "example.com", Address: "203.0.113.10", Port: 70000},
-		"sni с пробелом":     {SNI: "exa mple.com", Address: "203.0.113.10", Port: 443},
-		"sni с портом":       {SNI: "example.com:443", Address: "203.0.113.10", Port: 443},
-		"sni — адрес":        {SNI: "203.0.113.10", Address: "203.0.113.11", Port: 443},
-		"sni с дефисом":      {SNI: "-example.com", Address: "203.0.113.10", Port: 443},
-		"address со слэшем":  {SNI: "example.com", Address: "203.0.113.10/24", Port: 443},
-		"address с пробелом": {SNI: "example.com", Address: "bad host", Port: 443},
-		"address с URL":      {SNI: "example.com", Address: "https://vpn.example.org", Port: 443},
+		"нет --sni":            {Address: "203.0.113.10", Port: 443},
+		"нет --address":        {SNI: "example.com", Port: 443},
+		"порт 0":               {SNI: "example.com", Address: "203.0.113.10", Port: 0},
+		"порт больше 65535":    {SNI: "example.com", Address: "203.0.113.10", Port: 70000},
+		"sni с пробелом":       {SNI: "exa mple.com", Address: "203.0.113.10", Port: 443},
+		"sni с портом":         {SNI: "example.com:443", Address: "203.0.113.10", Port: 443},
+		"sni — адрес":          {SNI: "203.0.113.10", Address: "203.0.113.11", Port: 443},
+		"sni с дефисом":        {SNI: "-example.com", Address: "203.0.113.10", Port: 443},
+		"address со слэшем":    {SNI: "example.com", Address: "203.0.113.10/24", Port: 443},
+		"address с пробелом":   {SNI: "example.com", Address: "bad host", Port: 443},
+		"address с URL":        {SNI: "example.com", Address: "https://vpn.example.org", Port: 443},
+		"address — петля":      {SNI: "example.com", Address: "127.0.0.1", Port: 443},
+		"address — любой":      {SNI: "example.com", Address: "0.0.0.0", Port: 443},
+		"address — ::1":        {SNI: "example.com", Address: "::1", Port: 443},
+		"address — ::":         {SNI: "example.com", Address: "::", Port: 443},
+		"address — multicast":  {SNI: "example.com", Address: "ff02::1", Port: 443},
+		"address — link-local": {SNI: "example.com", Address: "169.254.1.1", Port: 443},
+		"address — fe80":       {SNI: "example.com", Address: "fe80::1", Port: 443},
+		"address — 4in6":       {SNI: "example.com", Address: "::ffff:203.0.113.10", Port: 443},
 	}
 	for name, o := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -402,4 +416,105 @@ func listens(t *testing.T, s *sys, port int) bool {
 		t.Fatal(err)
 	}
 	return on
+}
+
+// regAdapter — то же, что связывает cmd/xm: app называет вид значения строкой.
+type regAdapter struct{ r *redact.Redactor }
+
+func (g regAdapter) Register(kind, value string) { g.r.Register(redact.Kind(kind), value) }
+
+// Секреты и данные установки регистрируются в редакторе: шаблон не ловит shortId, а ключ ловит
+// только по длине. Значение должно быть заменено, даже если его вставили в чужой текст.
+func TestInstallRegistersValuesWithRedactor(t *testing.T) {
+	s := fresh(t)
+	if _, err := s.app.Install(ctx(t), okOpts); err != nil {
+		t.Fatal(err)
+	}
+	st, err := s.app.s.Store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := st.Inbounds[0].Reality
+	for name, v := range map[string]string{"закрытый ключ": r.PrivateKey, "открытый ключ": r.PublicKey,
+		"shortId": r.ShortIDs[0], "адрес": st.Server.Addresses.IPv4, "sni": r.ServerNames[0]} {
+		if got := s.reg.Text("сбой: " + v); strings.Contains(got, v) {
+			t.Errorf("%s не зарегистрирован: %q", name, got)
+		}
+	}
+}
+
+// Канарейка: при провале установки значения состояния не попадают в ошибку и журнал xm.
+func TestInstallFailureLeaksNoSecret(t *testing.T) {
+	s := fresh(t)
+	s.testExit = 23 // xray run -test отвергает конфигурацию: ключи уже созданы
+	_, err := s.app.Install(ctx(t), okOpts)
+	if !errors.Is(err, ErrRolledBack) {
+		t.Fatalf("%v", err)
+	}
+	for _, j := range s.f.Journaled() {
+		if strings.Contains(j.Message, "203.0.113.10") {
+			t.Fatalf("адрес сервера в журнале xm: %q", j.Message)
+		}
+	}
+	if strings.Contains(err.Error(), "203.0.113.10") {
+		t.Fatalf("адрес сервера в ошибке: %v", err)
+	}
+}
+
+// Состояние появилось между проверкой и транзакцией: Apply под блокировкой отказывает и ничего
+// не трогает — чужая установка не перезаписывается.
+func TestInstallRaceDoesNotOverwriteExistingState(t *testing.T) {
+	s := fresh(t)
+	s.rel.onFetch = func() {
+		if err := s.app.s.Security.EnsureBaseline(ctx(t)); err != nil {
+			t.Error(err)
+		}
+		other := stateOf()
+		other.Server.Port = 8443
+		if err := s.app.s.Store.Save(other); err != nil {
+			t.Error(err)
+		}
+	}
+	if _, err := s.app.Install(ctx(t), okOpts); !errors.Is(err, ErrInstalled) {
+		t.Fatalf("%v", err)
+	}
+	st, err := s.app.s.Store.Load()
+	if err != nil || st.Server.Port != 8443 {
+		t.Fatalf("состояние перезаписано: %+v %v", st.Server, err)
+	}
+	if got := s.snap(t); got.unit != nil || got.config != nil || got.tx {
+		t.Fatalf("%+v", got)
+	}
+}
+
+// Версия, выложенная с другим содержимым, не принимается: целостность бинарника важнее повтора.
+func TestInstallRejectsStagedBinaryWithOtherContent(t *testing.T) {
+	s := fresh(t)
+	dir := platform.CoreDir + "/" + v2
+	if err := os.MkdirAll(s.f.Path(dir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.f.FS().WriteFile(dir+"/xray", []byte("непроверенный бинарник"), 0o755, platform.Root()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.app.Install(ctx(t), okOpts); !errors.Is(err, core.ErrStaged) {
+		t.Fatalf("%v", err)
+	}
+	if got := s.snap(t); got.state != nil || got.unit != nil || got.current != "" {
+		t.Fatalf("%+v", got)
+	}
+}
+
+// Незавершённая транзакция откатывается до проверки «уже установлено».
+func TestInstallRecoversPendingTransactionFirst(t *testing.T) {
+	s := fresh(t)
+	if err := s.app.s.Security.EnsureBaseline(ctx(t)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.f.FS().WriteFile(store.TxPath, []byte("не журнал"), 0o600, platform.Root()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.app.Install(ctx(t), okOpts); !errors.Is(err, ErrRollbackFailed) || s.rel.latestCalls != 0 {
+		t.Fatalf("%v", err)
+	}
 }

@@ -78,7 +78,8 @@ func (m *Manager) Current(ctx context.Context) (Version, error) {
 
 // Stage распаковывает только xray в каталог версии v и проверяет его: ELF под amd64,
 // `xray version` называет v. Предусловие: суммы архива сверены (update.Fetch) — Stage
-// запускает бинарник. Активная версия не меняется; выложенная версия — ErrStaged.
+// запускает бинарник. Активная версия не меняется; выложенная версия с другим содержимым —
+// ErrStaged, с тем же — успех без записи.
 func (m *Manager) Stage(ctx context.Context, v Version, archive []byte) error {
 	if _, err := ParseVersion(string(v)); err != nil {
 		return err
@@ -98,9 +99,15 @@ func (m *Manager) Stage(ctx context.Context, v Version, archive []byte) error {
 	}
 	file := dir + "/" + binary
 	// Выложенная версия не перезаписывается: на неё может указывать current, а замена
-	// бинарника — только транзакцией. Ошибка чтения, кроме «нет файла», — тоже отказ.
-	if _, err := m.p.FS().ReadFile(file); !errors.Is(err, platform.ErrNotFound) {
+	// бинарника — только транзакцией. Тот же проверенный архив повторно — не ошибка (повтор
+	// установки после отката); другое содержимое — ErrStaged; ошибка чтения — отказ.
+	switch have, err := m.p.FS().ReadFile(file); {
+	case err == nil && bytes.Equal(have, bin):
+		return nil
+	case err == nil:
 		return fmt.Errorf("версия %s: %w", v, ErrStaged)
+	case !errors.Is(err, platform.ErrNotFound):
+		return fmt.Errorf("версия %s: %w", v, err)
 	}
 	if err := m.p.FS().WriteFile(file, bin, 0o755, platform.Root()); err != nil {
 		return fmt.Errorf("бинарник %s: %w", v, err)

@@ -68,6 +68,7 @@ type sys struct {
 	fs  *armedFS
 	app *App
 	rel *fakeReleases
+	reg *redact.Redactor
 
 	active             bool
 	failVerb           string // глагол systemctl, который отказывает
@@ -170,11 +171,12 @@ func build(t *testing.T, installed bool) *sys {
 		return platform.Result{}, nil
 	})
 	reg := redact.New()
+	s.reg = reg
 	cfgPath := config.Path
 	s.app = New(Services{
 		Store: store.New(p.FS()), Backup: backup.New(p), Config: config.New(p), Core: core.New(p),
 		Server: server.New(p, cfgPath), Logging: logging.New(p, reg, slog.LevelInfo),
-		Security: security.New(p), Releases: s.rel,
+		Security: security.New(p), Releases: s.rel, Redactor: regAdapter{reg},
 		XM: "0.1.0", Now: f.Clock().Now, ControlTimeout: 150 * time.Millisecond,
 	})
 	return s

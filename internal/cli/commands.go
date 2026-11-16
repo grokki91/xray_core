@@ -96,7 +96,7 @@ func fail(e Env, asJSON bool, err error) int {
 	default:
 		code, hint = "app.failed", "причина указана выше"
 	}
-	msg := quote(err.Error())
+	msg := e.Redact(quote(err.Error()))
 	fmt.Fprintf(e.Stderr, "xm: %s\n%s\n", msg, hint)
 	if asJSON {
 		writeJSON(e, contract.NewError(e.Version, e.Clock.Now(), contract.Error{Code: code, Message: msg, Hint: hint}))

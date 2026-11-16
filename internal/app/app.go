@@ -45,6 +45,8 @@ type Services struct {
 	Security *security.Manager
 	// Releases — источник релизов Xray для установки.
 	Releases Releases
+	// Redactor — реестр редактора: значения состояния регистрируются сразу, как app их узнал.
+	Redactor Redactor
 	XM       string           // версия xm — в манифест снимка
 	Now      func() time.Time // часы платформы
 	// ControlTimeout — срок контроля после перезапуска; ноль — 30 секунд.
@@ -68,6 +70,9 @@ type Change struct {
 	State  store.State      // новое состояние; поле Applied заполняет транзакция
 	Unit   *server.UnitSpec // nil — юнит не меняется
 	Core   core.Version     // пусто — ядро не меняется; иначе версия уже выложена (core.Stage)
+	// Create — установка: состояния быть не должно, иначе ErrInstalled. Проверка идёт под
+	// блокировкой: две одновременные установки не перезапишут друг друга.
+	Create bool
 }
 
 // Apply выполняет изменение транзакцией: блокировка → базовая защита → (откат незавершённой) →
@@ -95,6 +100,10 @@ func (a *App) Apply(ctx context.Context, ch Change) error {
 	if err != nil {
 		return err
 	}
+	if ch.Create && hadState {
+		return ErrInstalled
+	}
+	a.register(ch.State)
 	coreBefore, err := a.s.Core.Current(ctx)
 	if err != nil {
 		return err
@@ -205,7 +214,31 @@ func (a *App) loadPrev() (st store.State, had bool, err error) {
 	if err != nil {
 		return store.State{}, false, fmt.Errorf("состояние: %w", err)
 	}
+	a.register(st)
 	return st, true, nil
+}
+
+// Redactor — реестр точных значений редактора (kind — вид значения: key, short-id, server-ip,
+// domain). Нужен, чтобы шаблоны не были единственной защитой: shortId шаблон не ловит.
+type Redactor interface{ Register(kind, value string) }
+
+// register вносит в редактор секреты и данные установки из состояния.
+func (a *App) register(st store.State) {
+	r := a.s.Redactor
+	for _, in := range st.Inbounds {
+		r.Register("key", in.Reality.PrivateKey)
+		r.Register("key", in.Reality.PublicKey)
+		for _, id := range in.Reality.ShortIDs {
+			r.Register("short-id", id)
+		}
+		for _, n := range in.Reality.ServerNames {
+			r.Register("domain", n)
+		}
+	}
+	ad := st.Server.Addresses
+	r.Register("server-ip", ad.IPv4)
+	r.Register("server-ip", ad.IPv6)
+	r.Register("domain", ad.Domain)
 }
 
 // Recover откатывает незавершённую транзакцию, если следующий запуск xm её нашёл

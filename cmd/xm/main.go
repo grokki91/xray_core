@@ -3,7 +3,6 @@ package main
 
 import (
 	"context"
-	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -26,19 +25,10 @@ import (
 // единственный способ принять значение от компоновщика; после старта она не меняется.
 var version = "dev"
 
-// redactingWriter пропускает вывод через редактор: сообщения об ошибках берутся из системы и не
-// должны нести данные установки. Один Write — одно сообщение: cli пишет их целиком.
-type redactingWriter struct {
-	w io.Writer
-	r *redact.Redactor
-}
+// registry связывает app с редактором: app называет вид значения строкой и не знает пакета redact.
+type registry struct{ r *redact.Redactor }
 
-func (rw redactingWriter) Write(p []byte) (int, error) {
-	if _, err := io.WriteString(rw.w, rw.r.Text(string(p))); err != nil {
-		return 0, err
-	}
-	return len(p), nil
-}
+func (g registry) Register(kind, value string) { g.r.Register(redact.Kind(kind), value) }
 
 func main() {
 	// Ctrl-C отменяет команду, но не откат транзакции: он идёт под собственным сроком. Убитый
@@ -60,11 +50,12 @@ func run(ctx context.Context) int {
 		Server:   server.New(p, config.Path),
 		Logging:  logging.New(p, reg, slog.LevelInfo),
 		Security: security.New(p),
+		Redactor: registry{reg},
 		Releases: update.NewGitHub(p),
 		XM:       version,
 		Now:      p.Clock().Now,
 	})
 	return cli.Run(os.Args[1:], cli.Env{
-		Ctx: ctx, Stdout: os.Stdout, Stderr: redactingWriter{os.Stderr, reg}, Version: version, Clock: p.Clock(), App: a,
+		Ctx: ctx, Stdout: os.Stdout, Stderr: os.Stderr, Version: version, Clock: p.Clock(), App: a, Redact: reg.Text,
 	})
 }
