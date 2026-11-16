@@ -14,13 +14,15 @@ $Tools = @(@{ Cmd = 'git'; Winget = 'Git.Git' })        # команда и ид
 
 # Шаги проверки: Step '<имя>' { … }. Шаг провален, если блок бросил исключение, внешняя
 # программа вернула ненулевой код, командлет записал ошибку или последнее значение — $false.
-# Доступно: $src — проверяемый коммит, $box — песочница.
+# Доступно: $src — проверяемый коммит, $box — песочница. Ссылок из песочницы наружу шаги не создают.
 function Invoke-Checks {
     Step 'files' { Test-Path -LiteralPath (Join-Path $src 'go.mod') -PathType Leaf }
 }
 
 $ErrorActionPreference = 'Continue' # 'Stop' в Windows PowerShell 5.1 обрывает git на первой строке stderr
-$box = $null; $log = $null; $src = $null; $stepName = 'start'; $result = $null; $installed = @()
+$log = $null; $src = $null; $stepName = 'start'; $result = $null; $installed = @(); $saved = @{}
+$tempRoot = [IO.Path]::GetTempPath()
+Set-Variable -Name box -Scope Script -Value $null
 
 function Step([string]$Name, [scriptblock]$Body) {
     $script:stepName = $Name
@@ -35,27 +37,51 @@ function Test-Admin {
     $id = [Security.Principal.WindowsIdentity]::GetCurrent()
     ([Security.Principal.WindowsPrincipal]$id).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
+function Test-Package([string]$Id) { # установлен ли пакет — по winget, а не по PATH
+    $global:LASTEXITCODE = 0
+    winget list --id $Id --exact --accept-source-agreements --disable-interactivity *> $null
+    $LASTEXITCODE -eq 0
+}
+function Set-BoxEnv([hashtable]$Vars) { # прежние значения — в $saved, возвращаются в finally
+    foreach ($k in $Vars.Keys) {
+        if (-not $script:saved.ContainsKey($k)) { $script:saved[$k] = [Environment]::GetEnvironmentVariable($k, 'Process') }
+        [Environment]::SetEnvironmentVariable($k, $Vars[$k], 'Process')
+    }
+}
 
 try {
     $stepName = 'admin'
     if ($NeedAdmin -and -not (Test-Admin)) { throw 'admin' }
 
     $stepName = 'sandbox'
-    $box = Join-Path ([IO.Path]::GetTempPath()) ('xm-check-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+    Set-Variable -Name box -Scope Script -Option ReadOnly -Force -Value (Join-Path $tempRoot ('xm-check-' + [guid]::NewGuid().ToString('N').Substring(0, 8)))
     New-Item -ItemType Directory -Path $box -ErrorAction Stop | Out-Null
-    foreach ($d in 'tmp', 'cache', 'go') { New-Item -ItemType Directory -Path (Join-Path $box $d) -ErrorAction Stop | Out-Null }
+    foreach ($d in 'tmp', 'home', 'appdata', 'localappdata', 'cache', 'go') { New-Item -ItemType Directory -Path (Join-Path $box $d) -ErrorAction Stop | Out-Null }
     $log = Join-Path $box 'log'
     $src = Join-Path $box 'src'
-    $env:TEMP = Join-Path $box 'tmp'; $env:TMP = $env:TEMP
-    $env:GOPATH = Join-Path $box 'go'; $env:GOMODCACHE = Join-Path $box 'go\mod'
-    $env:GOCACHE = Join-Path $box 'cache\go'; $env:GOTOOLCHAIN = 'auto'; $env:GIT_TERMINAL_PROMPT = '0'
 
+    # Ставится только отсутствующее по winget; уже установленное не обновляется и не удаляется.
     foreach ($t in $Tools) {
         if (Get-Command $t.Cmd -ErrorAction SilentlyContinue) { continue }
-        Step 'tools' { winget install --id $t.Winget --exact --silent --accept-package-agreements --accept-source-agreements --disable-interactivity }
-        $installed += $t.Winget
+        $stepName = 'tools'
+        if (Test-Package $t.Winget) { throw 'tools' } # стоит, но не в PATH — не трогаем
+        try {
+            Step 'tools' { winget install --id $t.Winget --exact --silent --no-upgrade --accept-package-agreements --accept-source-agreements --disable-interactivity }
+        } finally {
+            if (Test-Package $t.Winget) { $installed += $t.Winget }
+        }
         $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
         Step 'tools' { [bool](Get-Command $t.Cmd -ErrorAction SilentlyContinue) }
+    }
+
+    # Конфигурация владельца (git, go) не читается, кэши и временные файлы — только в песочнице.
+    Set-BoxEnv @{
+        TEMP = (Join-Path $box 'tmp'); TMP = (Join-Path $box 'tmp'); HOME = (Join-Path $box 'home')
+        APPDATA = (Join-Path $box 'appdata'); LOCALAPPDATA = (Join-Path $box 'localappdata')
+        GOPATH = (Join-Path $box 'go'); GOMODCACHE = (Join-Path $box 'go\mod'); GOCACHE = (Join-Path $box 'cache\go')
+        GOENV = 'off'; GOTOOLCHAIN = 'auto'; GOFLAGS = $null; GOPROXY = $null; GOSUMDB = $null; GONOSUMDB = $null
+        GONOPROXY = $null; GOPRIVATE = $null; GOINSECURE = $null
+        GIT_CONFIG_GLOBAL = 'NUL'; GIT_CONFIG_NOSYSTEM = '1'; GIT_TERMINAL_PROMPT = '0'
     }
 
     Step 'fetch' { git init -q $src }
@@ -68,15 +94,16 @@ try {
     # Причина — имя шага в $stepName; текст ошибки остаётся в журнале и удаляется с песочницей.
 } finally {
     $state = 'clean'
+    foreach ($k in $saved.Keys) { [Environment]::SetEnvironmentVariable($k, $saved[$k], 'Process') }
     foreach ($id in $installed) {
         $global:LASTEXITCODE = 0
         winget uninstall --id $id --exact --silent --disable-interactivity *> $null
         if ($LASTEXITCODE -ne 0) { $state = 'dirty' }
     }
-    if ($box -and (Test-Path -LiteralPath $box)) {
-        Remove-Item -LiteralPath $box -Recurse -Force -ErrorAction SilentlyContinue
-        if (Test-Path -LiteralPath $box) { $state = 'dirty' }
+    if ($box -and $box -like (Join-Path $tempRoot 'xm-check-*') -and (Test-Path -LiteralPath $box)) {
+        cmd.exe /d /c rmdir /s /q $box *> $null # rmdir не проходит по ссылкам и точкам соединения
     }
+    if ($box -and (Test-Path -LiteralPath $box)) { $state = 'dirty' }
     if (-not $result) { $result = "FAIL $stepName" }
     Write-Output ('XM-CHECK {0} {1} {2} {3}' -f $CheckId, $Commit.Substring(0, 7), $result, $state)
 }

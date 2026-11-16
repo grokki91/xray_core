@@ -41,7 +41,7 @@
 | `diag.md` | `internal/diag/**`, `internal/monitor/**` | классы выводов диагностики |
 | `interfaces.md` | `internal/cli/**`, `internal/api/**`, `internal/webui/**`, `internal/bridge/**`, `internal/contract/**`, `web/**` | адаптеры, контракт, панель |
 | `tests.md` | `**/*_test.go`, `tests/**` | что считается тестом |
-| `shell.md` | `install.sh`, `scripts/**`, `.claude/hooks/**` | скрипты на Bash |
+| `shell.md` | `install.sh`, `scripts/**`, `.claude/hooks/**` | скрипты на Bash и PowerShell |
 
 Общие правила — в `AGENTS.md`; правила компонентов — здесь, по путям. Правило — короткая
 выжимка «что делать при правке этих файлов» со ссылкой на политику в `docs/`, а не её копия.

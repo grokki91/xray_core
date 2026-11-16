@@ -25,15 +25,68 @@ git clone -q --bare "$work/seed" "$work/origin.git"
 git -C "$work/origin.git" config uploadpack.allowAnySHA1InWant true
 sha=$(git -C "$work/seed" rev-parse HEAD)
 
-# fill ФАЙЛ КОММИТ ШАГ… — заполнить каркас: параметры и тело checks
+# Поддельные apt-get, dpkg-query и sudo: список установленных — файл $FAKE_DB, «установка»
+# пакета кладёт одноимённую команду в $FAKE_BIN. FAKE_REMV — apt хочет удалить чужой пакет при
+# установке; FAKE_EXTRA — лишний пакет в плане удаления; FAKE_DEP — зависимость при установке.
+export FAKE_BIN=$work/bin FAKE_DB=$work/db PATH=$work/bin:$PATH
+mkdir -p "$FAKE_BIN"
+cat >"$FAKE_BIN/apt-get" <<'FAKE'
+#!/usr/bin/env bash
+sim=0
+[[ $1 == -s ]] && { sim=1; shift; }
+cmd=$1
+shift
+pkgs=()
+for a; do [[ $a == -* ]] || pkgs+=("$a"); done
+case $cmd in
+update) ;;
+install)
+  if ((sim)); then
+    for p in "${pkgs[@]}"; do echo "Inst $p (1.0 fake)"; done
+    [[ -n ${FAKE_REMV:-} ]] && echo "Remv $FAKE_REMV [1.0]"
+    exit 0
+  fi
+  for p in "${pkgs[@]}" ${FAKE_DEP:-}; do
+    echo "$p" >>"$FAKE_DB"
+    printf '#!/bin/sh\n' >"$FAKE_BIN/$p"
+    chmod +x "$FAKE_BIN/$p"
+  done ;;
+purge)
+  if ((sim)); then
+    for p in "${pkgs[@]}" ${FAKE_EXTRA:-}; do echo "Purg $p [1.0]"; done
+    exit 0
+  fi
+  for p in "${pkgs[@]}"; do
+    grep -vx "$p" "$FAKE_DB" >"$FAKE_DB.new"
+    mv "$FAKE_DB.new" "$FAKE_DB"
+    rm -f "$FAKE_BIN/$p"
+  done ;;
+*) exit 100 ;;
+esac
+FAKE
+cat >"$FAKE_BIN/dpkg-query" <<'FAKE'
+#!/bin/sh
+sed 's/^/ii  /' "$FAKE_DB"
+printf 'rc  removed-long-ago\n'
+FAKE
+cat >"$FAKE_BIN/sudo" <<'FAKE'
+#!/bin/sh
+case $1 in -v | -k) exit 0 ;; esac
+exec "$@"
+FAKE
+chmod +x "$FAKE_BIN"/*
+
+# fill ФАЙЛ КОММИТ ШАГ… — заполнить каркас: параметры ($tools — строка TOOLS) и тело checks
+tools='(git)'
 fill() {
   local out=$1 commit=$2 body
   shift 2
   body=$(printf '  %s\n' "$@")
-  awk -v id=t-1 -v url="file://$work/origin.git" -v commit="$commit" -v body="$body" '
+  awk -v id=t-1 -v url="file://$work/origin.git" -v commit="$commit" -v tools="$tools" -v body="$body" '
     /^CHECK_ID=/ { print "CHECK_ID=\x27" id "\x27"; next }
     /^REPO_URL=/ { print "REPO_URL=\x27" url "\x27"; next }
     /^COMMIT=/ { print "COMMIT=\x27" commit "\x27"; next }
+    /^TOOLS=/ { print "TOOLS=" tools; next }
     /^checks\(\) \{$/ { print; print body; skip = 1; next }
     skip && /^\}$/ { skip = 0 }
     !skip { print }
@@ -69,6 +122,49 @@ run "вывод шага не попадает в ответ" "XM-CHECK t-1 ${sh
   'step noisy echo 203.0.113.7'
 run "чужой коммит → FAIL fetch" "XM-CHECK t-1 0000000 FAIL fetch clean" \
   0000000000000000000000000000000000000000 'step files true'
+
+# db ОЖИДАЕМОЕ — список «установленных» пакетов после прогона
+db() {
+  local got
+  got=$(tr '\n' ' ' <"$FAKE_DB")
+  if [[ $got == "$1" ]]; then ok "  пакеты: «$1»"; else no "  пакеты: «$got», ожидалось «$1»"; fi
+}
+
+echo "каркас VPS: пакеты"
+tools='(git xmfake)'
+printf 'owner-pkg\n' >"$FAKE_DB"
+run "недостающий пакет ставится и удаляется" "XM-CHECK t-1 ${sha:0:7} PASS clean" "$sha" \
+  'step use xmfake'
+FAKE_DEP=xmfake-lib
+export FAKE_DEP
+run "зависимость тоже удаляется" "XM-CHECK t-1 ${sha:0:7} PASS clean" "$sha" 'step use xmfake'
+unset FAKE_DEP
+db "owner-pkg "
+FAKE_REMV=owner-pkg run "apt удалил бы чужой пакет → отказ до установки" \
+  "XM-CHECK t-1 ${sha:0:7} FAIL tools clean" "$sha" 'step use xmfake'
+db "owner-pkg "
+FAKE_EXTRA=owner-pkg run "лишний пакет в плане удаления → dirty, ничего не удалено" \
+  "XM-CHECK t-1 ${sha:0:7} PASS dirty" "$sha" 'step use xmfake'
+db "owner-pkg xmfake "
+printf 'owner-pkg\n' >"$FAKE_DB"
+rm -f "$FAKE_BIN/xmfake"
+
+# Фоновый процесс неинтерактивного bash игнорирует SIGINT, поэтому — TERM: ловушка та же.
+echo "каркас VPS: прерывание"
+tools='(git)'
+fill "$work/s.sh" "$sha" 'step wait sleep 2'
+mkdir -p "$work/tmp"
+TMPDIR="$work/tmp" bash "$work/s.sh" >"$work/out" 2>/dev/null </dev/null &
+pid=$!
+sleep 1
+kill -TERM "$pid"
+wait "$pid"
+got=$(cat "$work/out")
+want="XM-CHECK t-1 ${sha:0:7} FAIL wait clean"
+if [[ $got != "$want" ]]; then no "прерывание: «$got», ожидалось «$want»"
+elif [[ -n $(find "$work/tmp" -mindepth 1 -print -quit) ]]; then no "прерывание: песочница не удалена"
+else ok "прерывание → строка и уборка"; fi
+rm -rf "$work/tmp"
 
 if ((fails)); then
   echo "integration skeleton: FAIL ($fails)"

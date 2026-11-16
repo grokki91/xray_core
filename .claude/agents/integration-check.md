@@ -37,12 +37,11 @@ tools: Read, Grep, Glob, Bash
 Проверка нужна:
 
 ```
-Нужна проверка на реальной интеграции: VPS (Ubuntu, bash) | Windows 11 (PowerShell)
+Нужна проверка на реальной интеграции: VPS (Ubuntu, bash) | Windows 11 (PowerShell 5.1)
 Что доказывает: <эффект одной фразой>
 Права: sudo | администратор | не нужны
 Скрипт:
-<обёрнутый по §4 скрипт целиком, в блоке bash или powershell>
-Ожидаемый результат: XM-CHECK <id> <sha7> PASS clean
+<обёрнутый по §4 скрипт целиком, в блоке bash или powershell>Ожидаемый результат: XM-CHECK <id> <sha7> PASS clean
 ```
 
 Сверка:
