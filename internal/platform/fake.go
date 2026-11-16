@@ -27,6 +27,7 @@ type Fake struct {
 	underRoot map[string]bool
 	routes    map[string]fakeRoute
 	users     map[string]Owner
+	journal   *fakeJournal
 }
 
 // Call — записанный вызов: операция и путь, имя пользователя или программа с аргументами.
@@ -42,6 +43,7 @@ func NewFake(root string, now time.Time) *Fake { return newFake(root, now, progr
 
 func newFake(root string, now time.Time, progs map[string]string) *Fake {
 	f := &Fake{programs: progs, now: now, owners: map[string]Owner{}, handlers: map[string]func(Command) (Result, error){}, underRoot: map[string]bool{}, routes: map[string]fakeRoute{}, users: map[string]Owner{}}
+	f.journal = &fakeJournal{f: f}
 	f.files = files{root: root, chown: f.recordOwner, ownerOf: f.ownerOf, trace: f.trace}
 	return f
 }

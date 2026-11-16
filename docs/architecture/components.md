@@ -35,6 +35,7 @@ type Platform interface {
     Systemd() Systemd  // юниты: установить, включить, start/stop/restart, состояние
     Net() Net          // Get по HTTPS (фаза 2); интерфейсы, маршруты, слушающие сокеты — фаза 4
     Users() Users      // системный пользователь службы
+    Journal() Journal  // запись в journald, идентификатор xm (ADR-0022)
     Clock() Clock
 }
 ```
@@ -337,13 +338,18 @@ type Engine interface {
 ```go
 type Manager interface {
     Logger() *slog.Logger                              // всегда поверх redact
-    XrayLog(ctx context.Context, q Query) (io.ReadCloser, error) // journald
-    Settings() LogSettings                             // уровень; журнал доступа Xray выключен
+    XrayLog(ctx context.Context, q Query) (io.ReadCloser, error) // journald; фаза 5
+    Settings() Settings                                // уровень; журнал доступа Xray выключен
+    XraySection() []byte                               // раздел log конфигурации Xray
 }
 ```
 
-- Хранилище — journald: без собственных файлов и ротации. Журнал доступа Xray выключен: в нём
-  адреса клиентов. Фаза 2; `XrayLog` — фаза 5.
+- Хранилище — journald: без собственных файлов и ротации. Запись — `platform.Journal` с
+  идентификатором `xm` ([ADR-0022](../adr/0022-journald-from-platform.md)); ошибка записи не
+  заменяется выводом в stderr. Каждая запись целиком проходит `redact.Text` до `Journal`.
+- Раздел `log` Xray — `{"access":"none","loglevel":"warning"}`: журнал доступа выключен, в нём
+  адреса клиентов; ошибки идут в стандартный вывод юнита, то есть в journald. Фаза 2;
+  `XrayLog` — фаза 5.
 
 ### update
 
