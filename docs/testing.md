@@ -61,7 +61,7 @@
 ## 5. Тестовые данные
 
 Только фиктивные значения ([secrets.md](security/secrets.md) §4). Ключи создаются во время
-теста. Бинарники Xray для L3 и L4 скачиваются с проверкой суммы и кэшируются по версии; версии —
+теста. Бинарники Xray для L3 скачиваются с проверкой суммы и кэшируются по версии (для L4 Xray качает и проверяет сам `xm install`); версии —
 нижняя и верхняя границы проверенного диапазона ([compatibility.md](compatibility.md) §2), суммы — в `platform/xraytest`. Локально:
 
 ```bash
@@ -84,7 +84,7 @@ IPv4 и IPv6; обновление и откат; `xm diag`; панель чер
 ## 8. Что покрыто сейчас
 
 Покрыты проверки репозитория и хуки (`tests/test-guards.sh`), каркас скрипта проверки на
-реальной интеграции для VPS (`tests/test-integration-skeleton.sh`); L4 — `tests/system/l4.sh` и задание CI `l4` на Ubuntu 22.04 и 24.04 (см. таблицу); L0 — `gofmt`, `go vet`, в CI ещё
+реальной интеграции для VPS (`tests/test-integration-skeleton.sh`); Каркас L4 — `tests/system/l4.sh` и задание CI `l4` на Ubuntu 22.04 и 24.04 (строка «система» ниже); L0 — `gofmt`, `go vet`, в CI ещё
 staticcheck, govulncheck, shellcheck и gitleaks. Остальное из L1–L4 вводится вместе с кодом по
 фазам [roadmap.md](roadmap.md).
 
