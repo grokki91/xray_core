@@ -97,8 +97,8 @@ func (m *Manager) Render(st store.State, logSection json.RawMessage) (Rendered, 
 	return Rendered{Data: out.Bytes(), SHA256: hex.EncodeToString(sum[:])}, nil
 }
 
-// Write атомарно пишет конфигурацию в Path: root:xray, 0640. Пользователь xray должен
-// существовать (security.EnsureBaseline).
+// Write атомарно пишет конфигурацию в Path: root:xray, 0640. Группу берёт у пользователя xray:
+// Users.Ensure создаст его, если базовая защита (security.EnsureBaseline) ещё не выполнялась.
 func (m *Manager) Write(ctx context.Context, r Rendered) error {
 	svc, err := m.p.Users().Ensure(ctx, platform.ServiceUser)
 	if err != nil {
