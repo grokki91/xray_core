@@ -179,6 +179,29 @@ func TestFetchRejects(t *testing.T) {
 	}
 }
 
+// Архив размера Xray-linux-64.zip v26.11.9 (docs/compatibility.md §2) скачивается и читается из
+// кэша: предел с запасом выше реального размера.
+func TestFetchRealSizeArchive(t *testing.T) {
+	const v26_11_9 = 16754078
+	f, g := env(t)
+	big := make([]byte, v26_11_9)
+	copy(big, archive)
+	b256, _ := sums(big)
+	f.Serve(latestURL, releaseJSON(tag, false, "sha256:"+b256))
+	f.Serve(dgstURL, dgstFor(big))
+	f.Serve(assetURL, big)
+	r := latest(t, g)
+	for _, step := range []string{"загрузка", "кэш"} {
+		if a, err := g.Fetch(ctx(t), r, ArchAMD64); err != nil || len(a.Data) != v26_11_9 {
+			t.Fatalf("%s: %d байт, %v", step, len(a.Data), err)
+		}
+		f.Serve(assetURL, nil) // второй проход — только из кэша
+	}
+	if maxArchive < 3*v26_11_9 {
+		t.Errorf("предел %d байт: запас меньше трёхкратного к реальному размеру", maxArchive)
+	}
+}
+
 func TestFetchRejectsInput(t *testing.T) {
 	_, g := env(t)
 	r := latest(t, g)
