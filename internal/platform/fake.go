@@ -27,6 +27,7 @@ type Fake struct {
 	underRoot map[string]bool
 	routes    map[string]fakeRoute
 	users     map[string]Owner
+	effective Owner
 	journal   *fakeJournal
 }
 
