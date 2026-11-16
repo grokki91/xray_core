@@ -21,12 +21,18 @@ type Platform interface {
 }
 
 // Command — запуск программы. Program — имя из закрытого списка, а не путь; ввод владельца —
-// только отдельным элементом Args; секрет — только через Stdin.
+// только отдельным элементом Args; секрет — только через Stdin. Version — только у xray: путь
+// строится из неё (ADR-0019).
 type Command struct {
 	Program string
+	Version string
 	Args    []string
 	Stdin   []byte
 }
+
+// CoreDir — каталог версий Xray: <CoreDir>/<версия>/xray и ссылка <CoreDir>/current
+// (docs/architecture/data-model.md §1).
+const CoreDir = "/usr/local/lib/xm/core"
 
 // Result — итог завершившегося процесса.
 type Result struct {
@@ -42,6 +48,14 @@ type FS interface {
 	WriteFile(path string, data []byte, perm fs.FileMode, owner Owner) error
 	// Mkdir создаёт каталог с правами и владельцем; существующий каталог не меняет.
 	Mkdir(path string, perm fs.FileMode, owner Owner) error
+	// Remove удаляет обычный файл; ссылка на пути или на месте файла, каталог — ошибка.
+	Remove(path string) error
+	// Symlink атомарно ставит на path ссылку на target: временная ссылка в том же каталоге и
+	// rename. target — одно имя в том же каталоге (без «/», не «.» и «..»), иначе ErrPath;
+	// каталог на месте path не заменяется.
+	Symlink(path, target string) error
+	// Readlink возвращает цель ссылки path; не ссылка — ошибка, нет файла — ErrNotFound.
+	Readlink(path string) (string, error)
 	// Lock берёт межпроцессную исключительную блокировку файла path (создаёт его с 0600) и ждёт
 	// её до конца срока ctx.
 	Lock(ctx context.Context, path string) (unlock func(), err error)

@@ -89,10 +89,13 @@ type GitHub struct {
 
 func NewGitHub(p platform.Platform) *GitHub { return &GitHub{p: p} }
 
-var (
-	tagRe = regexp.MustCompile(`^v[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}$`)
-	hexRe = regexp.MustCompile(`^[0-9a-f]+$`)
-)
+var hexRe = regexp.MustCompile(`^[0-9a-f]+$`)
+
+// validTag — тег вида vN.N.N; правило версии — platform.ValidVersion.
+func validTag(tag string) bool {
+	v, ok := strings.CutPrefix(tag, "v")
+	return ok && platform.ValidVersion(v)
+}
 
 // Latest возвращает последний стабильный релиз.
 func (g *GitHub) Latest(ctx context.Context) (Release, error) {
@@ -112,7 +115,7 @@ func (g *GitHub) Latest(ctx context.Context) (Release, error) {
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return Release{}, fmt.Errorf("последний релиз: ответ API не разобран: %w", err)
 	}
-	if !tagRe.MatchString(resp.Tag) {
+	if !validTag(resp.Tag) {
 		return Release{}, fmt.Errorf("последний релиз: тег %q не вида vX.Y.Z", resp.Tag)
 	}
 	if resp.Prerelease || resp.Draft {
@@ -131,7 +134,7 @@ func (g *GitHub) Latest(ctx context.Context) (Release, error) {
 // и по SHA-256 из API. `.dgst` скачивается каждый раз; архив берётся из кэша, если проходит
 // ту же сверку, иначе скачивается и кладётся в кэш.
 func (g *GitHub) Fetch(ctx context.Context, r Release, a Arch) (Archive, error) {
-	if !tagRe.MatchString(r.Tag) {
+	if !validTag(r.Tag) {
 		return Archive{}, fmt.Errorf("релиз: тег %q не вида vX.Y.Z", r.Tag)
 	}
 	name, err := assetName(a)

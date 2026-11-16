@@ -27,9 +27,10 @@ type Fake struct {
 
 // Call — записанный вызов: операция и путь или программа с аргументами.
 type Call struct {
-	Op   string // read, write, mkdir, lock, exec, get
-	Path string // путь файла, имя программы или адрес
-	Args []string
+	Op      string // read, write, mkdir, symlink, readlink, lock, exec, get
+	Path    string // путь файла, имя программы или адрес
+	Version string // версия xray
+	Args    []string
 }
 
 // NewFake возвращает поддельную реализацию с файлами под root и часами, стоящими на now.
@@ -91,7 +92,7 @@ func (f *Fake) SetNow(t time.Time) {
 
 // Handle задаёт ответ программы из закрытого списка.
 func (f *Fake) Handle(program string, h func(Command) (Result, error)) {
-	if _, ok := f.programs[program]; !ok {
+	if _, ok := f.programs[program]; !ok && program != xrayProgram {
 		panic(fmt.Sprintf("platform.Fake: программы %q нет в закрытом списке", program)) // ошибка теста
 	}
 	f.mu.Lock()
@@ -100,11 +101,15 @@ func (f *Fake) Handle(program string, h func(Command) (Result, error)) {
 }
 
 func (f *Fake) Exec(ctx context.Context, c Command) (Result, error) {
-	if _, err := checkCommand(ctx, f.programs, c); err != nil {
+	path, err := checkCommand(ctx, f.programs, c)
+	if err != nil {
+		return Result{}, err
+	}
+	if err := f.files.checkBinary(c, path); err != nil {
 		return Result{}, err
 	}
 	f.mu.Lock()
-	f.calls = append(f.calls, Call{Op: "exec", Path: c.Program, Args: slices.Clone(c.Args)})
+	f.calls = append(f.calls, Call{Op: "exec", Path: c.Program, Version: c.Version, Args: slices.Clone(c.Args)})
 	h := f.handlers[c.Program]
 	f.mu.Unlock()
 	if h == nil {

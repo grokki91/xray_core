@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
 	"syscall"
 	"time"
 )
@@ -55,6 +56,9 @@ func (r *Real) Exec(ctx context.Context, c Command) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	if err := r.files.checkBinary(c, path); err != nil {
+		return Result{}, err
+	}
 	cmd := exec.CommandContext(ctx, path, c.Args...)
 	cmd.Env = childEnv
 	cmd.Dir = "/"
@@ -100,11 +104,38 @@ func (l *limited) Write(p []byte) (int, error) {
 	return l.b.Write(p)
 }
 
+// xrayProgram — программа, путь которой строится из версии (ADR-0019).
+const xrayProgram = "xray"
+
+var versionRe = regexp.MustCompile(`^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}$`)
+
+// ValidVersion — единственное правило версии Xray N.N.N (docs/security/policy.md §5): по нему
+// строится путь программы, поэтому его используют и core, и update.
+func ValidVersion(v string) bool { return versionRe.MatchString(v) }
+
+// xrayPath — путь бинарника Xray версии v; версия не N.N.N — ErrProgram.
+func xrayPath(v string) (string, error) {
+	if !ValidVersion(v) {
+		return "", fmt.Errorf("%w: xray версии %q", ErrProgram, v)
+	}
+	return CoreDir + "/" + v + "/" + xrayProgram, nil
+}
+
 // checkCommand — общие для обеих реализаций предусловия запуска; возвращает путь программы.
 func checkCommand(ctx context.Context, progs map[string]string, c Command) (string, error) {
-	path, ok := progs[c.Program]
-	if !ok {
-		return "", fmt.Errorf("%w: %q", ErrProgram, c.Program)
+	var path string
+	if c.Program == xrayProgram {
+		p, err := xrayPath(c.Version)
+		if err != nil {
+			return "", err
+		}
+		path = p
+	} else {
+		p, ok := progs[c.Program]
+		if !ok || c.Version != "" {
+			return "", fmt.Errorf("%w: %q", ErrProgram, c.Program)
+		}
+		path = p
 	}
 	if _, ok := ctx.Deadline(); !ok {
 		return "", ErrDeadline
