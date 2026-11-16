@@ -5,24 +5,26 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 )
 
 // Fake — поддельная реализация для тестов: файлы — под временным каталогом root, владельцы
-// записываются, а не меняются (root не нужен), процессы отвечают обработчиками, все вызовы
-// записываются, сеть отвечает заданными телами и перенаправлениями. Правила путей, ссылок,
-// блокировок, запуска и адресов — те же, что у Real.
+// записываются, а не меняются (root не нужен), процессы отвечают обработчиками или запускаются
+// файлом под root (RunUnderRoot), все вызовы записываются, сеть отвечает заданными телами и
+// перенаправлениями. Правила путей, ссылок, блокировок, запуска и адресов — те же, что у Real.
 type Fake struct {
 	programs map[string]string
 	files    files
 
-	mu       sync.Mutex
-	now      time.Time
-	calls    []Call
-	owners   map[string]Owner
-	handlers map[string]func(Command) (Result, error)
-	routes   map[string]fakeRoute
+	mu        sync.Mutex
+	now       time.Time
+	calls     []Call
+	owners    map[string]Owner
+	handlers  map[string]func(Command) (Result, error)
+	underRoot map[string]bool
+	routes    map[string]fakeRoute
 }
 
 // Call — записанный вызов: операция и путь или программа с аргументами.
@@ -37,7 +39,7 @@ type Call struct {
 func NewFake(root string, now time.Time) *Fake { return newFake(root, now, programs()) }
 
 func newFake(root string, now time.Time, progs map[string]string) *Fake {
-	f := &Fake{programs: progs, now: now, owners: map[string]Owner{}, handlers: map[string]func(Command) (Result, error){}, routes: map[string]fakeRoute{}}
+	f := &Fake{programs: progs, now: now, owners: map[string]Owner{}, handlers: map[string]func(Command) (Result, error){}, underRoot: map[string]bool{}, routes: map[string]fakeRoute{}}
 	f.files = files{root: root, chown: f.recordOwner, trace: f.trace}
 	return f
 }
@@ -98,6 +100,21 @@ func (f *Fake) Handle(program string, h func(Command) (Result, error)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.handlers[program] = h
+	delete(f.underRoot, program)
+}
+
+// RunUnderRoot велит запускать программу настоящим файлом её пути под root — так стенд L3
+// исполняет настоящий бинарник Xray без root на машине теста. Запуск — тот же, что у Real
+// (окружение, группа процессов, пределы); аргумент, начинающийся с «/», получает префикс root:
+// пути на VPS у подделки лежат под ним; неочищенный путь — ErrPath. Заменяет обработчик Handle.
+func (f *Fake) RunUnderRoot(program string) {
+	if _, ok := f.programs[program]; !ok && program != xrayProgram {
+		panic(fmt.Sprintf("platform.Fake: программы %q нет в закрытом списке", program)) // ошибка теста
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.underRoot[program] = true
+	delete(f.handlers, program)
 }
 
 func (f *Fake) Exec(ctx context.Context, c Command) (Result, error) {
@@ -110,8 +127,23 @@ func (f *Fake) Exec(ctx context.Context, c Command) (Result, error) {
 	}
 	f.mu.Lock()
 	f.calls = append(f.calls, Call{Op: "exec", Path: c.Program, Version: c.Version, Args: slices.Clone(c.Args)})
-	h := f.handlers[c.Program]
+	h, underRoot := f.handlers[c.Program], f.underRoot[c.Program]
 	f.mu.Unlock()
+	if underRoot {
+		args := make([]string, len(c.Args))
+		for i, a := range c.Args {
+			if strings.HasPrefix(a, "/") {
+				// Путь — по правилу FS: абсолютный и очищенный, иначе «/../x» ушёл бы из root.
+				p, err := f.files.real(a)
+				if err != nil {
+					return Result{}, err
+				}
+				a = p
+			}
+			args[i] = a
+		}
+		return runProcess(ctx, f.files.root+path, c.Program, args, c.Stdin)
+	}
 	if h == nil {
 		return Result{}, fmt.Errorf("platform.Fake: нет ответа для %q", c.Program)
 	}

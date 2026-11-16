@@ -59,29 +59,35 @@ func (r *Real) Exec(ctx context.Context, c Command) (Result, error) {
 	if err := r.files.checkBinary(c, path); err != nil {
 		return Result{}, err
 	}
-	cmd := exec.CommandContext(ctx, path, c.Args...)
+	return runProcess(ctx, path, c.Program, c.Args, c.Stdin)
+}
+
+// runProcess запускает файл path без оболочки: окружение childEnv, каталог «/», своя группа
+// процессов, предел вывода. Общий путь Real.Exec и Fake.RunUnderRoot.
+func runProcess(ctx context.Context, path, name string, args []string, stdin []byte) (Result, error) {
+	cmd := exec.CommandContext(ctx, path, args...)
 	cmd.Env = childEnv
 	cmd.Dir = "/"
-	cmd.Stdin = bytes.NewReader(c.Stdin)
+	cmd.Stdin = bytes.NewReader(stdin)
 	stdout, stderr := &limited{}, &limited{}
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	// Своя группа процессов: по сроку завершаются и потомки программы, а не только она.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	cmd.WaitDelay = waitDelay
-	err = cmd.Run()
+	err := cmd.Run()
 	if stdout.over || stderr.over {
-		return Result{}, fmt.Errorf("%s: вывод больше %d байт", c.Program, MaxOutput)
+		return Result{}, fmt.Errorf("%s: вывод больше %d байт", name, MaxOutput)
 	}
 	if ctx.Err() != nil {
-		return Result{}, fmt.Errorf("%s: %w", c.Program, ctx.Err())
+		return Result{}, fmt.Errorf("%s: %w", name, ctx.Err())
 	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
 		return Result{ExitCode: exitErr.ExitCode(), Stdout: stdout.b.Bytes(), Stderr: stderr.b.Bytes()}, nil
 	}
 	if err != nil {
-		return Result{}, fmt.Errorf("%s: %w", c.Program, err)
+		return Result{}, fmt.Errorf("%s: %w", name, err)
 	}
 	return Result{Stdout: stdout.b.Bytes(), Stderr: stderr.b.Bytes()}, nil
 }
