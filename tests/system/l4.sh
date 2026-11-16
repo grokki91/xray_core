@@ -19,6 +19,9 @@ check() { # check ШАГ КОМАНДА… — успех команды
 	shift
 	if "$@" >/dev/null 2>&1; then ok "$name"; else bad "$name"; fi
 }
+eq() { # eq ШАГ ПОЛУЧЕНО ОЖИДАЕТСЯ
+	if [[ $2 == "$3" ]]; then ok "$1"; else bad "$1: получено «$2», ожидалось «$3»"; fi
+}
 perm() { # perm ПУТЬ ВЛАДЕЛЕЦ:ГРУППА ПРАВА — строка манифеста data-model.md §1
 	local got
 	got=$(stat -c '%U:%G %a' "$1" 2>/dev/null)
@@ -45,19 +48,19 @@ check "служба активна" systemctl is-active --quiet xray.service
 check "автозапуск включён" systemctl is-enabled --quiet xray.service
 pid=$(systemctl show -p MainPID --value xray.service)
 user=$(ps -o user= -p "${pid:-0}" 2>/dev/null | tr -d ' ')
-[[ $user == xray ]] && ok "процесс от пользователя xray" || bad "процесс от пользователя: $user"
+eq "процесс от пользователя xray" "$user" xray
 # CAP_NET_BIND_SERVICE — бит 10 → 0x400; NoNewPrivs — из NoNewPrivileges юнита
 cap=$(awk '/^CapEff:/ {print $2}' "/proc/${pid:-0}/status" 2>/dev/null)
-[[ $((16#${cap:-0})) == 1024 ]] && ok "возможности процесса: только CAP_NET_BIND_SERVICE" || bad "возможности процесса: ${cap:-нет}"
+eq "возможности процесса: только CAP_NET_BIND_SERVICE" "$((16#${cap:-0}))" 1024
 nnp=$(awk '/^NoNewPrivs:/ {print $2}' "/proc/${pid:-0}/status" 2>/dev/null)
-[[ $nnp == 1 ]] && ok "NoNewPrivs" || bad "NoNewPrivs: ${nnp:-нет}"
+eq "NoNewPrivs" "${nnp:-нет}" 1
 check "порт $port слушается" bash -c "ss -ltnH 'sport = :$port' | grep -q ."
 
 # 3. Манифест прав (data-model.md §1)
 perm /usr/local/lib/xm root:root 755
 perm /usr/local/lib/xm/core root:root 755
 ver=$(readlink /usr/local/lib/xm/core/current 2>/dev/null)
-[[ $ver =~ ^[0-9A-Za-z._-]+$ ]] && ok "current указывает на каталог версии" || bad "current: $ver"
+if [[ $ver =~ ^[0-9A-Za-z._-]+$ ]]; then ok "current указывает на каталог версии"; else bad "current: «$ver»"; fi
 perm "/usr/local/lib/xm/core/$ver" root:root 755
 perm "/usr/local/lib/xm/core/$ver/xray" root:root 755
 perm /etc/xm root:root 700
@@ -72,13 +75,14 @@ perm /var/lib/xm/cache root:root 700
 
 # 4. status
 "$xm" status --json >"$out/status" 2>&1
+# shellcheck disable=SC2016 # $p — переменная jq, не оболочки
 check "status: версия Xray и порт" jq -e --argjson p "$port" \
 	'.data.installed and .data.service.active == "active" and .data.versions.xray != "" and .data.port == $p and (.data.drift | not)' "$out/status"
 
 # 5. Повторная установка — отказ с кодом 3 (ADR-0025)
 "$xm" install --sni "$sni" --address "$addr" --port "$port" >"$out/again" 2>&1
 rc=$?
-[[ $rc == 3 ]] && ok "повторная установка: код 3" || bad "повторная установка: код $rc"
+eq "повторная установка: код" "$rc" 3
 
 # 6. stop → start: служба и порт
 "$xm" stop >"$out/stop" 2>&1
