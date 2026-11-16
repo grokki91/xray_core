@@ -32,6 +32,11 @@ sni=example.com
 addr=192.0.2.10 # документационный адрес RFC 5737: проверке нужна форма, а не достижимость
 port=443
 
+# 0. Среда: факты о машине для разбора провалов (секретов здесь нет)
+echo "env  is-system-running: $(systemctl is-system-running 2>&1 | head -1)"
+echo "env  PID 1: $(ps -p 1 -o comm= 2>&1)"
+echo "env  ОС: $(. /usr/lib/os-release && echo "$ID $VERSION_ID"), память: $(awk '/^MemTotal:/ {print int($2/1024)}' /proc/meminfo) МиБ"
+
 # 1. Установка
 "$xm" install --sni "$sni" --address "$addr" --port "$port" >"$out/install" 2>&1
 rc=$?
