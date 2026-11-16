@@ -1,0 +1,233 @@
+package config
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/grokki91/xray_core/internal/platform"
+	"github.com/grokki91/xray_core/internal/store"
+)
+
+const (
+	fakeKey  = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	logPart  = `{"access":"none","loglevel":"warning"}`
+	idPhone  = "00000000-0000-4000-8000-000000000001"
+	idLaptop = "00000000-0000-4000-8000-000000000002"
+)
+
+func ctx(t *testing.T) context.Context {
+	t.Helper()
+	c, cancel := context.WithTimeout(t.Context(), time.Minute)
+	t.Cleanup(cancel)
+	return c
+}
+
+// state — состояние с фиктивными данными (docs/security/secrets.md §4).
+func state() store.State {
+	return store.State{
+		SchemaVersion: 1,
+		Server:        store.Server{Port: 443},
+		Inbounds: []store.Inbound{{
+			Preset: "reality-xhttp",
+			Reality: store.Reality{
+				Target: "example.com:443", ServerNames: []string{"example.com"},
+				PrivateKey: fakeKey, PublicKey: fakeKey, ShortIDs: []string{"0123456789abcdef"},
+			},
+			Params: map[string]string{"path": "/example"},
+		}},
+		Profiles: []store.Profile{
+			{Name: "phone", ID: idPhone, Enabled: true},
+			{Name: "laptop", ID: idLaptop, Enabled: false},
+		},
+	}
+}
+
+func render(t *testing.T, st store.State) Rendered {
+	t.Helper()
+	r, err := New(nil).Render(st, json.RawMessage(logPart))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+func TestRenderIsDeterministic(t *testing.T) {
+	a, b := render(t, state()), render(t, state())
+	if !bytes.Equal(a.Data, b.Data) || a.SHA256 != b.SHA256 {
+		t.Fatal("одно состояние дало разные файлы")
+	}
+}
+
+func TestRenderMatchesGolden(t *testing.T) {
+	want, err := os.ReadFile("testdata/config.golden.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := render(t, state()).Data; !bytes.Equal(got, want) {
+		t.Fatalf("конфигурация расходится с эталоном:\n%s", got)
+	}
+}
+
+func TestRenderOnlyEnabledProfiles(t *testing.T) {
+	out := string(render(t, state()).Data)
+	if !strings.Contains(out, idPhone) || strings.Contains(out, idLaptop) {
+		t.Fatalf("клиенты в конфигурации не совпали с включёнными профилями:\n%s", out)
+	}
+}
+
+func TestRenderNoProfilesIsValidDocument(t *testing.T) {
+	st := state()
+	st.Profiles = nil
+	var doc struct {
+		Inbounds []struct {
+			Settings struct {
+				Clients []json.RawMessage `json:"clients"`
+			} `json:"settings"`
+		} `json:"inbounds"`
+	}
+	if err := json.Unmarshal(render(t, st).Data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Inbounds[0].Settings.Clients == nil || len(doc.Inbounds[0].Settings.Clients) != 0 {
+		t.Fatal("без профилей нужен пустой список clients, не null")
+	}
+}
+
+func TestRenderBlocksPrivateDestinations(t *testing.T) {
+	var doc struct {
+		Outbounds []struct{ Tag, Protocol string }
+		Routing   struct {
+			DomainStrategy string
+			Rules          []struct {
+				IP          []string
+				OutboundTag string
+			}
+		}
+	}
+	if err := json.Unmarshal(render(t, state()).Data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Outbounds[0].Protocol != "freedom" || doc.Outbounds[1].Protocol != "blackhole" {
+		t.Fatalf("outbounds: %+v", doc.Outbounds)
+	}
+	if doc.Routing.DomainStrategy != "IPOnDemand" || len(doc.Routing.Rules) != 1 || doc.Routing.Rules[0].OutboundTag != doc.Outbounds[1].Tag {
+		t.Fatalf("routing: %+v", doc.Routing)
+	}
+	have := map[string]bool{}
+	for _, c := range doc.Routing.Rules[0].IP {
+		have[c] = true
+	}
+	for _, c := range []string{"0.0.0.0/8", "10.0.0.0/8", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16", "::/128", "::1/128", "fc00::/7", "fe80::/10"} {
+		if !have[c] {
+			t.Errorf("в запрете нет %s", c)
+		}
+	}
+}
+
+func TestRenderDNSFromState(t *testing.T) {
+	if strings.Contains(string(render(t, state()).Data), `"dns"`) {
+		t.Fatal("раздел dns есть при пустом состоянии")
+	}
+	st := state()
+	st.DNS = store.DNS{DoH: []string{"https://1.1.1.1/dns-query"}, Strategy: "UseIP"}
+	out := string(render(t, st).Data)
+	if !strings.Contains(out, `"https://1.1.1.1/dns-query"`) || !strings.Contains(out, `"queryStrategy": "UseIP"`) {
+		t.Fatalf("dns не отрисован:\n%s", out)
+	}
+}
+
+func TestRenderRejectsBadState(t *testing.T) {
+	cases := map[string]func(*store.State){
+		"нет входящих":       func(s *store.State) { s.Inbounds = nil },
+		"два входящих":       func(s *store.State) { s.Inbounds = append(s.Inbounds, s.Inbounds[0]) },
+		"неизвестный пресет": func(s *store.State) { s.Inbounds[0].Preset = "nope" },
+		"плохой порт":        func(s *store.State) { s.Server.Port = 0 },
+		"плохой ключ":        func(s *store.State) { s.Inbounds[0].Reality.PrivateKey = "short" },
+	}
+	for name, mut := range cases {
+		t.Run(name, func(t *testing.T) {
+			st := state()
+			mut(&st)
+			_, err := New(nil).Render(st, json.RawMessage(logPart))
+			if err == nil {
+				t.Fatal("принято")
+			}
+			if !errorsIs(err, ErrState) {
+				t.Fatalf("ошибка не ErrState: %v", err)
+			}
+			if strings.Contains(err.Error(), fakeKey) || strings.Contains(err.Error(), "short") {
+				t.Fatalf("в ошибке значение секрета: %v", err)
+			}
+		})
+	}
+	if _, err := New(nil).Render(state(), json.RawMessage(`{`)); err == nil {
+		t.Fatal("раздел log не JSON принят")
+	}
+}
+
+func fake(t *testing.T) *platform.Fake {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.MkdirAll(root+"/usr/local/etc/xray", 0o750); err != nil {
+		t.Fatal(err)
+	}
+	return platform.NewFake(root, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+}
+
+func TestWriteSetsManifestPerms(t *testing.T) {
+	f := fake(t)
+	m := New(f)
+	r := render(t, state())
+	if err := m.Write(ctx(t), r); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(f.Path(Path))
+	if err != nil || !bytes.Equal(got, r.Data) {
+		t.Fatalf("содержимое: %v", err)
+	}
+	fi, _ := os.Stat(f.Path(Path))
+	svc, _ := f.Users().Ensure(ctx(t), platform.ServiceUser)
+	if fi.Mode().Perm() != 0o640 {
+		t.Errorf("права %v, нужны 0640", fi.Mode().Perm())
+	}
+	if o, ok := f.Owner(Path); !ok || o != (platform.Owner{GID: svc.GID}) {
+		t.Errorf("владелец %v, нужен root:xray", o)
+	}
+}
+
+func TestDrift(t *testing.T) {
+	f := fake(t)
+	m := New(f)
+	st := state()
+	if d, err := m.Drift(st); err != nil || d {
+		t.Fatalf("нет файла и нет суммы: дрейф %v, %v", d, err)
+	}
+	r := render(t, st)
+	if err := m.Write(ctx(t), r); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := m.Drift(st); !d {
+		t.Fatal("файл есть, суммы нет — нужен дрейф")
+	}
+	st.Applied.ConfigSHA256 = r.SHA256
+	if d, err := m.Drift(st); err != nil || d {
+		t.Fatalf("файл как применён: дрейф %v, %v", d, err)
+	}
+	if err := os.WriteFile(f.Path(Path), []byte("{}\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := m.Drift(st); !d {
+		t.Fatal("ручная правка не замечена")
+	}
+	if err := os.Remove(f.Path(Path)); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := m.Drift(st); !d {
+		t.Fatal("файл удалён, сумма есть — нужен дрейф")
+	}
+}
