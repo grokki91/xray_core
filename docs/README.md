@@ -18,6 +18,7 @@
 | как обновляется Xray и что такое откат | [operations/updates.md](operations/updates.md) |
 | как устроена диагностика, какие есть проверки | [operations/diagnostics.md](operations/diagnostics.md) |
 | что и на каком уровне тестировать | [testing.md](testing.md) |
+| нужна ли владельцу проверка PR на VPS или Windows 11 и как её выдать | [dev/integration-check.md](dev/integration-check.md) |
 | какие ОС, версии Xray и клиенты поддержаны — с датами | [compatibility.md](compatibility.md) |
 | что делать дальше, что входит в MVP | [roadmap.md](roadmap.md) |
 | что ещё не решено | [open-questions.md](open-questions.md) |
@@ -51,3 +52,4 @@
 | Редактор | фильтр, заменяющий чувствительные значения метками |
 | Манифест прав | таблица путей, владельцев и прав на VPS |
 | Цель REALITY | чужой сайт, под который маскируется рукопожатие |
+| Проверка на реальной интеграции | скрипт, который владелец запускает на VPS или Windows 11, когда эффект PR не доказывают L0–L4; ответ — одна строка `XM-CHECK` |

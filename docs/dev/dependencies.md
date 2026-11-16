@@ -44,7 +44,7 @@ govulncheck, staticcheck, shellcheck подключены 2026-11-15). Прав�
 |---|---|---|
 | `proxy.golang.org`, `sum.golang.org` | `go` локально и в CI; `go run …@версия` в CI | тулчейн версии из `go.mod`; модули govulncheck и staticcheck; проверка сумм |
 | `vuln.go.dev` | govulncheck | база уязвимостей Go |
-| `github.com` (релизы `gitleaks/gitleaks`, `koalaman/shellcheck`, `XTLS/Xray-core`; `actions/checkout`) | шаги CI, раннер; тесты L3 локально и в CI | бинарники сканеров; архивы Xray для стенда L3 ([ADR-0020](../adr/0020-l3-stand.md)); код действия |
+| `github.com` (релизы `gitleaks/gitleaks`, `koalaman/shellcheck`, `XTLS/Xray-core`; `actions/checkout`) | шаги CI, раннер; тесты L3 локально и в CI; скрипт проверки на реальной интеграции у владельца (репозиторий проекта) | бинарники сканеров; архивы Xray для стенда L3 ([ADR-0020](../adr/0020-l3-stand.md)); код действия; проверяемый коммит ([ADR-0021](../adr/0021-owner-integration-check.md)) |
 | `release-assets.githubusercontent.com` | шаги CI; тесты L3 | файлы релизов сканеров и Xray: на него перенаправляет `github.com` ([ADR-0016](../adr/0016-ci-and-tooling.md)) |
 
 ## 4. Локальные утилиты разработки
@@ -55,6 +55,7 @@ govulncheck, staticcheck, shellcheck подключены 2026-11-15). Прав�
 |---|---|---|
 | `bash`, `git`, `grep`, `sed`, `awk` | `scripts/check.sh`, `scripts/guard.sh`, хуки | принятием PR фазы 0 |
 | `jq` | разбор входа хуков Claude Code | принятием PR фазы 0 |
+| пакетный менеджер ОС: `apt-get` и `dpkg-query` на VPS, `winget` на Windows 11 | недостающие инструменты скрипта проверки на реальной интеграции; поставленное скриптом удаляется в его конце | 2026-11-16, запрос владельца; [ADR-0021](../adr/0021-owner-integration-check.md) |
 
 ## 5. Внешние адреса, к которым обращается `xm`
 
