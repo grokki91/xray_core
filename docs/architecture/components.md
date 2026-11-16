@@ -31,7 +31,7 @@
 ```go
 type Platform interface {
     Exec(ctx context.Context, c Command) (Result, error) // Command{Program, Args, Stdin}; без оболочки
-    FS() FS            // ReadFile, WriteFile (temp + fchown + fchmod + fsync + rename), Mkdir, Lock (flock)
+    FS() FS            // ReadFile, WriteFile (temp + fchown + fchmod + fsync + rename), Mkdir, Remove, Symlink, Readlink, Lock (flock)
     Systemd() Systemd  // юниты: установить, включить, start/stop/restart, состояние
     Net() Net          // Get по HTTPS (фаза 2); интерфейсы, маршруты, слушающие сокеты — фаза 4
     Users() Users      // системный пользователь службы
@@ -40,7 +40,8 @@ type Platform interface {
 ```
 
 - Команды — массивом аргументов, без `sh -c`; имя программы — из закрытого списка (имя → абсолютный
-  путь; пополняется с первым потребителем); окружение процесса — только `PATH` и `LC_ALL=C`;
+  путь; пополняется с первым потребителем); `xray` — только с `Command.Version` вида `N.N.N`, путь
+  `CoreDir/<версия>/xray` строит `platform` ([ADR-0019](../adr/0019-versioned-xray-exec-and-current-link.md)); окружение процесса — только `PATH` и `LC_ALL=C`;
   ненулевой код выхода — не ошибка, а `Result.ExitCode`.
 - Срок обязателен: `Exec` и `Lock` без дедлайна в контексте — ошибка `ErrDeadline`. Процесс
   запускается в своей группе: по сроку завершается вся группа. Вывод — не больше `MaxOutput`.
@@ -48,7 +49,9 @@ type Platform interface {
   `update`, общий предел выбран владельцем 2026-11-16 вместо отдельного); `Mkdir` на существующем
   каталоге с другими правами — ошибка, а не молчаливое исправление.
 - Пути — только абсолютные и очищенные; символическая ссылка в любом элементе пути — ошибка
-  `ErrSymlink`; файл создаётся сразу с правами и владельцем, без окна с чужими правами.
+  `ErrSymlink`, кроме последнего элемента у `Symlink` (заменяется атомарно, цель — одно имя в том
+  же каталоге) и `Readlink` (ADR-0019); `Remove` удаляет только обычный файл; бинарник `xray`
+  запускается, только если путь к нему без ссылок и файл обычный (иначе `ErrSymlink`, `ErrNotFound`); файл создаётся сразу с правами и владельцем, без окна с чужими правами.
 - Две реализации: настоящая (`New`) и поддельная (`NewFake`: файлы под временным каталогом,
   владельцы записываются, процессы отвечают обработчиками, вызовы записываются) — на ней идут
   тесты уровня L2 ([testing.md](../testing.md)). Работа с файлами у них общая, поэтому правила
@@ -61,7 +64,7 @@ type Platform interface {
   `ErrTooLarge`; в ошибке — только узел, без параметров адреса; прокси — из окружения
   (`HTTPS_PROXY`), список сверяется с узлом назначения; срок обязателен. Поддельная сеть отвечает заданными телами и перенаправлениями
   (`Serve`, `Redirect`) по тем же правилам.
-- Фаза 1 — `Exec`, `FS`, `Clock`; фаза 2 — `Net.Get`; `Systemd`, `Users`, остальное `Net` —
+- Фаза 1 — `Exec`, `FS`, `Clock`; фаза 2 — `Net.Get`, `xray` по версии, `Remove`, `Symlink`, `Readlink`; `Systemd`, `Users`, остальное `Net` —
   вместе с первым потребителем (фазы 2 и 4).
 
 ### store
@@ -136,19 +139,29 @@ Upstream-бинарник Xray на диске. Не знает, откуда б
 
 ```go
 type Manager interface {
-    Current(ctx context.Context) (Version, error)       // активная версия; пусто — не установлено
-    Stage(ctx context.Context, v Version, zip io.Reader) error // распаковать в каталог версии, проверить бинарник
-    Activate(ctx context.Context, v Version) error      // атомарно переключить ссылку current
-    Previous() (Version, bool)
-    Prune(keep int) error
-    Validate(ctx context.Context, configPath string) error // xray run -test
-    Tool(ctx context.Context, sub Subcommand, args ...string) ([]byte, error) // закрытый список подкоманд
+    Current(ctx context.Context) (Version, error)                // активная версия; пусто — не установлено
+    Stage(ctx context.Context, v Version, archive []byte) error  // распаковать xray в каталог версии, проверить
+    Activate(ctx context.Context, v Version) error               // проверить версию, атомарно переключить current
+    Validate(ctx context.Context, v Version, configPath string) error // xray run -test бинарником версии v
+    Previous() (Version, bool)                                   // фаза 5
+    Prune(keep int) error                                        // фаза 5
+    Tool(ctx context.Context, v Version, sub Subcommand, args ...string) ([]byte, error) // сигнатура — с первым потребителем (api statsquery)
 }
 ```
 
 - Данные: `/usr/local/lib/xm/core/<версия>/xray`, ссылка `current`; хранятся две версии.
-- Распаковка защищена от выхода из каталога; проверяется, что бинарник — ELF нужной архитектуры
-  и `xray version` отвечает ожидаемой версией. Фаза 2.
+- Распаковка защищена от выхода из каталога: любой путь вне каталога, абсолютный или с `\`
+  отвергает архив целиком; берётся только `xray` из корня архива, обычным файлом, не больше
+  128 МиБ; файлов в архиве не больше 32. Проверяется, что бинарник — исполняемый ELF64 x86-64 и
+  `xray version` называет ожидаемую версию; `Activate` повторяет проверку версии.
+- Предусловие `Stage`: суммы архива сверены (`update.Fetch`) — `Stage` запускает бинарник; связку
+  проверяет сценарий `app`. Выложенная версия не перезаписывается (`ErrStaged`): на неё может
+  указывать `current`. Бинарник, не прошедший проверку, удаляется.
+- Закрытый список подкоманд `core` — `version` и `run`; `x25519` и `uuid` не запускаются: секреты
+  создаёт только `security`. Вывод `run -test` в ошибку не попадает — решение по коду выхода
+  (23 — `ErrConfig`).
+- Каталоги `/usr/local/lib/xm/`, `core/`, `core/<версия>/` создаёт `Stage`: ядро ставится до
+  базовой защиты ([overview.md](overview.md) §6). Фаза 2.
 
 ### config
 

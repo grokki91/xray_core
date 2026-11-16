@@ -213,3 +213,109 @@ func (x files) Lock(ctx context.Context, path string) (func(), error) {
 	}
 	return func() { f.Close() }, nil // закрытие снимает flock
 }
+
+// checkBinary — бинарник xray по версии: обычный файл, без ссылок на пути (каталог версии,
+// подменённый ссылкой, не уводит запуск от root на чужой файл). Общая проверка обеих реализаций.
+func (x files) checkBinary(c Command, path string) error {
+	if c.Program != xrayProgram {
+		return nil
+	}
+	p := x.root + path
+	if err := x.noSymlinks(p); err != nil {
+		return err
+	}
+	fi, err := os.Lstat(p)
+	if err != nil {
+		return fmt.Errorf("%s %s: нет бинарника: %w", c.Program, c.Version, err)
+	}
+	if !fi.Mode().IsRegular() {
+		return fmt.Errorf("%s %s: бинарник не обычный файл", c.Program, c.Version)
+	}
+	return nil
+}
+
+func (x files) Remove(path string) error {
+	x.trace("remove", path)
+	p, err := x.real(path)
+	if err != nil {
+		return err
+	}
+	if err := x.noSymlinks(p); err != nil {
+		return err
+	}
+	fi, err := os.Lstat(p)
+	if err != nil {
+		return fmt.Errorf("удаление %s: %w", path, err)
+	}
+	if !fi.Mode().IsRegular() {
+		return fmt.Errorf("удаление %s: не обычный файл", path)
+	}
+	if err := os.Remove(p); err != nil {
+		return fmt.Errorf("удаление %s: %w", path, err)
+	}
+	return syncDir(filepath.Dir(p))
+}
+
+// checkTarget — цель ссылки: одно имя в том же каталоге (ADR-0019).
+func checkTarget(target string) error {
+	if target == "" || target == "." || target == ".." || strings.Contains(target, "/") {
+		return fmt.Errorf("%w: цель ссылки %q", ErrPath, target)
+	}
+	return nil
+}
+
+func (x files) Symlink(path, target string) (err error) {
+	x.trace("symlink", path)
+	if err := checkTarget(target); err != nil {
+		return err
+	}
+	p, err := x.real(path)
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(p)
+	// Сама ссылка на месте path заменяется — проверяется только путь к ней.
+	if err := x.noSymlinks(dir); err != nil {
+		return err
+	}
+	if fi, err := os.Lstat(p); err == nil && fi.IsDir() {
+		return fmt.Errorf("ссылка %s: на месте ссылки каталог", path)
+	}
+	tmp, err := os.CreateTemp(dir, ".xm-tmp-*")
+	if err != nil {
+		return fmt.Errorf("ссылка %s: %w", path, err)
+	}
+	name := tmp.Name()
+	tmp.Close()
+	// Имя занято на мгновение пустым файлом 0600: так оно уникально; ссылка встаёт на его место.
+	if err = os.Remove(name); err != nil {
+		return fmt.Errorf("ссылка %s: %w", path, err)
+	}
+	if err = os.Symlink(target, name); err != nil {
+		return fmt.Errorf("ссылка %s: %w", path, err)
+	}
+	if err = os.Rename(name, p); err != nil {
+		os.Remove(name)
+		return fmt.Errorf("замена %s: %w", path, err)
+	}
+	return syncDir(dir)
+}
+
+func (x files) Readlink(path string) (string, error) {
+	x.trace("readlink", path)
+	p, err := x.real(path)
+	if err != nil {
+		return "", err
+	}
+	if err := x.noSymlinks(filepath.Dir(p)); err != nil {
+		return "", err
+	}
+	fi, err := os.Lstat(p)
+	if err != nil {
+		return "", fmt.Errorf("ссылка %s: %w", path, err)
+	}
+	if fi.Mode()&fs.ModeSymlink == 0 {
+		return "", fmt.Errorf("ссылка %s: не символическая ссылка", path)
+	}
+	return os.Readlink(p)
+}

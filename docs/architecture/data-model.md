@@ -10,8 +10,9 @@
 | Путь | Владелец | Права | Секреты | Назначение |
 |---|---|---|---|---|
 | `/usr/local/bin/xm` | root:root | 0755 | нет | менеджер |
+| `/usr/local/lib/xm/`, `core/`, `core/<версия>/` | root:root | 0755 | нет | каталоги версий Xray; создаёт `core.Stage` |
 | `/usr/local/lib/xm/core/<версия>/xray` | root:root | 0755 | нет | бинарники Xray (две версии) |
-| `/usr/local/lib/xm/core/current` | root:root | ссылка | нет | активная версия |
+| `/usr/local/lib/xm/core/current` | root:root | ссылка | нет | активная версия: цель — имя каталога версии ([ADR-0019](../adr/0019-versioned-xray-exec-and-current-link.md)) |
 | `/etc/xm/` | root:root | 0700 | да | каталог состояния |
 | `/etc/xm/state.json` | root:root | 0600 | да | источник правды |
 | `/usr/local/etc/xray/` | root:xray | 0750 | да | каталог конфигурации Xray |
