@@ -81,13 +81,18 @@ check "stop: порт свободен" bash -c "! ss -ltnH 'sport = :$port' | g
 "$xm" start >"$out/start" 2>&1
 check "start: служба активна" systemctl is-active --quiet xray.service
 
-# 7. Секреты не попали в вывод команд: значения из состояния — канарейка
-leak=0
-while IFS= read -r secret; do
-	[[ -n $secret ]] || continue
-	grep -qF -- "$secret" "$out"/* && leak=1
-done < <(jq -r '.inbounds[].reality | .private_key, .public_key, (.short_ids[])' /etc/xm/state.json 2>/dev/null)
-((leak == 0)) && ok "вывод команд без секретов состояния" || bad "секрет состояния в выводе команд"
+# 7. Секреты не попали в вывод команд: значения из состояния — канарейка. Значения идут через
+# файл, а не аргументы процесса; пустой список — провал, а не «чисто».
+jq -r '(.inbounds[].reality | .private_key, .public_key, .short_ids[]), (.profiles[]?.id)' /etc/xm/state.json >"$out/.secrets" 2>/dev/null
+chmod 600 "$out/.secrets"
+n=$(grep -c . "$out/.secrets")
+if ((n < 3)); then
+	bad "канарейка: в состоянии найдено $n значений, нужно не меньше 3"
+elif grep -qF -f "$out/.secrets" "$out/install" "$out/status" "$out/again" "$out/stop" "$out/start"; then
+	bad "секрет состояния в выводе команд"
+else
+	ok "вывод команд без секретов состояния"
+fi
 
 if ((fails == 0)); then echo "l4: PASS"; else echo "l4: FAIL ($fails)"; fi
 ((fails == 0))
