@@ -178,10 +178,12 @@ type Manager interface {
 
 ```go
 type Manager interface {
-    Render(st State) (Rendered, error)
-    Write(ctx context.Context, r Rendered) error  // атомарно, права по манифесту
-    Drift(ctx context.Context) (bool, error)      // файл на диске ≠ последнему применённому
+    Render(st store.State, log json.RawMessage) (Rendered, error) // log — раздел от logging
+    Write(ctx context.Context, r Rendered) error  // атомарно, root:xray 0640
+    Drift(st store.State) (bool, error)           // файл на диске ≠ applied.config_sha256
 }
+
+type Rendered struct { Data []byte; SHA256 string }  // SHA256 → applied.config_sha256
 
 type Preset interface {  // каталог пресетов: config/preset
     ID() string                                   // например "reality-xhttp"
@@ -190,11 +192,14 @@ type Preset interface {  // каталог пресетов: config/preset
 }
 ```
 
-- Собирает разделы: `log` (от `logging`), `dns` (от `dns`), `inbounds` (пресет + клиенты от
-  `profile`), `outbounds`, `routing` (в том числе запрет частных и петлевых адресов назначения,
+- Собирает разделы: `log` (готовый раздел передаёт `app` от `logging`: менеджеры друг друга не
+  импортируют), `dns` (из `state.dns`; пока `doh` пуст — до фазы 4 — раздела нет), `inbounds` (пресет + клиенты из `state.profiles`), `outbounds`, `routing` (в том числе запрет частных и петлевых адресов назначения,
   [policy.md](../security/policy.md) §4).
 - Ручная правка файла — дрейф: `status` показывает его, следующее применение сохраняет
   изменённый файл в снимок и перезаписывает.
+- Входящий в MVP один; в `clients` попадают только включённые профили. Ошибки отрисовки несут
+  имена полей, не значения. Адреса назначения `0.0.0.0/8`, частные, петлевые и link-local
+  уходят в `blackhole` правилом с `domainStrategy: IPOnDemand`.
 - Проверка — `core.Validate` перед записью. Набор полей сверяется с upstream по скилу
   `xray-upstream`. Фаза 2.
 
