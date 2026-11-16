@@ -148,9 +148,13 @@ func (m *Manager) RemoveUnit(ctx context.Context) error {
 	return sd.Reload(ctx)
 }
 
-// Unit возвращает файл юнита как есть; юнита нет — nil без ошибки. Нужен транзакции, чтобы
-// вернуть юнит при откате (ADR-0023).
+// Unit возвращает файл юнита xm как есть; юнита нет — nil без ошибки; чужой юнит — ErrForeign и
+// его содержимое не читается наружу: в нём бывают переменные окружения с секретами. Нужен
+// транзакции, чтобы вернуть юнит при откате (ADR-0023).
 func (m *Manager) Unit() ([]byte, error) {
+	if _, err := m.ours(); err != nil {
+		return nil, err
+	}
 	data, err := m.p.FS().ReadFile(UnitPath)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil

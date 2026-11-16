@@ -33,16 +33,25 @@ var secretKey = strings.Repeat("Z", 10) + "canary" + "CANARY" + strings.Repeat("
 // armedFS — файловая система, которая один раз отказывает в записи по пути (после arm).
 type armedFS struct {
 	platform.FS
-	path  string
-	armed bool
+	path       string // запись по пути с этим началом
+	removePath string // удаление этого пути
+	armed      bool
 }
 
 func (a *armedFS) WriteFile(path string, data []byte, perm os.FileMode, o platform.Owner) error {
-	if a.armed && path == a.path {
+	if a.armed && strings.HasPrefix(path, a.path) {
 		a.armed = false
 		return errors.New("сбой записи (тест)")
 	}
 	return a.FS.WriteFile(path, data, perm, o)
+}
+
+func (a *armedFS) Remove(path string) error {
+	if a.removePath != "" && path == a.removePath {
+		a.removePath = ""
+		return errors.New("сбой удаления (тест)")
+	}
+	return a.FS.Remove(path)
 }
 
 type armedPlatform struct {
@@ -238,6 +247,7 @@ func TestApplyFailureAtEachStepRestoresOriginal(t *testing.T) {
 		"запись конфигурации":     {func(s *sys) { s.fs.path, s.fs.armed = config.Path, true }, "конфигурация: запись"},
 		"запись состояния":        {func(s *sys) { s.fs.path, s.fs.armed = store.StatePath, true }, "сбой записи"},
 		"перезапуск":              {func(s *sys) { s.failVerb = "restart" }, "systemctl restart"},
+		"удаление кандидата":      {func(s *sys) { s.fs.removePath = config.CandidatePath }, "сбой удаления"},
 		"контроль: порт закрыт":   {func(s *sys) { s.restartListens = []bool{false, true} }, "контроль не пройден"},
 	}
 	for name, step := range steps {
@@ -395,5 +405,75 @@ func TestCanaryNotInJournalOrErrors(t *testing.T) {
 	}
 	if _, err := os.Stat(s.f.Path(store.TxPath)); err == nil {
 		t.Fatal("журнал остался после отката")
+	}
+}
+
+// До журнала ничего не изменено: сбой снимка или записи журнала — обычная ошибка, не откат.
+func TestFailureBeforeJournalChangesNothing(t *testing.T) {
+	for name, arm := range map[string]func(s *sys){
+		"снимок":            func(s *sys) { s.fs.path, s.fs.armed = backup.Dir, true },
+		"журнал транзакции": func(s *sys) { s.fs.path, s.fs.armed = store.TxPath, true },
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := newSys(t)
+			if err := s.app.Apply(ctx(t), Change{Reason: "install", State: stateOf("phone"), Unit: unit1}); err != nil {
+				t.Fatal(err)
+			}
+			before := s.snap(t)
+			arm(s)
+			err := s.app.Apply(ctx(t), Change{Reason: "update", State: stateOf("phone", "laptop"), Unit: unit2, Core: v2})
+			if err == nil || errors.Is(err, ErrRolledBack) || errors.Is(err, ErrRollbackFailed) {
+				t.Fatalf("ждали обычную ошибку до изменений, получено %v", err)
+			}
+			if after := s.snap(t); !before.equal(after) {
+				t.Fatalf("система изменена до журнала: %+v", after)
+			}
+		})
+	}
+}
+
+// Чужой юнит — отказ до снимка и журнала: его байты в журнал не попадают и откат невозможен.
+func TestForeignUnitRefusedBeforeJournal(t *testing.T) {
+	for name, unit := range map[string]*server.UnitSpec{"юнит не меняется": nil, "юнит меняется": unit1} {
+		t.Run(name, func(t *testing.T) {
+			s := newSys(t)
+			foreign := "[Service]\nEnvironment=TOKEN=" + secretKey + "\n"
+			if err := s.f.FS().WriteFile(server.UnitPath, []byte(foreign), 0o644, platform.Root()); err != nil {
+				t.Fatal(err)
+			}
+			err := s.app.Apply(ctx(t), Change{Reason: "install", State: stateOf("phone"), Unit: unit})
+			if !errors.Is(err, server.ErrForeign) {
+				t.Fatalf("ждали ErrForeign, получено %v", err)
+			}
+			if s.snap(t).tx || s.snap(t).state != nil {
+				t.Fatal("что-то записано до отказа")
+			}
+			if got, _ := os.ReadFile(s.f.Path(server.UnitPath)); string(got) != foreign {
+				t.Fatal("чужой юнит изменён")
+			}
+		})
+	}
+}
+
+// Секрет не остаётся ни в журнале транзакции, ни в файле-кандидате.
+func TestCandidateAndJournalHoldNoSecret(t *testing.T) {
+	s := newSys(t)
+	if err := s.app.Apply(ctx(t), Change{Reason: "install", State: stateOf("phone"), Unit: unit1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(s.f.Path(config.CandidatePath)); err == nil {
+		t.Fatal("кандидат остался после успешной транзакции")
+	}
+	// Откат не удался — журнал остался на диске: в нём не должно быть секрета.
+	s.nRestart, s.restartListens = 0, []bool{false, false}
+	if err := s.app.Apply(ctx(t), Change{Reason: "update", State: stateOf("phone", "laptop"), Unit: unit2}); !errors.Is(err, ErrRollbackFailed) {
+		t.Fatalf("%v", err)
+	}
+	j, err := os.ReadFile(s.f.Path(store.TxPath))
+	if err != nil || bytes.Contains(j, []byte(secretKey)) {
+		t.Fatalf("журнал: %v, секрет внутри: %v", err, bytes.Contains(j, []byte(secretKey)))
+	}
+	if info, err := os.Stat(s.f.Path(store.TxPath)); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("права журнала: %v %v", info, err)
 	}
 }

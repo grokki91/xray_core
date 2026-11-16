@@ -154,7 +154,7 @@ func TestScanListeningOnlyListenState(t *testing.T) {
 		"   0: 00000000:01BB 00000000:0000 0A 0:0\n" + // 443 LISTEN
 		"   1: 0100007F:1F90 0100007F:C350 01 0:0\n" // 8080 ESTABLISHED
 	for port, want := range map[int]bool{443: true, 8080: false, 80: false} {
-		got, err := scanListening(strings.NewReader(strings.ReplaceAll(table, "\\\n", "\n")), port)
+		got, err := scanListening(strings.NewReader(table), port)
 		if err != nil || got != want {
 			t.Errorf("порт %d: %v %v, ждали %v", port, got, err, want)
 		}

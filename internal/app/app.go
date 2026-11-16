@@ -139,8 +139,12 @@ func (a *App) change(ctx context.Context, ch Change, st store.State, r config.Re
 	if err != nil {
 		return err
 	}
-	defer func() { _ = a.s.Config.Unstage() }()
-	if err := a.s.Core.Validate(ctx, version, path); err != nil {
+	// Кандидат с секретами нужен только проверке: убираем сразу, а не в конце.
+	err = a.s.Core.Validate(ctx, version, path)
+	if uerr := a.s.Config.Unstage(); err == nil {
+		err = uerr
+	}
+	if err != nil {
 		return err
 	}
 	if version != coreBefore {
@@ -264,8 +268,10 @@ func (a *App) rollback(ctx context.Context, tx store.Tx) error {
 		return err
 	}
 	if tx.UnitBefore != nil && tx.WasActive {
+		// Службы без состояния не бывает; порта нет — поднимать и проверять нечего, служба
+		// остаётся остановленной (ADR-0023).
 		if tx.PortBefore == 0 {
-			return errors.New("служба работала, а порт до транзакции не известен")
+			return a.s.Store.ClearTx()
 		}
 		if err := svc.Restart(ctx); err != nil {
 			return err
