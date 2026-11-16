@@ -19,7 +19,9 @@ import (
 type files struct {
 	root  string
 	chown func(f *os.File, path string, o Owner) error
-	trace func(op, path string)
+	// ownerOf — владелец существующего пути: у Real из inode, у Fake из записанных назначений.
+	ownerOf func(path string, fi fs.FileInfo) Owner
+	trace   func(op, path string)
 }
 
 func (x files) real(path string) (string, error) {
@@ -155,6 +157,9 @@ func (x files) Mkdir(path string, perm fs.FileMode, owner Owner) error {
 		// Чужие права не исправляются молча: приведение — дело манифеста (security).
 		if fi.Mode().Perm() != perm.Perm() {
 			return fmt.Errorf("каталог %s: права %v, нужны %v", path, fi.Mode().Perm(), perm.Perm())
+		}
+		if got := x.ownerOf(path, fi); got != owner {
+			return fmt.Errorf("каталог %s: владелец %d:%d, нужен %d:%d", path, got.UID, got.GID, owner.UID, owner.GID)
 		}
 		return nil
 	} else if err != nil {

@@ -3,6 +3,7 @@ package platform
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"slices"
 	"strings"
@@ -25,11 +26,12 @@ type Fake struct {
 	handlers  map[string]func(Command) (Result, error)
 	underRoot map[string]bool
 	routes    map[string]fakeRoute
+	users     map[string]Owner
 }
 
-// Call — записанный вызов: операция и путь или программа с аргументами.
+// Call — записанный вызов: операция и путь, имя пользователя или программа с аргументами.
 type Call struct {
-	Op      string // read, write, mkdir, symlink, readlink, lock, exec, get
+	Op      string // read, write, mkdir, symlink, readlink, lock, exec, get, user
 	Path    string // путь файла, имя программы или адрес
 	Version string // версия xray
 	Args    []string
@@ -39,8 +41,8 @@ type Call struct {
 func NewFake(root string, now time.Time) *Fake { return newFake(root, now, programs()) }
 
 func newFake(root string, now time.Time, progs map[string]string) *Fake {
-	f := &Fake{programs: progs, now: now, owners: map[string]Owner{}, handlers: map[string]func(Command) (Result, error){}, underRoot: map[string]bool{}, routes: map[string]fakeRoute{}}
-	f.files = files{root: root, chown: f.recordOwner, trace: f.trace}
+	f := &Fake{programs: progs, now: now, owners: map[string]Owner{}, handlers: map[string]func(Command) (Result, error){}, underRoot: map[string]bool{}, routes: map[string]fakeRoute{}, users: map[string]Owner{}}
+	f.files = files{root: root, chown: f.recordOwner, ownerOf: f.ownerOf, trace: f.trace}
 	return f
 }
 
@@ -49,6 +51,13 @@ func (f *Fake) recordOwner(_ *os.File, path string, o Owner) error {
 	defer f.mu.Unlock()
 	f.owners[path] = o
 	return nil
+}
+
+// ownerOf — владелец пути у подделки: назначенный Mkdir или WriteFile, иначе root.
+func (f *Fake) ownerOf(path string, _ fs.FileInfo) Owner {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.owners[path]
 }
 
 func (f *Fake) trace(op, path string) {
@@ -74,6 +83,8 @@ func (f *Fake) Redirect(from, to string) {
 	defer f.mu.Unlock()
 	f.routes[from] = fakeRoute{location: to}
 }
+
+func (f *Fake) Users() Users { return fakeUsers{f} }
 
 func (f *Fake) Clock() Clock { return fakeClock{f} }
 
