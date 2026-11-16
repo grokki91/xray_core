@@ -5,7 +5,7 @@
 | Шаг | Кто | Обязателен |
 |---|---|---|
 | Самопроверка | автор (агент): `bash scripts/check.sh`, чек-лист §2 | всегда |
-| Ревью безопасности | субагент `security-reviewer` | изменение затрагивает пути правил `secrets.md`, `update.md`, `platform.md`, `interfaces.md`, юнит, права, хуки, CI |
+| Ревью безопасности | субагент `security-reviewer` | изменение затрагивает пути правил `secrets.md`, `update.md`, `platform.md`, `interfaces.md`, `network.md`, юнит, права, хуки, CI |
 | Ревью архитектуры | субагент `architecture-reviewer` | новый пакет, новый импорт между слоями, изменение `docs/architecture/` или ADR |
 | Проверка на реальной интеграции | субагент `integration-check`, запуск — владелец | эффект не доказывают L0–L4 ([integration-check.md](integration-check.md) §1) |
 | Решение о слиянии | владелец | всегда |
