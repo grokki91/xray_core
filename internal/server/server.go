@@ -48,14 +48,18 @@ type UnitSpec struct {
 	Hardening []UnitOption
 }
 
-// Service — управление службой xray.service.
-type Service struct{ s platform.Systemd }
+// Service — управление службой xray.service и контроль её состояния.
+type Service struct {
+	s     platform.Systemd
+	net   platform.Net
+	clock platform.Clock
+}
 
 // Status — состояние службы (platform.UnitStatus).
 type Status = platform.UnitStatus
 
 // Service возвращает управление службой.
-func (m *Manager) Service() Service { return Service{m.p.Systemd()} }
+func (m *Manager) Service() Service { return Service{m.p.Systemd(), m.p.Net(), m.p.Clock()} }
 
 func (s Service) Start(ctx context.Context) error   { return s.s.Start(ctx) }
 func (s Service) Stop(ctx context.Context) error    { return s.s.Stop(ctx) }
@@ -142,4 +146,43 @@ func (m *Manager) RemoveUnit(ctx context.Context) error {
 		return fmt.Errorf("юнит %s: %w", platform.ServiceUnit, err)
 	}
 	return sd.Reload(ctx)
+}
+
+// Unit возвращает файл юнита xm как есть; юнита нет — nil без ошибки; чужой юнит — ErrForeign и
+// его содержимое не читается наружу: в нём бывают переменные окружения с секретами. Нужен
+// транзакции, чтобы вернуть юнит при откате (ADR-0023).
+func (m *Manager) Unit() ([]byte, error) {
+	if _, err := m.ours(); err != nil {
+		return nil, err
+	}
+	data, err := m.p.FS().ReadFile(UnitPath)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("юнит %s: %w", platform.ServiceUnit, err)
+	}
+	return data, nil
+}
+
+// RestoreUnit возвращает юнит, снятый Unit: nil — юнита не было, удалить свой. Файл без метки xm
+// не записывается и поверх чужого юнита не пишется.
+func (m *Manager) RestoreUnit(ctx context.Context, data []byte) error {
+	if data == nil {
+		return m.RemoveUnit(ctx)
+	}
+	if first, _, _ := bytes.Cut(data, []byte("\n")); string(first) != Label {
+		return fmt.Errorf("%w: восстанавливаемый юнит без метки", ErrForeign)
+	}
+	if _, err := m.ours(); err != nil {
+		return err
+	}
+	if err := m.p.FS().WriteFile(UnitPath, data, 0o644, platform.Root()); err != nil {
+		return fmt.Errorf("юнит %s: %w", platform.ServiceUnit, err)
+	}
+	sd := m.p.Systemd()
+	if err := sd.Reload(ctx); err != nil {
+		return err
+	}
+	return sd.Enable(ctx)
 }

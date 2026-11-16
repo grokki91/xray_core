@@ -91,6 +91,9 @@ type Net interface {
 	// http.DefaultTransport: список сверяется с узлом назначения, TLS — до него; контекст
 	// обязан нести срок.
 	Get(ctx context.Context, r Request) ([]byte, error)
+	// Listening сообщает, слушает ли хост TCP-порт на любом адресе (IPv4 или IPv6): по таблицам
+	// сокетов ядра, без соединения. Новых портов не открывает.
+	Listening(ctx context.Context, port int) (bool, error)
 }
 
 // Request — загрузка: адрес, закрытый список узлов потребителя и предел тела в байтах.
@@ -103,6 +106,8 @@ type Request struct {
 // Clock — время.
 type Clock interface {
 	Now() time.Time
+	// Sleep ждёт d или конца ctx; при отмене возвращает ошибку контекста.
+	Sleep(ctx context.Context, d time.Duration) error
 }
 
 var (

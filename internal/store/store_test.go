@@ -181,3 +181,75 @@ func TestLock(t *testing.T) {
 		t.Errorf("каталог блокировки: %v, %v; нужны 0700", fi.Mode().Perm(), err)
 	}
 }
+
+func txEnv(t *testing.T) *Store {
+	t.Helper()
+	s, f := fakeStore(t)
+	for _, d := range []string{"/var", "/var/lib", "/var/lib/xm", "/var/lib/xm/tx"} {
+		if err := f.FS().Mkdir(d, 0o700, platform.Root()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return s
+}
+
+func TestTxRoundTripAndNoOverwrite(t *testing.T) {
+	s := txEnv(t)
+	if _, ok, err := s.ReadTx(); ok || err != nil {
+		t.Fatalf("журнала нет: %v %v", ok, err)
+	}
+	in := Tx{Snapshot: "20260102T030405Z-auto", CoreBefore: "26.11.9", UnitBefore: []byte("[Unit]\n"), WasActive: true, PortBefore: 443}
+	if err := s.WriteTx(in); err != nil {
+		t.Fatal(err)
+	}
+	out, ok, err := s.ReadTx()
+	if err != nil || !ok || out.Snapshot != in.Snapshot || string(out.UnitBefore) != "[Unit]\n" || !out.WasActive || out.PortBefore != 443 || out.CoreBefore != "26.11.9" {
+		t.Fatalf("%+v %v %v", out, ok, err)
+	}
+	if err := s.WriteTx(in); !errors.Is(err, ErrTx) {
+		t.Fatalf("журнал незавершённой транзакции перезаписан: %v", err)
+	}
+	if err := s.ClearTx(); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := s.ReadTx(); ok {
+		t.Fatal("журнал не удалён")
+	}
+	if err := s.ClearTx(); err != nil {
+		t.Fatalf("повторное удаление: %v", err)
+	}
+}
+
+func TestReadTxRejectsDamaged(t *testing.T) {
+	for name, data := range map[string]string{"не JSON": "x", "чужое поле": `{"version":1,"snapshot":"a","x":1}`, "версия": `{"version":2,"snapshot":"a"}`, "без снимка": `{"version":1}`} {
+		s, f := txEnv(t), (*platform.Fake)(nil)
+		_ = f
+		if err := s.fs.WriteFile(TxPath, []byte(data), 0o600, platform.Root()); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := s.ReadTx(); !errors.Is(err, ErrTx) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+func TestRestoreVerbatimAndAbsent(t *testing.T) {
+	s, f := fakeStore(t)
+	bad := []byte("не json, но возвращается как есть")
+	if err := s.Restore(bad); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := f.FS().ReadFile(StatePath)
+	if !bytes.Equal(got, bad) {
+		t.Fatal("Restore изменил байты")
+	}
+	if err := s.Restore(nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.FS().ReadFile(StatePath); !errors.Is(err, platform.ErrNotFound) {
+		t.Fatalf("файл не удалён: %v", err)
+	}
+	if err := s.Restore(nil); err != nil {
+		t.Fatalf("удаление отсутствующего: %v", err)
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -123,5 +124,55 @@ func TestNetAgree(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestListeningReal(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skip("нет петли для теста:", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	c, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	on, err := New().Net().Listening(c, port)
+	if err != nil || !on {
+		t.Fatalf("слушаемый порт %d: %v %v", port, on, err)
+	}
+	ln.Close()
+	on, err = New().Net().Listening(c, port)
+	if err != nil || on {
+		t.Fatalf("закрытый порт %d: %v %v", port, on, err)
+	}
+	if _, err := New().Net().Listening(c, 0); err == nil {
+		t.Fatal("порт 0 принят")
+	}
+}
+
+func TestScanListeningOnlyListenState(t *testing.T) {
+	table := "  sl  local_address rem_address   st\n" +
+		"   0: 00000000:01BB 00000000:0000 0A 0:0\n" + // 443 LISTEN
+		"   1: 0100007F:1F90 0100007F:C350 01 0:0\n" // 8080 ESTABLISHED
+	for port, want := range map[int]bool{443: true, 8080: false, 80: false} {
+		got, err := scanListening(strings.NewReader(table), port)
+		if err != nil || got != want {
+			t.Errorf("порт %d: %v %v, ждали %v", port, got, err, want)
+		}
+	}
+}
+
+func TestFakeListeningAndSleep(t *testing.T) {
+	f := NewFake(t.TempDir(), time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	c, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if on, _ := f.Net().Listening(c, 443); on {
+		t.Fatal("по умолчанию порт не слушается")
+	}
+	f.SetListening(443, true)
+	if on, _ := f.Net().Listening(c, 443); !on {
+		t.Fatal("SetListening не подействовал")
+	}
+	if err := f.Clock().Sleep(c, 3*time.Second); err != nil || !f.Clock().Now().Equal(time.Date(2026, 1, 1, 0, 0, 3, 0, time.UTC)) {
+		t.Fatalf("Sleep: %v %v", err, f.Clock().Now())
 	}
 }

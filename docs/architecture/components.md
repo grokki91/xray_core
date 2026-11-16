@@ -33,7 +33,7 @@ type Platform interface {
     Exec(ctx context.Context, c Command) (Result, error) // Command{Program, Args, Stdin}; без оболочки
     FS() FS            // ReadFile, WriteFile (temp + fchown + fchmod + fsync + rename), Mkdir, Remove, Symlink, Readlink, Lock (flock)
     Systemd() Systemd  // только xray.service: Running, Reload, Enable/Disable, Start/Stop/Restart, Status
-    Net() Net          // Get по HTTPS (фаза 2); интерфейсы, маршруты, слушающие сокеты — фаза 4
+    Net() Net          // Get по HTTPS, Listening — порт слушается (фаза 2); интерфейсы, маршруты — фаза 4
     Users() Users      // системный пользователь службы; Effective — владелец процесса xm
     Journal() Journal  // запись в journald, идентификатор xm (ADR-0022)
     Clock() Clock
@@ -70,6 +70,9 @@ type Platform interface {
   `ErrTooLarge`; в ошибке — только узел, без параметров адреса; прокси — из окружения
   (`HTTPS_PROXY`), список сверяется с узлом назначения; срок обязателен. Поддельная сеть отвечает заданными телами и перенаправлениями
   (`Serve`, `Redirect`) по тем же правилам.
+- `Net.Listening(ctx, port)` — слушает ли хост TCP-порт: строки `LISTEN` в `/proc/net/tcp` и `tcp6`
+  (нет `tcp6` на хосте без IPv6 — не ошибка); соединений не открывает. `Clock.Sleep(ctx, d)` — ожидание
+  до конца `ctx`; у подделки сдвигает часы ([ADR-0023](../adr/0023-transaction-control-and-rollback-scope.md)).
 - `Users.Ensure(ctx, имя)` — владелец пользователя; нет такого — создаёт системного без оболочки и
   домашнего каталога через `useradd` из закрытого списка. Допустимо одно имя, `ServiceUser`
   (`xray`): политика §3 не разрешает менять других пользователей; иное имя — `ErrName`. Поддельные пользователи получают идентификаторы с 990.
@@ -92,6 +95,8 @@ type Store interface {
     Load() (State, error)                // ErrNoState, ErrSchema, ErrNewerSchema
     Save(State) error                    // только внутри транзакции
     Lock(ctx context.Context) (unlock func(), err error)
+    WriteTx(Tx) error; ReadTx() (Tx, bool, error); ClearTx() error // журнал транзакции
+    Restore(data []byte) error                                    // байты снимка как есть; nil — удалить
 }
 ```
 
@@ -102,6 +107,9 @@ type Store interface {
   → правила содержимого (порт, адрес, хотя бы один входящий с ключами и shortId, список
   профилей). Состояние новее сборки — отказ «обновите xm». Мигрированное состояние пишет
   следующий `Save`.
+- Журнал транзакции `/var/lib/xm/tx/pending.json`: снимок, прежние версия ядра, юнит, активность
+  службы и порт; `WriteTx` не перезаписывает существующий. `Restore` схему не проверяет: снимок мог
+  быть снят с повреждённого состояния ([ADR-0023](../adr/0023-transaction-control-and-rollback-scope.md)).
 - Запись — `platform.FS.WriteFile` с `0600` и root; блокировка — `flock` файла `/run/xm/lock`
   (каталог создаётся при необходимости: `/run` — tmpfs).
 
@@ -188,6 +196,8 @@ type Manager interface {
     Render(st store.State, log json.RawMessage) (Rendered, error) // log — раздел от logging
     Write(ctx context.Context, r Rendered) error  // атомарно, root:xray 0640
     Drift(st store.State) (bool, error)           // файл на диске ≠ applied.config_sha256
+    Stage(r Rendered) (path string, err error)    // кандидат для `xray run -test` в каталоге транзакций
+    Unstage() error; Remove() error               // убрать кандидата; убрать config.json при откате чистой установки
 }
 
 type Rendered struct { Data []byte; SHA256 string }  // SHA256 → applied.config_sha256
@@ -255,7 +265,9 @@ type Manager interface {
     Preflight(ctx context.Context) (HostFacts, []Issue) // ОС, архитектура, ресурсы, systemd, время, чужая установка
     InstallUnit(ctx context.Context, spec UnitSpec) error
     RemoveUnit(ctx context.Context) error
-    Service() Service                                    // Start, Stop, Restart, Status
+    Service() Service                                    // Start, Stop, Restart, Status, CheckRunning, CheckStopped
+    Unit() ([]byte, error)                               // файл юнита как есть; нет — nil
+    RestoreUnit(ctx context.Context, data []byte) error  // вернуть снятый юнит; nil — удалить свой
 }
 ```
 
@@ -275,7 +287,9 @@ type Manager interface {
   `root:root 0644`, `daemon-reload`, `enable`; службу не запускает. `RemoveUnit` — `disable`, удаление,
   `daemon-reload`; юнита нет — не ошибка; чужой юнит не трогают оба (`ErrForeign`).
 - `Service()` — `Start`, `Stop`, `Restart`, `Status` (`platform.UnitStatus`: загружен, состояние,
-  автозапуск, число перезапусков, PID). Контроль «без цикла перезапусков» строит `app` по `Restarts`.
+  автозапуск, число перезапусков, PID). `CheckRunning(ctx, port)` — контроль после изменения: активна,
+  `Restarts=0`, порт слушается, повтор после выдержки; `CheckStopped` — неактивна и порт свободен.
+  Срок — из `ctx`; провал — `ErrControl` ([ADR-0023](../adr/0023-transaction-control-and-rollback-scope.md)).
 - Расширение «несколько VPS»: реестр узлов (алиас SSH, без учётных данных) и исполнитель,
   вызывающий на узле тот же `xm … --json`. Фаза 2; реестр — после MVP.
 
@@ -482,8 +496,11 @@ type App interface {
 }
 ```
 
-- Транзакция: блокировка → снимок → изменение → проверка → запись → перезапуск → контроль →
-  фиксация или откат; незавершённая транзакция откатывается при следующем запуске.
+- Транзакция `Apply(ctx, Change)`: блокировка → откат незавершённой → отрисовка → снимок → журнал →
+  `xray run -test` → ядро, юнит, конфигурация, состояние → перезапуск → контроль → фиксация или
+  откат ([ADR-0005](../adr/0005-transactions-and-rollback.md), [ADR-0023](../adr/0023-transaction-control-and-rollback-scope.md)).
+  Ошибки: `ErrRolledBack` (код 1) и `ErrRollbackFailed` (код 5). `Recover` откатывает незавершённую
+  транзакцию при следующем запуске. Сценарии `Install`, `Service` и прочие — шаг 10 и далее.
 - Возвращает типы `contract`; о терминале и HTTP не знает. Фаза 2 и далее.
 
 ---

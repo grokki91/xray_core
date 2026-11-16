@@ -29,6 +29,7 @@ type Fake struct {
 	users     map[string]Owner
 	effective Owner
 	journal   *fakeJournal
+	listening map[int]bool
 }
 
 // Call — записанный вызов: операция и путь, имя пользователя или программа с аргументами.
@@ -43,7 +44,7 @@ type Call struct {
 func NewFake(root string, now time.Time) *Fake { return newFake(root, now, programs()) }
 
 func newFake(root string, now time.Time, progs map[string]string) *Fake {
-	f := &Fake{programs: progs, now: now, owners: map[string]Owner{}, handlers: map[string]func(Command) (Result, error){}, underRoot: map[string]bool{}, routes: map[string]fakeRoute{}, users: map[string]Owner{}}
+	f := &Fake{programs: progs, now: now, owners: map[string]Owner{}, handlers: map[string]func(Command) (Result, error){}, underRoot: map[string]bool{}, routes: map[string]fakeRoute{}, users: map[string]Owner{}, listening: map[int]bool{}}
 	f.journal = &fakeJournal{f: f}
 	f.files = files{root: root, chown: f.recordOwner, ownerOf: f.ownerOf, trace: f.trace}
 	return f
@@ -87,6 +88,13 @@ func (f *Fake) Redirect(from, to string) {
 	f.routes[from] = fakeRoute{location: to}
 }
 
+// SetListening задаёт, слушает ли «хост» порт.
+func (f *Fake) SetListening(port int, on bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.listening[port] = on
+}
+
 func (f *Fake) Users() Users { return fakeUsers{f} }
 
 func (f *Fake) Clock() Clock { return fakeClock{f} }
@@ -97,6 +105,17 @@ func (c fakeClock) Now() time.Time {
 	c.f.mu.Lock()
 	defer c.f.mu.Unlock()
 	return c.f.now
+}
+
+// Sleep у подделки не ждёт: часы сдвигаются на d.
+func (c fakeClock) Sleep(ctx context.Context, d time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	c.f.mu.Lock()
+	defer c.f.mu.Unlock()
+	c.f.now = c.f.now.Add(d)
+	return nil
 }
 
 // SetNow переводит часы.

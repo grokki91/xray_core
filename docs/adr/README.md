@@ -38,3 +38,4 @@
 | [0020](0020-l3-stand.md) | Стенд L3 с настоящим Xray | Принято |
 | [0021](0021-owner-integration-check.md) | Проверка владельцем на реальной интеграции | Принято |
 | [0022](0022-journald-from-platform.md) | Журнал `xm` — запись в journald через `platform` | Принято |
+| [0023](0023-transaction-control-and-rollback-scope.md) | Контроль и границы отката транзакции | Принято |
