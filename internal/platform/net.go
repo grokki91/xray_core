@@ -1,14 +1,19 @@
 package platform
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
+	"os"
 	"slices"
+	"strconv"
+	"strings"
 )
 
 // maxRedirects — предел цепочки перенаправлений: релизы GitHub дают одно.
@@ -131,4 +136,79 @@ func (n fakeNet) Get(ctx context.Context, r Request) ([]byte, error) {
 		}
 		cur = route.location
 	}
+}
+
+// procTCP — таблицы сокетов ядра; состояние 0A — LISTEN.
+var procTCP = []string{"/proc/net/tcp", "/proc/net/tcp6"}
+
+func checkPort(port int) error {
+	if port < 1 || port > 65535 {
+		return fmt.Errorf("порт %d вне 1–65535", port)
+	}
+	return nil
+}
+
+func (realNet) Listening(ctx context.Context, port int) (bool, error) {
+	if err := checkPort(port); err != nil {
+		return false, err
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	for _, path := range procTCP {
+		f, err := os.Open(path)
+		// На хосте без IPv6 таблицы tcp6 нет: слушать на IPv6 там нечему.
+		if errors.Is(err, fs.ErrNotExist) && path == procTCP[1] {
+			continue
+		}
+		if err != nil {
+			return false, fmt.Errorf("таблица сокетов %s: %w", path, err)
+		}
+		on, err := scanListening(f, port)
+		f.Close()
+		if err != nil {
+			return false, fmt.Errorf("таблица сокетов %s: %w", path, err)
+		}
+		if on {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// scanListening ищет в таблице /proc/net/tcp* сокет в состоянии LISTEN на порту port.
+func scanListening(r io.Reader, port int) (bool, error) {
+	sc := bufio.NewScanner(r)
+	sc.Scan() // заголовок
+	for sc.Scan() {
+		f := strings.Fields(sc.Text())
+		if len(f) < 4 || f[3] != "0A" {
+			continue
+		}
+		_, hex, ok := strings.Cut(f[1], ":")
+		if !ok {
+			return false, errors.New("строка таблицы без порта")
+		}
+		p, err := strconv.ParseUint(hex, 16, 16)
+		if err != nil {
+			return false, errors.New("порт в таблице не число")
+		}
+		if int(p) == port {
+			return true, nil
+		}
+	}
+	return false, sc.Err()
+}
+
+func (n fakeNet) Listening(ctx context.Context, port int) (bool, error) {
+	if err := checkPort(port); err != nil {
+		return false, err
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	n.f.mu.Lock()
+	defer n.f.mu.Unlock()
+	n.f.calls = append(n.f.calls, Call{Op: "listening", Path: strconv.Itoa(port)})
+	return n.f.listening[port], nil
 }

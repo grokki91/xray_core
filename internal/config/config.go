@@ -177,3 +177,28 @@ type rule struct {
 	IP          []string `json:"ip"`
 	OutboundTag string   `json:"outboundTag"`
 }
+
+// CandidatePath — временный файл новой конфигурации для `xray run -test`: до атомарной записи в
+// Path (ADR-0005, шаг 3–4). Секреты внутри — поэтому каталог транзакций и права 0600.
+const CandidatePath = "/var/lib/xm/tx/config.candidate.json"
+
+// Stage записывает кандидата и возвращает его путь для core.Validate. Убирает его Unstage.
+func (m *Manager) Stage(r Rendered) (string, error) {
+	if err := m.p.FS().WriteFile(CandidatePath, r.Data, 0o600, platform.Root()); err != nil {
+		return "", fmt.Errorf("конфигурация: кандидат: %w", err)
+	}
+	return CandidatePath, nil
+}
+
+// Unstage удаляет кандидата; его отсутствие — не ошибка.
+func (m *Manager) Unstage() error { return m.removeIfAny(CandidatePath) }
+
+// Remove удаляет config.json: откат установки, которой не было (в снимке файла нет).
+func (m *Manager) Remove() error { return m.removeIfAny(Path) }
+
+func (m *Manager) removeIfAny(path string) error {
+	if err := m.p.FS().Remove(path); err != nil && !errors.Is(err, platform.ErrNotFound) {
+		return fmt.Errorf("конфигурация: удаление %s: %w", path, err)
+	}
+	return nil
+}

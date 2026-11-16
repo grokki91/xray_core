@@ -1,0 +1,399 @@
+package app
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/grokki91/xray_core/internal/backup"
+	"github.com/grokki91/xray_core/internal/config"
+	"github.com/grokki91/xray_core/internal/core"
+	"github.com/grokki91/xray_core/internal/logging"
+	"github.com/grokki91/xray_core/internal/platform"
+	"github.com/grokki91/xray_core/internal/redact"
+	"github.com/grokki91/xray_core/internal/server"
+	"github.com/grokki91/xray_core/internal/store"
+)
+
+const (
+	v1, v2 = "26.10.31", "26.11.9"
+	port   = 443
+)
+
+// Значения собраны во время теста: в исходниках секретоподобных строк нет.
+// 43 знака base64 RawURL, последний — «A», чтобы значение было ключом из 32 байт.
+var secretKey = strings.Repeat("Z", 10) + "canary" + "CANARY" + strings.Repeat("9", 10) + strings.Repeat("Z", 10) + "A"
+
+// armedFS — файловая система, которая один раз отказывает в записи по пути (после arm).
+type armedFS struct {
+	platform.FS
+	path  string
+	armed bool
+}
+
+func (a *armedFS) WriteFile(path string, data []byte, perm os.FileMode, o platform.Owner) error {
+	if a.armed && path == a.path {
+		a.armed = false
+		return errors.New("сбой записи (тест)")
+	}
+	return a.FS.WriteFile(path, data, perm, o)
+}
+
+type armedPlatform struct {
+	platform.Platform
+	fs *armedFS
+}
+
+func (p armedPlatform) FS() platform.FS { return p.fs }
+
+// sys — поддельная машина: systemctl с состоянием, xray с кодом проверки, порт по плану.
+type sys struct {
+	f   *platform.Fake
+	fs  *armedFS
+	app *App
+
+	active, loaded     bool
+	failVerb           string // глагол systemctl, который отказывает
+	testExit           int    // код `xray run -test`
+	badVersion         string // версия, которую xray называет неверно
+	restartListens     []bool // слушает ли порт после очередного перезапуска; пусто — слушает
+	restarts, nRestart int
+}
+
+func newSys(t *testing.T) *sys {
+	t.Helper()
+	root := t.TempDir()
+	for _, d := range []string{"/etc/xm", "/usr/local/etc/xray", "/var/lib/xm/backups", "/var/lib/xm/tx", "/etc/systemd/system", "/usr/local/lib/xm/core", "/run"} {
+		if err := os.MkdirAll(root+d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f := platform.NewFake(root, time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC))
+	s := &sys{f: f}
+	s.fs = &armedFS{FS: f.FS()}
+	p := armedPlatform{f, s.fs}
+	for _, v := range []string{v1, v2} {
+		d := platform.CoreDir + "/" + v
+		if err := os.MkdirAll(root+d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.FS().WriteFile(d+"/xray", []byte("не настоящий бинарник"), 0o755, platform.Root()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.FS().Symlink(platform.CoreDir+"/current", v1); err != nil {
+		t.Fatal(err)
+	}
+	f.Handle("xray", func(c platform.Command) (platform.Result, error) {
+		if c.Args[0] == "version" {
+			name := c.Version
+			if name == s.badVersion {
+				name = "0.0.1"
+			}
+			return platform.Result{Stdout: []byte("Xray " + name + " (Xray, Penetrates Everything.) abc (go1.27.4 linux/amd64)\n")}, nil
+		}
+		return platform.Result{ExitCode: s.testExit}, nil
+	})
+	f.Handle("systemctl", func(c platform.Command) (platform.Result, error) {
+		verb := c.Args[2]
+		if verb == s.failVerb {
+			s.failVerb = "" // отказ одноразовый: откат должен мочь выполнить тот же глагол
+			return platform.Result{ExitCode: 1}, nil
+		}
+		switch verb {
+		case "show":
+			_, err := os.Stat(f.Path(server.UnitPath))
+			load := "not-found"
+			if err == nil {
+				load = "loaded"
+			}
+			act := "inactive"
+			if s.active {
+				act = "active"
+			}
+			sub := map[bool]string{true: "running", false: "dead"}[s.active]
+			return platform.Result{Stdout: []byte(fmt.Sprintf("LoadState=%s\nActiveState=%s\nSubState=%s\nUnitFileState=enabled\nNRestarts=0\nMainPID=1\n", load, act, sub))}, nil
+		case "restart", "start":
+			listens := true
+			if s.nRestart < len(s.restartListens) {
+				listens = s.restartListens[s.nRestart]
+			}
+			s.nRestart++
+			s.restarts++
+			s.active = true
+			f.SetListening(port, listens)
+		case "stop":
+			s.active = false
+			f.SetListening(port, false)
+		}
+		return platform.Result{}, nil
+	})
+	reg := redact.New()
+	cfgPath := config.Path
+	s.app = New(Services{
+		Store: store.New(p.FS()), Backup: backup.New(p), Config: config.New(p), Core: core.New(p),
+		Server: server.New(p, cfgPath), Logging: logging.New(p, reg, slog.LevelInfo),
+		XM: "0.1.0", Now: f.Clock().Now, ControlTimeout: 150 * time.Millisecond,
+	})
+	return s
+}
+
+func ctx(t *testing.T) context.Context {
+	c, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	t.Cleanup(cancel)
+	return c
+}
+
+func stateOf(profiles ...string) store.State {
+	st := store.State{
+		SchemaVersion: 1,
+		Server:        store.Server{Port: port, Addresses: store.Addresses{IPv4: "203.0.113.10"}},
+		Inbounds: []store.Inbound{{
+			Preset: "reality-xhttp",
+			Reality: store.Reality{Target: "example.com:443", ServerNames: []string{"example.com"},
+				PrivateKey: secretKey, PublicKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", ShortIDs: []string{"0123456789abcdef"}},
+			Params: map[string]string{"path": "/example"},
+		}},
+		Profiles: []store.Profile{},
+	}
+	for i, n := range profiles {
+		st.Profiles = append(st.Profiles, store.Profile{Name: n, ID: fmt.Sprintf("00000000-0000-4000-8000-%012d", i+1), Enabled: true})
+	}
+	return st
+}
+
+var unit1 = &server.UnitSpec{Hardening: []server.UnitOption{{Key: "NoNewPrivileges", Value: "true"}}}
+var unit2 = &server.UnitSpec{Hardening: []server.UnitOption{{Key: "NoNewPrivileges", Value: "true"}, {Key: "PrivateTmp", Value: "true"}}}
+
+// snapshot — всё, что транзакция обязана возвращать: файлы, ссылка current, служба.
+type snapshot struct {
+	state, config, unit []byte
+	current             string
+	active              bool
+	tx                  bool
+}
+
+func (s *sys) snap(t *testing.T) snapshot {
+	t.Helper()
+	read := func(p string) []byte {
+		b, err := os.ReadFile(s.f.Path(p))
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	cur, _ := s.f.FS().Readlink(platform.CoreDir + "/current")
+	_, txErr := os.Stat(s.f.Path(store.TxPath))
+	return snapshot{read(store.StatePath), read(config.Path), read(server.UnitPath), cur, s.active, txErr == nil}
+}
+
+func (a snapshot) equal(b snapshot) bool {
+	return bytes.Equal(a.state, b.state) && bytes.Equal(a.config, b.config) && bytes.Equal(a.unit, b.unit) &&
+		a.current == b.current && a.active == b.active && a.tx == b.tx
+}
+
+func TestApplyCleanInstall(t *testing.T) {
+	s := newSys(t)
+	if err := s.app.Apply(ctx(t), Change{Reason: "install", State: stateOf("phone"), Unit: unit1}); err != nil {
+		t.Fatal(err)
+	}
+	got := s.snap(t)
+	if got.state == nil || got.config == nil || got.unit == nil || !got.active || got.tx {
+		t.Fatalf("после установки: %+v", got)
+	}
+	st, err := s.app.s.Store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if drift, err := s.app.s.Config.Drift(st); err != nil || drift {
+		t.Fatalf("applied.config_sha256 не совпал с файлом: %v %v", drift, err)
+	}
+	if st.Applied.At.IsZero() {
+		t.Fatal("applied.at не заполнен")
+	}
+	// Снимок перед транзакцией лежит и читается.
+	if _, err := os.Stat(s.f.Path(backup.Dir + "/20261116T120000Z-install.tar.gz")); err != nil {
+		t.Fatalf("снимка нет: %v", err)
+	}
+}
+
+// Провал на каждом шаге оставляет исходное состояние (docs/roadmap.md, критерий фазы 2).
+func TestApplyFailureAtEachStepRestoresOriginal(t *testing.T) {
+	steps := map[string]struct {
+		arm  func(s *sys)
+		want string // фрагмент причины: сбой случился именно на этом шаге
+	}{
+		"проверка xray run -test": {func(s *sys) { s.testExit = 23 }, "отверг конфигурацию"},
+		"переключение ядра":       {func(s *sys) { s.badVersion = v2 }, "не называет эту версию"},
+		"установка юнита":         {func(s *sys) { s.failVerb = "enable" }, "systemctl enable"},
+		"запись конфигурации":     {func(s *sys) { s.fs.path, s.fs.armed = config.Path, true }, "конфигурация: запись"},
+		"запись состояния":        {func(s *sys) { s.fs.path, s.fs.armed = store.StatePath, true }, "сбой записи"},
+		"перезапуск":              {func(s *sys) { s.failVerb = "restart" }, "systemctl restart"},
+		"контроль: порт закрыт":   {func(s *sys) { s.restartListens = []bool{false, true} }, "контроль не пройден"},
+	}
+	for name, step := range steps {
+		t.Run(name, func(t *testing.T) {
+			s := newSys(t)
+			if err := s.app.Apply(ctx(t), Change{Reason: "install", State: stateOf("phone"), Unit: unit1}); err != nil {
+				t.Fatal(err)
+			}
+			before := s.snap(t)
+			s.nRestart, s.restartListens = 0, nil
+			step.arm(s)
+			ch := Change{Reason: "update", State: stateOf("phone", "laptop"), Unit: unit2, Core: v2}
+			err := s.app.Apply(ctx(t), ch)
+			if !errors.Is(err, ErrRolledBack) {
+				t.Fatalf("ждали ErrRolledBack, получено %v", err)
+			}
+			if !strings.Contains(err.Error(), step.want) {
+				t.Fatalf("сбой не на ожидаемом шаге (%q): %v", step.want, err)
+			}
+			if after := s.snap(t); !before.equal(after) {
+				t.Fatalf("исходное состояние не возвращено:\nдо    %+v\nпосле %+v", before, after)
+			}
+			if strings.Contains(err.Error(), secretKey) {
+				t.Fatal("текст ошибки содержит секрет")
+			}
+		})
+	}
+}
+
+func TestApplyCleanInstallFailureLeavesNothing(t *testing.T) {
+	s := newSys(t)
+	s.failVerb = "restart"
+	err := s.app.Apply(ctx(t), Change{Reason: "install", State: stateOf("phone"), Unit: unit1})
+	if !errors.Is(err, ErrRolledBack) {
+		t.Fatalf("%v", err)
+	}
+	got := s.snap(t)
+	if got.state != nil || got.config != nil || got.unit != nil || got.active || got.tx {
+		t.Fatalf("после отката чистой установки остались следы: %+v", got)
+	}
+	if _, err := os.Stat(s.f.Path(config.CandidatePath)); err == nil {
+		t.Fatal("файл-кандидат остался")
+	}
+}
+
+func TestApplyRejectsBadStateBeforeAnyChange(t *testing.T) {
+	s := newSys(t)
+	bad := stateOf("phone")
+	bad.Inbounds = nil
+	if err := s.app.Apply(ctx(t), Change{Reason: "install", State: bad, Unit: unit1}); err == nil || errors.Is(err, ErrRolledBack) {
+		t.Fatalf("ждали отказ до изменений, получено %v", err)
+	}
+	entries, _ := os.ReadDir(s.f.Path(backup.Dir))
+	if len(entries) != 0 || s.snap(t).tx {
+		t.Fatal("снимок или журнал созданы до проверки ввода")
+	}
+}
+
+func TestApplyReasonIsChecked(t *testing.T) {
+	s := newSys(t)
+	if err := s.app.Apply(ctx(t), Change{Reason: "Плохая причина", State: stateOf("phone"), Unit: unit1}); err == nil {
+		t.Fatal("причина принята")
+	}
+	if s.snap(t).state != nil {
+		t.Fatal("состояние записано при отказе на снимке")
+	}
+}
+
+// Откат, не прошедший контроль, — код 5; журнал остаётся, следующий запуск откатывает снова.
+func TestRollbackFailureKeepsJournalAndRecoverRetries(t *testing.T) {
+	s := newSys(t)
+	if err := s.app.Apply(ctx(t), Change{Reason: "install", State: stateOf("phone"), Unit: unit1}); err != nil {
+		t.Fatal(err)
+	}
+	before := s.snap(t)
+	s.nRestart, s.restartListens = 0, []bool{false, false} // и изменение, и откат не поднимают порт
+	err := s.app.Apply(ctx(t), Change{Reason: "update", State: stateOf("phone", "laptop"), Unit: unit2})
+	if !errors.Is(err, ErrRollbackFailed) || errors.Is(err, ErrRolledBack) {
+		t.Fatalf("ждали ErrRollbackFailed, получено %v", err)
+	}
+	if !s.snap(t).tx {
+		t.Fatal("журнал удалён при проваленном откате")
+	}
+	// Любое следующее изменение сначала откатывает; пока откат не идёт — оно не начинается.
+	s.nRestart, s.restartListens = 0, []bool{false}
+	if err := s.app.Apply(ctx(t), Change{Reason: "again", State: stateOf("x"), Unit: unit1}); !errors.Is(err, ErrRollbackFailed) {
+		t.Fatalf("при неудавшемся откате изменение началось: %v", err)
+	}
+	s.nRestart, s.restartListens = 0, nil
+	recovered, err := s.app.Recover(ctx(t))
+	if err != nil || !recovered {
+		t.Fatalf("Recover: %v %v", recovered, err)
+	}
+	if after := s.snap(t); !before.equal(after) {
+		t.Fatalf("исходное состояние не возвращено: %+v", after)
+	}
+}
+
+// Незавершённая транзакция (процесс убит после журнала) откатывается при следующем запуске.
+func TestRecoverAfterCrash(t *testing.T) {
+	s := newSys(t)
+	if err := s.app.Apply(ctx(t), Change{Reason: "install", State: stateOf("phone"), Unit: unit1}); err != nil {
+		t.Fatal(err)
+	}
+	before := s.snap(t)
+	unitBytes, _ := s.app.s.Server.Unit()
+	snap, err := s.app.s.Backup.Create(ctx(t), "update", backup.Meta{XM: "0.1.0", Xray: v1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.app.s.Store.WriteTx(store.Tx{Snapshot: snap.ID, CoreBefore: v1, UnitBefore: unitBytes, WasActive: true, PortBefore: port}); err != nil {
+		t.Fatal(err)
+	}
+	// «Транзакция» успела испортить состояние и переключить ядро, затем процесс убит.
+	if err := s.f.FS().WriteFile(store.StatePath, []byte("испорчено"), 0o600, platform.Root()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.app.s.Core.Activate(ctx(t), v2); err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := s.app.Recover(ctx(t))
+	if err != nil || !recovered {
+		t.Fatalf("Recover: %v %v", recovered, err)
+	}
+	if after := s.snap(t); !before.equal(after) {
+		t.Fatalf("после отката: %+v", after)
+	}
+	if again, err := s.app.Recover(ctx(t)); err != nil || again {
+		t.Fatalf("повторный Recover: %v %v", again, err)
+	}
+}
+
+func TestRecoverDamagedJournalIsRollbackFailure(t *testing.T) {
+	s := newSys(t)
+	if err := s.f.FS().WriteFile(store.TxPath, []byte("не журнал"), 0o600, platform.Root()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.app.Recover(ctx(t)); !errors.Is(err, ErrRollbackFailed) {
+		t.Fatalf("%v", err)
+	}
+}
+
+// Канарейка: секрет состояния не попадает в журнал транзакции и в ошибки.
+func TestCanaryNotInJournalOrErrors(t *testing.T) {
+	s := newSys(t)
+	s.testExit = 23
+	err := s.app.Apply(ctx(t), Change{Reason: "install", State: stateOf("phone"), Unit: unit1})
+	if !errors.Is(err, ErrRolledBack) || strings.Contains(err.Error(), secretKey) {
+		t.Fatalf("%v", err)
+	}
+	for _, j := range s.f.Journaled() {
+		if strings.Contains(j.Message, secretKey) {
+			t.Fatalf("секрет в журнале xm: %q", j.Message)
+		}
+	}
+	if _, err := os.Stat(s.f.Path(store.TxPath)); err == nil {
+		t.Fatal("журнал остался после отката")
+	}
+}

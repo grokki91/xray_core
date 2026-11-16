@@ -62,6 +62,17 @@ type realClock struct{}
 
 func (realClock) Now() time.Time { return time.Now() }
 
+func (realClock) Sleep(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func (r *Real) Exec(ctx context.Context, c Command) (Result, error) {
 	path, err := checkCommand(ctx, r.programs, c)
 	if err != nil {

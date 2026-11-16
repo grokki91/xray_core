@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -229,5 +230,34 @@ func TestDrift(t *testing.T) {
 	}
 	if d, _ := m.Drift(st); !d {
 		t.Fatal("файл удалён, сумма есть — нужен дрейф")
+	}
+}
+
+func TestStageUnstageRemove(t *testing.T) {
+	f := platform.NewFake(t.TempDir(), time.Time{})
+	for _, d := range []string{"/var", "/var/lib", "/var/lib/xm", "/var/lib/xm/tx", "/usr", "/usr/local", "/usr/local/etc", "/usr/local/etc/xray"} {
+		if err := f.FS().Mkdir(d, 0o700, platform.Root()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m := New(f)
+	p, err := m.Stage(Rendered{Data: []byte("{}")})
+	if err != nil || p != CandidatePath {
+		t.Fatalf("%q %v", p, err)
+	}
+	if info, err := os.Stat(f.Path(p)); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("права кандидата: %v %v", info, err)
+	}
+	if err := m.Unstage(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.FS().ReadFile(p); !errors.Is(err, platform.ErrNotFound) {
+		t.Fatalf("кандидат не удалён: %v", err)
+	}
+	if err := m.Unstage(); err != nil {
+		t.Fatalf("повторное удаление: %v", err)
+	}
+	if err := m.Remove(); err != nil {
+		t.Fatalf("Remove без файла: %v", err)
 	}
 }

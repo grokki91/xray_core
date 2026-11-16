@@ -20,7 +20,7 @@
 | `/etc/systemd/system/xray.service` | root:root | 0644 | нет | юнит с меткой `xm` |
 | `/var/lib/xm/` | root:root | 0700 | да | данные менеджера |
 | `/var/lib/xm/backups/` | root:root | 0700, файлы 0600 | да | снимки |
-| `/var/lib/xm/tx/` | root:root | 0700 | да | журнал незавершённой транзакции |
+| `/var/lib/xm/tx/` | root:root | 0700 | да | журнал незавершённой транзакции `pending.json` (0600) и файл-кандидат `config.candidate.json` (0600) для `xray run -test` ([ADR-0023](../adr/0023-transaction-control-and-rollback-scope.md)) |
 | `/var/lib/xm/diag/` | root:root | 0700, файлы 0600 | нет (отредактировано) | история диагностики |
 | `/var/lib/xm/monitor/` | root:root | 0700, файлы 0600 | нет | хронология замеров |
 | `/var/lib/xm/cache/` | root:root | 0700, файлы 0600 | нет | загруженные архивы релизов: `<тег>-<файл>`, например `v26.11.9-Xray-linux-64.zip`; создаёт `update` до базовой защиты |
