@@ -63,6 +63,8 @@ eq "возможности процесса: только CAP_NET_BIND_SERVICE" 
 nnp=$(awk '/^NoNewPrivs:/ {print $2}' "/proc/${pid:-0}/status" 2>/dev/null)
 eq "NoNewPrivs" "${nnp:-нет}" 1
 check "порт $port слушается" bash -c "ss -ltnH 'sport = :$port' | grep -q ."
+# Память Xray на конфигурации пресета без клиентов и трафика — факт для compatibility.md
+echo "env  память xray: VmRSS $(awk '/^VmRSS:/ {print $2, $3}' "/proc/${pid:-0}/status" 2>/dev/null), VmHWM $(awk '/^VmHWM:/ {print $2, $3}' "/proc/${pid:-0}/status" 2>/dev/null)"
 
 # 3. Манифест прав (data-model.md §1)
 perm /usr/local/lib/xm root:root 755
