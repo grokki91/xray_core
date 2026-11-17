@@ -103,6 +103,7 @@ check "start: служба активна" systemctl is-active --quiet xray.serv
 # systemd уже перезапускал сам, — и когда она снова работает, и в окне ожидания авто-перезапуска
 # (RestartSec=5s), где ручной перезапуск NRestarts не обнуляет. Значения счётчика — факты среды.
 nrestarts() { systemctl show -p NRestarts --value xray.service; }
+# shellcheck disable=SC2317 # crash и waiting вызываются через check
 crash() { # crash — убить процесс и дождаться авто-перезапуска systemd (не дольше 20 с)
 	local n
 	n=$(nrestarts)
@@ -127,10 +128,14 @@ waiting() { # waiting — убить процесс и дождаться, по�
 }
 check "падение в окне: systemd перезапустил службу сам" crash
 check "падение в окне: systemd ждёт авто-перезапуска" waiting
+before=$(nrestarts)
 "$xm" restart >"$out/restart-window" 2>&1
 eq "restart в окне авто-перезапуска: код" "$?" 0
 check "restart в окне: служба активна" systemctl is-active --quiet xray.service
-echo "env  NRestarts после ручного restart в окне авто-перезапуска: $(nrestarts)"
+# Счётчик не вырос и не обнулился — restart попал в окно, а не после авто-перезапуска systemd
+# (тот дал бы before+1, а ручной restart после него — 0); значение — факт compatibility.md §1.
+((before > 0)) || bad "restart в окне: счётчик до restart $before, ожидался больше 0"
+eq "restart в окне: NRestarts сохранён" "$(nrestarts)" "$before"
 
 # 8. Секреты не попали в вывод команд: значения из состояния — канарейка. Значения идут через
 # файл, а не аргументы процесса; пустой список — провал, а не «чисто».
@@ -139,10 +144,13 @@ chmod 600 "$out/.secrets"
 n=$(grep -c . "$out/.secrets")
 if ((n < 3)); then
 	bad "канарейка: в состоянии найдено $n значений, нужно не меньше 3"
-elif grep -qF -f "$out/.secrets" "$out/install" "$out/status" "$out/again" "$out/stop" "$out/start" "$out/restart" "$out/restart-window"; then
-	bad "секрет состояния в выводе команд"
 else
-	ok "вывод команд без секретов состояния"
+	grep -qF -f "$out/.secrets" "$out/install" "$out/status" "$out/again" "$out/stop" "$out/start" "$out/restart" "$out/restart-window"
+	case $? in
+	0) bad "секрет состояния в выводе команд" ;;
+	1) ok "вывод команд без секретов состояния" ;;
+	*) bad "канарейка: grep не прочитал вывод команд" ;;
+	esac
 fi
 
 if ((fails == 0)); then echo "l4: PASS"; else echo "l4: FAIL ($fails)"; fi
