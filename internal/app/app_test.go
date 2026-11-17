@@ -264,6 +264,66 @@ func TestApplyCleanInstall(t *testing.T) {
 	}
 }
 
+// После каждой транзакции остаются AutoKeep последних автоснимков (docs/roadmap.md, A4).
+func TestApplyPrunesAutoSnapshots(t *testing.T) {
+	s := newSys(t)
+	start := s.f.Clock().Now()
+	for i := range backup.AutoKeep + 1 {
+		s.f.SetNow(start.Add(time.Duration(i) * time.Minute))
+		if err := s.app.Apply(ctx(t), Change{Reason: "install", State: stateOf("phone"), Unit: unit1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := countSnapshots(t, s); n != backup.AutoKeep {
+		t.Fatalf("снимков %d, нужно %d", n, backup.AutoKeep)
+	}
+	if _, err := os.Stat(s.f.Path(backup.Dir + "/20261116T120000Z-install.tar.gz")); !os.IsNotExist(err) {
+		t.Fatalf("самый старый снимок не удалён: %v", err)
+	}
+	// Незавершённая транзакция: её снимок не удаляется, хранение не запускается.
+	s.f.SetNow(start.Add(time.Hour))
+	s.nRestart, s.restartListens = 0, []bool{false, false}
+	if err := s.app.Apply(ctx(t), Change{Reason: "update", State: stateOf("phone", "laptop"), Unit: unit2}); !errors.Is(err, ErrRollbackFailed) {
+		t.Fatalf("ждали ErrRollbackFailed, получено %v", err)
+	}
+	if _, err := os.Stat(s.f.Path(backup.Dir + "/20261116T130000Z-update.tar.gz")); err != nil {
+		t.Fatalf("снимок незавершённой транзакции удалён: %v", err)
+	}
+	if n := countSnapshots(t, s); n != backup.AutoKeep+1 {
+		t.Fatalf("при незавершённой транзакции снимков %d, нужно %d", n, backup.AutoKeep+1)
+	}
+}
+
+// Сбой хранения после фиксации не превращает изменение в провал.
+func TestApplyPruneFailureIsNotFailure(t *testing.T) {
+	s := newSys(t)
+	start := s.f.Clock().Now()
+	for i := range backup.AutoKeep + 1 {
+		s.f.SetNow(start.Add(time.Duration(i) * time.Minute))
+		if i == backup.AutoKeep {
+			s.fs.removePath = backup.Dir + "/20261116T120000Z-install.tar.gz"
+		}
+		if err := s.app.Apply(ctx(t), Change{Reason: "install", State: stateOf("phone"), Unit: unit1}); err != nil {
+			t.Fatalf("транзакция %d: %v", i, err)
+		}
+	}
+	if got := s.snap(t); got.tx {
+		t.Fatal("журнал транзакции остался")
+	}
+	if n := countSnapshots(t, s); n != backup.AutoKeep+1 {
+		t.Fatalf("снимков %d, нужно %d", n, backup.AutoKeep+1)
+	}
+}
+
+func countSnapshots(t *testing.T, s *sys) int {
+	t.Helper()
+	ents, err := os.ReadDir(s.f.Path(backup.Dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(ents)
+}
+
 // Провал на каждом шаге оставляет исходное состояние (docs/roadmap.md, критерий фазы 2).
 func TestApplyFailureAtEachStepRestoresOriginal(t *testing.T) {
 	steps := map[string]struct {

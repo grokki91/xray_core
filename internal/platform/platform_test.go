@@ -138,6 +138,15 @@ func TestImplementationsAgree(t *testing.T) {
 					t.Errorf("WriteFile(%s): %v, нужен ErrSymlink", p, err)
 				}
 			}
+			if _, err := fsys.ReadDir(dir + "/linkdir"); !errors.Is(err, ErrSymlink) {
+				t.Errorf("ReadDir через ссылку: %v, нужен ErrSymlink", err)
+			}
+			if _, err := fsys.ReadDir(dir + "/missing"); !errors.Is(err, ErrNotFound) {
+				t.Errorf("ReadDir отсутствующего: %v, нужен ErrNotFound", err)
+			}
+			if names, err := fsys.ReadDir(dir); err != nil || !slices.Equal(names, []string{"link", "linkdir", "state.json"}) {
+				t.Errorf("ReadDir: %v %v", names, err)
+			}
 			if err := fsys.Mkdir(dir+"/linkdir/sub", 0o700, self()); !errors.Is(err, ErrSymlink) {
 				t.Errorf("Mkdir через ссылку: %v, нужен ErrSymlink", err)
 			}

@@ -337,3 +337,33 @@ func TestCancelledContext(t *testing.T) {
 		t.Errorf("Read: %v", err)
 	}
 }
+
+// Prune оставляет keep самых новых снимков; чужие файлы каталога не трогает.
+func TestPruneKeepsNewest(t *testing.T) {
+	f, m := env(t)
+	var ids []string
+	for i := range 12 {
+		f.SetNow(now.Add(time.Duration(i) * time.Minute))
+		s, err := m.Create(ctx(t), "install", meta)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, s.ID)
+	}
+	put(t, f, Dir+"/notes.txt", []byte("x"))
+	if err := m.Prune(ctx(t), 10); err != nil {
+		t.Fatal(err)
+	}
+	for i, id := range ids {
+		_, err := m.Read(ctx(t), id)
+		if keep := i >= 2; keep != (err == nil) {
+			t.Errorf("снимок %s: оставлен=%v, ошибка %v", id, keep, err)
+		}
+	}
+	if _, err := f.FS().ReadFile(Dir + "/notes.txt"); err != nil {
+		t.Errorf("чужой файл удалён: %v", err)
+	}
+	if err := m.Prune(ctx(t), 0); !errors.Is(err, ErrInput) {
+		t.Errorf("keep=0: %v, нужен ErrInput", err)
+	}
+}

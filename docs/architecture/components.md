@@ -31,7 +31,7 @@
 ```go
 type Platform interface {
     Exec(ctx context.Context, c Command) (Result, error) // Command{Program, Args, Stdin}; без оболочки
-    FS() FS            // ReadFile, WriteFile (temp + fchown + fchmod + fsync + rename), Mkdir, Remove, Symlink, Readlink, Lock (flock)
+    FS() FS            // ReadFile, WriteFile (temp + fchown + fchmod + fsync + rename), Mkdir, ReadDir, Remove, Symlink, Readlink, Lock (flock)
     Systemd() Systemd  // только xray.service: Running, Reload, Enable/Disable, Start/Stop/Restart, Status
     Net() Net          // Get по HTTPS, Listening — порт слушается (фаза 2); интерфейсы, маршруты — фаза 4
     Users() Users      // системный пользователь службы; Effective — владелец процесса xm
@@ -83,7 +83,7 @@ type Platform interface {
   юнита нет — `Loaded=false`, не ошибка. Ненулевой код глагола — ошибка с кодом, без вывода процесса.
 - `Users.Effective()` — эффективные uid и gid процесса `xm`; у подделки root, пока тест не назначил
   другого (`SetEffective`).
-- Фаза 1 — `Exec`, `FS`, `Clock`; фаза 2 — `Net.Get`, `xray` по версии, `Remove`, `Symlink`, `Readlink`, `Users`, `Systemd`;
+- Фаза 1 — `Exec`, `FS`, `Clock`; фаза 2 — `Net.Get`, `xray` по версии, `Remove`, `Symlink`, `Readlink`, `Users`, `Systemd`; A4 — `ReadDir`;
   остальное `Net` — вместе с первым потребителем (фаза 4).
 
 ### store
@@ -436,7 +436,8 @@ type Manager interface {
 type Manager interface {
     Create(ctx context.Context, reason string, meta Meta) (Snapshot, error) // tar.gz + манифест SHA-256
     Read(ctx context.Context, id string) (Archive, error) // проверенное содержимое
-    // фаза 5: List, Verify, Prune
+    Prune(ctx context.Context, keep int) error            // оставить keep самых новых
+    // фаза 5: List, Verify
 }
 ```
 
@@ -451,8 +452,13 @@ type Manager interface {
   `manifest.json` (пути из архива никуда не подставляются), предел размера записи, состав и
   SHA-256 по манифесту; иначе `ErrCorrupt`. Запись файлов обратно делает транзакция `app`
   (она знает владельцев по манифесту прав), не `backup`.
-- Автоснимок перед каждой транзакцией; хранение — [data-model.md](data-model.md) §4. Фаза 2
-  (снимок и возврат для транзакции), 5 (команды, хранение, проверка).
+- Автоснимок перед каждой транзакцией; хранение — [data-model.md](data-model.md) §4: после
+  фиксации транзакции `app` вызывает `Prune(AutoKeep)` (10); при незавершённой транзакции
+  хранение не запускается, её снимок нужен откату. Сбой `Prune` — предупреждение в журнале:
+  изменение уже зафиксировано. Порядок — по идентификатору; файлы не по правилу имени не
+  трогаются. Сейчас все снимки автоматические; ручные снимки фазы 5 требуют отбора по виду в
+  `Prune`. Фаза 2 (снимок и возврат), 4 (хранение автоснимков, A4), 5 (команды, ручные снимки,
+  проверка).
 
 ### monitor
 

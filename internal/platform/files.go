@@ -261,6 +261,26 @@ func (x files) Remove(path string) error {
 	return syncDir(filepath.Dir(p))
 }
 
+func (x files) ReadDir(path string) ([]string, error) {
+	x.trace("readdir", path)
+	p, err := x.real(path)
+	if err != nil {
+		return nil, err
+	}
+	if err := x.noSymlinks(p); err != nil {
+		return nil, err
+	}
+	ents, err := os.ReadDir(p)
+	if err != nil {
+		return nil, fmt.Errorf("каталог %s: %w", path, err)
+	}
+	names := make([]string, len(ents))
+	for i, e := range ents {
+		names[i] = e.Name()
+	}
+	return names, nil
+}
+
 // checkTarget — цель ссылки: одно имя в том же каталоге (ADR-0019).
 func checkTarget(target string) error {
 	if target == "" || target == "." || target == ".." || strings.Contains(target, "/") {

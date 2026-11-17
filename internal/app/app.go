@@ -152,6 +152,10 @@ func (a *App) Apply(ctx context.Context, ch Change) error {
 	if err := a.s.Store.ClearTx(); err != nil {
 		return fmt.Errorf("фиксация: %w", err)
 	}
+	// Изменение уже зафиксировано: сбой хранения его не отменяет, а повторится при следующем.
+	if err := a.s.Backup.Prune(ctx, backup.AutoKeep); err != nil {
+		a.s.Logging.Logger().Warn("старые снимки не удалены", "причина", err.Error())
+	}
 	return nil
 }
 
