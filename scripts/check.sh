@@ -3,12 +3,20 @@
 # карта пакетов, реестр зависимостей, чувствительные данные, Go (gofmt, go vet, go test),
 # тесты tests/test-*.sh. Печатает только провалы и итог «checks: PASS|FAIL»; код выхода 0 — только PASS.
 # Нет нужной утилиты — провал, а не пропуск. Проверки Go — для модуля с go.mod в корне.
-#   bash scripts/check.sh [ФАЙЛ…]   ФАЙЛ — дополнительный текст для сканера (сообщение коммита, тело PR)
+#   bash scripts/check.sh [--tree ПУТЬ] [ФАЙЛ…]   ФАЙЛ — дополнительный текст для сканера (сообщение
+#   коммита, тело PR); ПУТЬ — проверяемое дерево, по умолчанию то, где лежит скрипт. Сам скрипт и
+#   сканер всегда берутся из каталога запущенного check.sh: дерево не проверяет себя своими руками.
 set -u
 export LC_ALL=C.UTF-8
+tool=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+tree=$tool/..
+if [[ ${1:-} == --tree ]]; then
+  tree=${2:?--tree требует путь}
+  shift 2
+fi
 extra=()
 for f in "$@"; do extra+=("$(realpath "$f")"); done
-cd "${BASH_SOURCE[0]%/*}/.." || exit 1
+cd -- "$tree" || exit 1
 fails=0
 bad() { printf '  ✗ %s\n' "$*"; fails=$((fails + 1)); }
 files() { git ls-files -co --exclude-standard "$@"; }
@@ -110,7 +118,7 @@ fi
 # ─── 7. Чувствительные данные
 guard() {
   local out
-  out=$(bash scripts/guard.sh "$@" 2>&1) && return 0
+  out=$(bash "$tool/guard.sh" "$@" 2>&1) && return 0
   while IFS= read -r l; do
     [[ -n $l ]] || continue
     printf '%s\n' "$l"

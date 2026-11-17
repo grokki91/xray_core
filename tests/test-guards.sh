@@ -102,6 +102,46 @@ expect 2 "git commit с адресом в сообщении" hook publish-guard
 printf '%s\n' "$uuid" >"$copy/leak.txt"
 expect 2 "git push при находке в дереве" hook publish-guard "$(bash_in 'git push -u origin main')"
 rm -f "$copy/leak.txt"
+# Рабочее дерево того же репозитория (исполнитель оркестратора) проверяется само; чужой
+# репозиторий из cwd корень не подменяет.
+cwd_in() { jq -n --arg c "$1" --arg d "$2" '{session_id: "s1", tool_name: "Bash", cwd: $d, tool_input: {command: $c}}'; }
+wt=$work/wt
+git -C "$copy" worktree add -q --detach "$wt"
+cp -r "$copy/scripts" "$wt/"
+mkdir -p "$wt/.claude" && cp -r "$copy/.claude/hooks" "$wt/.claude/"
+expect 0 "чистое рабочее дерево" hook publish-guard "$(cwd_in 'git commit -m m' "$wt")"
+expect 2 "cd ПУТЬ && git commit" hook publish-guard "$(cwd_in "cd $wt && git commit -m m" "$copy")"
+expect 2 "pushd ПУТЬ; git push" hook publish-guard "$(cwd_in "pushd $wt; git push -u origin x" "$copy")"
+expect 0 "cd без коммита" hook publish-guard "$(cwd_in "cd $wt && git status" "$copy")"
+printf '%s\n' "$uuid" >"$wt/leak.txt"
+expect 2 "находка в рабочем дереве из cwd" hook publish-guard "$(cwd_in 'git commit -m m' "$wt")"
+expect 2 "git -C рабочее дерево с находкой" hook publish-guard "$(cwd_in "git -C $wt commit -m m" "$copy")"
+expect 2 "git -C относительный путь от cwd" hook publish-guard "$(cwd_in 'git -C wt commit -m m' "$work")"
+# Ослабленный check.sh в самом дереве исполнителя не отключает проверку: скрипт — из основного каталога.
+printf 'exit 0\n' >"$wt/scripts/check.sh"
+expect 2 "ослабленный check.sh в рабочем дереве" hook publish-guard "$(cwd_in 'git commit -m m' "$wt")"
+hook_wt() { env CLAUDE_PROJECT_DIR="$wt" bash "$wt/.claude/hooks/publish-guard.sh" <<<"$1"; }
+expect 2 "CLAUDE_PROJECT_DIR — рабочее дерево с ослабленным check.sh" hook_wt "$(cwd_in 'git commit -m m' "$wt")"
+expect 2 "git -C с путём в кавычках" hook publish-guard "$(cwd_in "git -C \"$wt\" commit -m m" "$copy")"
+expect 0 "git -C с кавычками без коммита" hook publish-guard "$(cwd_in "git -C \"$wt\" status" "$copy")"
+expect 1 "check.sh --tree проверяет указанное дерево" bash "$copy/scripts/check.sh" --tree "$wt"
+cp "$copy/scripts/check.sh" "$wt/scripts/check.sh"
+rm -f "$wt/leak.txt"
+expect 0 "check.sh --tree: чистое дерево" bash "$copy/scripts/check.sh" --tree "$wt"
+printf '%s\n' "$uuid" >"$copy/leak.txt"
+expect 2 "git -C основной каталог из рабочего дерева" hook publish-guard "$(cwd_in "git -C $copy commit -m m" "$wt")"
+expect 2 "cwd без git" hook publish-guard "$(cwd_in 'git commit -m m' "$work")"
+expect 2 "несуществующий cwd" hook publish-guard "$(cwd_in 'git commit -m m' "$work/none")"
+mkdir -p "$copy/nested/scripts" && git -C "$copy/nested" init -q
+printf 'exit 0\n' >"$copy/nested/scripts/check.sh"
+expect 2 "вложенный репозиторий с пустым check.sh" hook publish-guard "$(cwd_in 'git commit -m m' "$copy/nested")"
+rm -rf "$copy/nested" "$copy/leak.txt"
+other=$work/other
+mkdir -p "$other/scripts" && git -C "$other" init -q
+printf 'exit 0\n' >"$other/scripts/check.sh"
+printf '%s\n' "$uuid" >"$copy/leak.txt"
+expect 2 "чужой репозиторий в cwd не обходит проверку" hook publish-guard "$(cwd_in 'git commit -m m' "$other")"
+rm -f "$copy/leak.txt"
 expect 2 "gh pr create с UUID" hook publish-guard "$(bash_in "gh pr create --draft --title t --body '$uuid'")"
 expect 2 "создание PR с UUID в теле" hook publish-guard "$(mcp_in mcp__github__create_pull_request "client $uuid")"
 expect 0 "создание PR с чистым телом" hook publish-guard "$(mcp_in mcp__github__create_pull_request 'Adds docs')"

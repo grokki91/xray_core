@@ -11,6 +11,33 @@ command -v jq >/dev/null 2>&1 || {
   exit 2
 }
 root=${CLAUDE_PROJECT_DIR:-$(cd "${BASH_SOURCE[0]%/*}/../.." && pwd)}
+# Исполнитель оркестратора коммитит в своём рабочем дереве: проверяется дерево из `git -C ПУТЬ`
+# (относительный — от cwd) или из cwd, если это рабочее дерево того же репозитория (общий
+# каталог git совпадает); чужой репозиторий корень не подменяет.
+common() { git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null; }
+dir=$(jq -r '.cwd // empty' <<<"$input")
+cmd_raw=$(jq -r '.tool_input.command // empty' <<<"$input")
+q_re='git[[:space:]]+-C[[:space:]]+["'"'"']'
+if [[ $cmd_raw =~ $q_re && $cmd_raw =~ (commit|push)([[:space:]]|$) ]]; then
+  echo "publish-guard: путь в git -C — без кавычек: дерево коммита иначе не определить" >&2
+  exit 2
+fi
+c_re='git[[:space:]]+-C[[:space:]]+([^[:space:]]+)[[:space:]]+(commit|push)([[:space:]]|$)'
+if [[ $cmd_raw =~ $c_re ]]; then
+  [[ ${BASH_REMATCH[1]} == /* || -z $dir ]] && dir=${BASH_REMATCH[1]} || dir=$dir/${BASH_REMATCH[1]}
+fi
+# Скрипты проверки — из основного рабочего дерева: CLAUDE_PROJECT_DIR исполнителя указывает на его
+# собственное дерево, где check.sh можно подменить.
+main=$(git -C "$root" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')
+[[ -n $main && -f $main/scripts/check.sh ]] || {
+  echo "publish-guard: не найдено основное рабочее дерево со scripts/check.sh" >&2
+  exit 2
+}
+root_common=$(common "$root")
+if [[ -n $dir && -n $root_common ]] && top=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null) &&
+  [[ $(common "$top") == "$root_common" ]]; then
+  root=$top
+fi
 tool=$(jq -r '.tool_name // empty' <<<"$input")
 owner_only() {
   echo "publish-guard: $1 — только владелец; агент создаёт PR черновиком (ADR-0018)" >&2
@@ -48,6 +75,13 @@ case $tool in
     [[ $cmd =~ ${gh}api[[:space:]] && $cmd =~ (pulls|PullRequest) && ! $cmd =~ -X[[:space:]]*GET ]] &&
       owner_only "изменение PR через gh api"
     [[ $cmd =~ ${gh}alias[[:space:]] ]] && owner_only "gh alias"
+    # Переход в команде меняет дерево коммита незаметно для хука: дерево задаётся `git -C ПУТЬ`.
+    cd_re='(^|[;&|(][[:space:]]*)(cd|pushd)([[:space:]]|$)'
+    git_re='git([[:space:]]+-C[[:space:]]+[^[:space:]]+)?[[:space:]]+(commit|push)([[:space:]]|$)'
+    if [[ $cmd =~ $cd_re && $cmd =~ $git_re ]]; then
+      echo "publish-guard: cd вместе с git commit|push не проверяется — используй git -C ПУТЬ" >&2
+      exit 2
+    fi
     [[ $cmd =~ git([[:space:]]+-C[[:space:]]+[^[:space:]]+)?[[:space:]]+push[[:space:]].*([[:space:]]|:)main([[:space:]]|$) ]] &&
       owner_only "push в main"
     ;;
@@ -68,6 +102,6 @@ tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT
 # Локальные пути /tmp/… и /root/… несут идентификатор сессии, а не данные установки.
 printf '%s\n' "$text" | sed -E "s#/(tmp|root)/[^[:space:]'\"]*##g" >"$tmp"
-out=$(bash "$root/scripts/check.sh" "$tmp" 2>&1) && exit 0
+out=$(bash "$main/scripts/check.sh" --tree "$root" "$tmp" 2>&1) && exit 0
 printf '%s\n' "Публикация остановлена: scripts/check.sh не прошёл — исправь и повтори." "$out" >&2
 exit 2
