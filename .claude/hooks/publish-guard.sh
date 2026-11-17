@@ -62,6 +62,13 @@ case $tool in
     [[ $cmd =~ ${gh}api[[:space:]] && $cmd =~ (pulls|PullRequest) && ! $cmd =~ -X[[:space:]]*GET ]] &&
       owner_only "изменение PR через gh api"
     [[ $cmd =~ ${gh}alias[[:space:]] ]] && owner_only "gh alias"
+    # Переход в команде меняет дерево коммита незаметно для хука: дерево задаётся `git -C ПУТЬ`.
+    cd_re='(^|[;&|(][[:space:]]*)(cd|pushd)([[:space:]]|$)'
+    git_re='git([[:space:]]+-C[[:space:]]+[^[:space:]]+)?[[:space:]]+(commit|push)([[:space:]]|$)'
+    if [[ $cmd =~ $cd_re && $cmd =~ $git_re ]]; then
+      echo "publish-guard: cd вместе с git commit|push не проверяется — используй git -C ПУТЬ" >&2
+      exit 2
+    fi
     [[ $cmd =~ git([[:space:]]+-C[[:space:]]+[^[:space:]]+)?[[:space:]]+push[[:space:]].*([[:space:]]|:)main([[:space:]]|$) ]] &&
       owner_only "push в main"
     ;;
