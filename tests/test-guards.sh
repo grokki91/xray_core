@@ -112,7 +112,17 @@ mkdir -p "$wt/.claude" && cp -r "$copy/.claude/hooks" "$wt/.claude/"
 expect 0 "чистое рабочее дерево" hook publish-guard "$(cwd_in 'git commit -m m' "$wt")"
 printf '%s\n' "$uuid" >"$wt/leak.txt"
 expect 2 "находка в рабочем дереве из cwd" hook publish-guard "$(cwd_in 'git commit -m m' "$wt")"
+expect 2 "git -C рабочее дерево с находкой" hook publish-guard "$(cwd_in "git -C $wt commit -m m" "$copy")"
+expect 2 "git -C относительный путь от cwd" hook publish-guard "$(cwd_in 'git -C wt commit -m m' "$work")"
 rm -f "$wt/leak.txt"
+printf '%s\n' "$uuid" >"$copy/leak.txt"
+expect 2 "git -C основной каталог из рабочего дерева" hook publish-guard "$(cwd_in "git -C $copy commit -m m" "$wt")"
+expect 2 "cwd без git" hook publish-guard "$(cwd_in 'git commit -m m' "$work")"
+expect 2 "несуществующий cwd" hook publish-guard "$(cwd_in 'git commit -m m' "$work/none")"
+mkdir -p "$copy/nested/scripts" && git -C "$copy/nested" init -q
+printf 'exit 0\n' >"$copy/nested/scripts/check.sh"
+expect 2 "вложенный репозиторий с пустым check.sh" hook publish-guard "$(cwd_in 'git commit -m m' "$copy/nested")"
+rm -rf "$copy/nested" "$copy/leak.txt"
 other=$work/other
 mkdir -p "$other/scripts" && git -C "$other" init -q
 printf 'exit 0\n' >"$other/scripts/check.sh"

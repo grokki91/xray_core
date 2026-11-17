@@ -11,12 +11,18 @@ command -v jq >/dev/null 2>&1 || {
   exit 2
 }
 root=${CLAUDE_PROJECT_DIR:-$(cd "${BASH_SOURCE[0]%/*}/../.." && pwd)}
-# Исполнитель оркестратора коммитит в своём рабочем дереве: проверяется дерево из cwd, если это
-# рабочее дерево того же репозитория (общий каталог git совпадает); чужой репозиторий — нет.
+# Исполнитель оркестратора коммитит в своём рабочем дереве: проверяется дерево из `git -C ПУТЬ`
+# (относительный — от cwd) или из cwd, если это рабочее дерево того же репозитория (общий
+# каталог git совпадает); чужой репозиторий корень не подменяет.
 common() { git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null; }
-cwd=$(jq -r '.cwd // empty' <<<"$input")
-if [[ -n $cwd ]] && top=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null) &&
-  [[ $(common "$top") == "$(common "$root")" && -n $(common "$root") ]]; then
+dir=$(jq -r '.cwd // empty' <<<"$input")
+c_re='git[[:space:]]+-C[[:space:]]+([^[:space:]]+)[[:space:]]+(commit|push)([[:space:]]|$)'
+if [[ $(jq -r '.tool_input.command // empty' <<<"$input") =~ $c_re ]]; then
+  [[ ${BASH_REMATCH[1]} == /* || -z $dir ]] && dir=${BASH_REMATCH[1]} || dir=$dir/${BASH_REMATCH[1]}
+fi
+root_common=$(common "$root")
+if [[ -n $dir && -n $root_common ]] && top=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null) &&
+  [[ $(common "$top") == "$root_common" ]]; then
   root=$top
 fi
 tool=$(jq -r '.tool_name // empty' <<<"$input")
