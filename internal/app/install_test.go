@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"os"
 	"strings"
 	"testing"
@@ -23,7 +24,7 @@ import (
 type fakeReleases struct {
 	tag                  string
 	archive              []byte
-	latestErr            error
+	latestErr, fetchErr  error
 	latestCalls, fetches int
 	onFetch              func() // что произойдёт между проверкой «состояния нет» и транзакцией
 }
@@ -38,7 +39,7 @@ func (r *fakeReleases) Fetch(context.Context, update.Release, update.Arch) (upda
 	if r.onFetch != nil {
 		r.onFetch()
 	}
-	return update.Archive{Data: r.archive}, nil
+	return update.Archive{Data: r.archive}, r.fetchErr
 }
 
 // elf64 — заголовок исполняемого ELF64 x86-64: больше `core.Stage` от бинарника не требует до
@@ -232,6 +233,25 @@ func TestInstallControlFailureRollsBackAndRetrySucceeds(t *testing.T) {
 	s.restartListens = nil
 	if _, err := s.app.Install(ctx(t), okOpts); err != nil {
 		t.Fatalf("повтор после отката: %v", err)
+	}
+}
+
+// Отказ проверки загрузки (суммы, адрес) останавливает установку до выкладки версии и транзакции.
+func TestInstallFetchRejectionChangesNothing(t *testing.T) {
+	for _, e := range []error{update.ErrIntegrity, platform.ErrURL} {
+		t.Run(e.Error(), func(t *testing.T) {
+			s := fresh(t)
+			s.rel.fetchErr = e
+			if _, err := s.app.Install(ctx(t), okOpts); !errors.Is(err, e) {
+				t.Fatalf("%v, нужна %v", err, e)
+			}
+			if got := s.snap(t); got.state != nil || got.unit != nil || got.config != nil || got.current != "" || got.tx {
+				t.Fatalf("%+v", got)
+			}
+			if _, err := os.Stat(s.f.Path(platform.CoreDir + "/" + v2)); !errors.Is(err, fs.ErrNotExist) {
+				t.Fatalf("версия выложена: %v", err)
+			}
+		})
 	}
 }
 

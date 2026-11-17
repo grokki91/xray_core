@@ -144,6 +144,9 @@ func TestFetchRejects(t *testing.T) {
 		{"неверная SHA2-512", func(f *platform.Fake) {
 			f.Serve(dgstURL, fmt.Appendf(nil, "SHA2-256= %s\nSHA2-512= %s\n", s256, strings.Repeat("0", 128)))
 		}, ErrIntegrity},
+		{"неверная SHA2-256", func(f *platform.Fake) {
+			f.Serve(dgstURL, fmt.Appendf(nil, "SHA2-256= %s\nSHA2-512= %s\n", strings.Repeat("0", 64), s512))
+		}, ErrIntegrity},
 		{"нет SHA2-512", func(f *platform.Fake) { f.Serve(dgstURL, fmt.Appendf(nil, "SHA2-256= %s\n", s256)) }, ErrIntegrity},
 		{"повтор ключа", func(f *platform.Fake) {
 			f.Serve(dgstURL, fmt.Appendf(nil, "SHA2-256= %s\nSHA2-512= %s\nSHA2-512= %s\n", s256, s512, s512))
