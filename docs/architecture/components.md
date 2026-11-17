@@ -341,8 +341,8 @@ type Manager interface {
 }
 ```
 
-- Манифест прав — одна таблица ([data-model.md](data-model.md) §1); `EnsureBaseline` приводит к
-  ней, `Audit` сверяет.
+- Манифест прав — одна таблица ([data-model.md](data-model.md) §1); `EnsureBaseline` создаёт по
+  ней недостающее, `Audit` сверяет.
 - Ключи REALITY — пара X25519 из `crypto/rand` (`crypto/ecdh`), base64 RawURL; открытый ключ
   совпадает с выводом `xray x25519 -i` (L3). Идентификатор клиента — UUID v4, shortId — 16
   шестнадцатеричных знаков.
