@@ -53,6 +53,8 @@ type FS interface {
 	Mkdir(path string, perm fs.FileMode, owner Owner) error
 	// Remove удаляет обычный файл; ссылка на пути или на месте файла, каталог — ошибка.
 	Remove(path string) error
+	// ReadDir возвращает имена записей каталога по возрастанию; нет каталога — ErrNotFound.
+	ReadDir(path string) ([]string, error)
 	// Symlink атомарно ставит на path ссылку на target: временная ссылка в том же каталоге и
 	// rename. target — одно имя в том же каталоге (без «/», не «.» и «..»), иначе ErrPath;
 	// каталог на месте path не заменяется.

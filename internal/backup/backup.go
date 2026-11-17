@@ -1,6 +1,6 @@
 // Пакет backup — снимок состояния и конфигурации (tar.gz с манифестом SHA-256) и чтение снимка
 // с проверкой. Запись файлов обратно — дело транзакции app: здесь только создать и вернуть
-// проверенное содержимое. Список, хранение и команды — фаза 5.
+// проверенное содержимое; хранение автоснимков — Prune. Список и команды — фаза 5.
 package backup
 
 import (
@@ -16,6 +16,8 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/grokki91/xray_core/internal/platform"
@@ -35,6 +37,8 @@ const (
 	manifestName = "manifest.json"
 
 	manifestVersion = 1
+	// AutoKeep — сколько последних автоснимков хранится (data-model.md §4).
+	AutoKeep = 10
 	// maxEntry — предел одной записи при чтении: защита от архива-бомбы. Состояние и
 	// конфигурация — килобайты.
 	maxEntry = 8 << 20
@@ -244,6 +248,37 @@ func (m *Manager) Read(ctx context.Context, id string) (Archive, error) {
 		}
 	}
 	return Archive{Manifest: mf, State: got[stateName], Config: got[configName]}, nil
+}
+
+// Prune удаляет снимки, кроме keep самых новых. Порядок — по идентификатору: он начинается с
+// UTC-времени. Файлы каталога, не похожие на снимок, не трогаются. Вызывать только без
+// незавершённой транзакции: её снимок нужен откату. Ручных снимков пока нет; с ними (фаза 5)
+// Prune должен отбирать снимки по виду, иначе удалит и ручные.
+func (m *Manager) Prune(ctx context.Context, keep int) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if keep < 1 {
+		return fmt.Errorf("%w: keep %d", ErrInput, keep)
+	}
+	names, err := m.p.FS().ReadDir(Dir)
+	if err != nil {
+		return fmt.Errorf("снимки: %w", err)
+	}
+	var ids []string
+	for _, n := range names {
+		if id, ok := strings.CutSuffix(n, ".tar.gz"); ok && idRe.MatchString(id) {
+			ids = append(ids, id)
+		}
+	}
+	slices.Sort(ids)
+	for len(ids) > keep {
+		if err := m.p.FS().Remove(Dir + "/" + ids[0] + ".tar.gz"); err != nil {
+			return fmt.Errorf("снимок %s: %w", ids[0], err)
+		}
+		ids = ids[1:]
+	}
+	return nil
 }
 
 func sum(b []byte) string {
