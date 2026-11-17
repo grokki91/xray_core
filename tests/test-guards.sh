@@ -102,6 +102,23 @@ expect 2 "git commit с адресом в сообщении" hook publish-guard
 printf '%s\n' "$uuid" >"$copy/leak.txt"
 expect 2 "git push при находке в дереве" hook publish-guard "$(bash_in 'git push -u origin main')"
 rm -f "$copy/leak.txt"
+# Рабочее дерево того же репозитория (исполнитель оркестратора) проверяется само; чужой
+# репозиторий из cwd корень не подменяет.
+cwd_in() { jq -n --arg c "$1" --arg d "$2" '{session_id: "s1", tool_name: "Bash", cwd: $d, tool_input: {command: $c}}'; }
+wt=$work/wt
+git -C "$copy" worktree add -q --detach "$wt"
+cp -r "$copy/scripts" "$wt/"
+mkdir -p "$wt/.claude" && cp -r "$copy/.claude/hooks" "$wt/.claude/"
+expect 0 "чистое рабочее дерево" hook publish-guard "$(cwd_in 'git commit -m m' "$wt")"
+printf '%s\n' "$uuid" >"$wt/leak.txt"
+expect 2 "находка в рабочем дереве из cwd" hook publish-guard "$(cwd_in 'git commit -m m' "$wt")"
+rm -f "$wt/leak.txt"
+other=$work/other
+mkdir -p "$other/scripts" && git -C "$other" init -q
+printf 'exit 0\n' >"$other/scripts/check.sh"
+printf '%s\n' "$uuid" >"$copy/leak.txt"
+expect 2 "чужой репозиторий в cwd не обходит проверку" hook publish-guard "$(cwd_in 'git commit -m m' "$other")"
+rm -f "$copy/leak.txt"
 expect 2 "gh pr create с UUID" hook publish-guard "$(bash_in "gh pr create --draft --title t --body '$uuid'")"
 expect 2 "создание PR с UUID в теле" hook publish-guard "$(mcp_in mcp__github__create_pull_request "client $uuid")"
 expect 0 "создание PR с чистым телом" hook publish-guard "$(mcp_in mcp__github__create_pull_request 'Adds docs')"
