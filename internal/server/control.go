@@ -14,7 +14,7 @@ var ErrControl = errors.New("контроль не пройден")
 
 const (
 	// controlStep — интервал опроса; settle — выдержка после первого успеха: цикл перезапусков
-	// не виден по одному снимку состояния (NRestarts растёт после первого падения).
+	// не виден по одному снимку состояния (NRestarts растёт после первого авто-перезапуска).
 	controlStep = 500 * time.Millisecond
 	settle      = 2 * time.Second
 )
@@ -22,12 +22,20 @@ const (
 // CheckRunning ждёт до срока ctx, пока служба станет активной и порт port начнёт слушаться, и
 // после выдержки проверяет это ещё раз: активна, не перезапускалась, порт слушается. Срок у
 // ctx обязателен. Доступность извне и сквозная самопроверка — не здесь (фаза 3).
+//
+// «Не перезапускалась» — NRestarts не вырос от первого снимка контроля: ручной перезапуск, пока
+// systemd ждёт авто-перезапуска, счётчик не обнуляет (ADR-0023, compatibility.md). Вызывать
+// сразу после запуска: раньше RestartSec авто-перезапуск счётчик не изменит.
 func (s Service) CheckRunning(ctx context.Context, port int) error {
+	base := -1
 	return s.wait(ctx, func(st platform.UnitStatus, on bool) (ok bool, fatal string) {
+		if base < 0 {
+			base = st.Restarts
+		}
 		switch {
 		case !st.Loaded:
 			return false, "юнит не найден"
-		case st.Restarts > 0:
+		case st.Restarts > base:
 			return false, "служба перезапускалась после запуска"
 		case st.Active == "failed":
 			return false, "служба завершилась с ошибкой"
