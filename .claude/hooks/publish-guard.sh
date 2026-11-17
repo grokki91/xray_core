@@ -16,10 +16,23 @@ root=${CLAUDE_PROJECT_DIR:-$(cd "${BASH_SOURCE[0]%/*}/../.." && pwd)}
 # каталог git совпадает); чужой репозиторий корень не подменяет.
 common() { git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null; }
 dir=$(jq -r '.cwd // empty' <<<"$input")
+cmd_raw=$(jq -r '.tool_input.command // empty' <<<"$input")
+q_re='git[[:space:]]+-C[[:space:]]+["'"'"']'
+if [[ $cmd_raw =~ $q_re && $cmd_raw =~ (commit|push)([[:space:]]|$) ]]; then
+  echo "publish-guard: путь в git -C — без кавычек: дерево коммита иначе не определить" >&2
+  exit 2
+fi
 c_re='git[[:space:]]+-C[[:space:]]+([^[:space:]]+)[[:space:]]+(commit|push)([[:space:]]|$)'
-if [[ $(jq -r '.tool_input.command // empty' <<<"$input") =~ $c_re ]]; then
+if [[ $cmd_raw =~ $c_re ]]; then
   [[ ${BASH_REMATCH[1]} == /* || -z $dir ]] && dir=${BASH_REMATCH[1]} || dir=$dir/${BASH_REMATCH[1]}
 fi
+# Скрипты проверки — из основного рабочего дерева: CLAUDE_PROJECT_DIR исполнителя указывает на его
+# собственное дерево, где check.sh можно подменить.
+main=$(git -C "$root" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')
+[[ -n $main && -f $main/scripts/check.sh ]] || {
+  echo "publish-guard: не найдено основное рабочее дерево со scripts/check.sh" >&2
+  exit 2
+}
 root_common=$(common "$root")
 if [[ -n $dir && -n $root_common ]] && top=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null) &&
   [[ $(common "$top") == "$root_common" ]]; then
@@ -89,6 +102,6 @@ tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT
 # Локальные пути /tmp/… и /root/… несут идентификатор сессии, а не данные установки.
 printf '%s\n' "$text" | sed -E "s#/(tmp|root)/[^[:space:]'\"]*##g" >"$tmp"
-out=$(bash "$root/scripts/check.sh" "$tmp" 2>&1) && exit 0
+out=$(bash "$main/scripts/check.sh" --tree "$root" "$tmp" 2>&1) && exit 0
 printf '%s\n' "Публикация остановлена: scripts/check.sh не прошёл — исправь и повтори." "$out" >&2
 exit 2
