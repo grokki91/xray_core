@@ -289,8 +289,9 @@ type Manager interface {
   `daemon-reload`; юнита нет — не ошибка; чужой юнит не трогают оба (`ErrForeign`).
 - `Service()` — `Start`, `Stop`, `Restart`, `Status` (`platform.UnitStatus`: загружен, состояние,
   автозапуск, число перезапусков, PID). `CheckRunning(ctx, port)` — контроль после изменения: активна,
-  `Restarts=0`, порт слушается, повтор после выдержки; `CheckStopped` — неактивна и порт свободен.
-  Срок — из `ctx`; провал — `ErrControl` ([ADR-0023](../adr/0023-transaction-control-and-rollback-scope.md)).
+  `Restarts` не вырос от первого снимка контроля, порт слушается, повтор после выдержки; `CheckStopped` —
+  неактивна и порт свободен. Срок — из `ctx`; провал — `ErrControl`
+  ([ADR-0023](../adr/0023-transaction-control-and-rollback-scope.md), [ADR-0026](../adr/0026-restart-counter-from-baseline.md)).
 - Расширение «несколько VPS»: реестр узлов (алиас SSH, без учётных данных) и исполнитель,
   вызывающий на узле тот же `xm … --json`. Фаза 2; реестр — после MVP.
 

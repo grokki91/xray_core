@@ -45,7 +45,6 @@ func TestCheckRunning(t *testing.T) {
 	}{
 		"активна и слушает": {unit{loaded: true, active: "active", sub: "running"}, true, true},
 		"порт не слушается": {unit{loaded: true, active: "active", sub: "running"}, false, false},
-		"перезапускалась":   {unit{loaded: true, active: "active", sub: "running", restarts: 1}, true, false},
 		"упала":             {unit{loaded: true, active: "failed", sub: "failed"}, true, false},
 		"ждёт перезапуска":  {unit{loaded: true, active: "activating", sub: "auto-restart"}, true, false},
 		"юнита нет":         {unit{}, true, false},
@@ -60,6 +59,29 @@ func TestCheckRunning(t *testing.T) {
 			}
 			if err != nil && !errors.Is(err, ErrControl) {
 				t.Fatalf("ошибка не ErrControl: %v", err)
+			}
+		})
+	}
+}
+
+// Ручной перезапуск в окне ожидания авто-перезапуска не обнуляет NRestarts (systemd 255,
+// compatibility.md): провал — только рост счётчика за время контроля, а не его значение.
+func TestCheckRunningCountsFromBaseline(t *testing.T) {
+	for name, grow := range map[string]bool{"счётчик не растёт": false, "счётчик растёт": true} {
+		t.Run(name, func(t *testing.T) {
+			u := unit{loaded: true, active: "active", sub: "running", restarts: 2}
+			f, s := controlEnv(t, &u, nil)
+			f.SetListening(443, true)
+			calls := 0
+			f.Handle("systemctl", func(c platform.Command) (platform.Result, error) {
+				if calls++; grow && calls > 1 {
+					u.restarts = 3
+				}
+				return platform.Result{Stdout: []byte(fmt.Sprintf("LoadState=loaded\nActiveState=active\nSubState=running\nUnitFileState=enabled\nNRestarts=%d\nMainPID=1\n", u.restarts))}, nil
+			})
+			err := s.CheckRunning(short(t), 443)
+			if grow != (err != nil) {
+				t.Fatalf("рост=%v, получено %v", grow, err)
 			}
 		})
 	}
