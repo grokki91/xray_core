@@ -40,7 +40,7 @@ type UnitStatus struct {
 	Active   string // ActiveState: active, inactive, activating, deactivating, failed, reloading
 	Sub      string // SubState: running, dead, auto-restart, …
 	Enabled  bool   // UnitFileState=enabled
-	Restarts int    // NRestarts: перезапуски systemd с последнего ручного запуска
+	Restarts int    // NRestarts: авто-перезапуски systemd; когда счётчик сбрасывается — compatibility.md §1
 	MainPID  int
 }
 

@@ -99,7 +99,7 @@ check "stop: порт свободен" bash -c "! ss -ltnH 'sport = :$port' | g
 "$xm" start >"$out/start" 2>&1
 check "start: служба активна" systemctl is-active --quiet xray.service
 
-# 7. Контроль после падения (A5, ADR-0023): xm restart проходит контроль у службы, которую
+# 7. Контроль после падения (A5, ADR-0026): xm restart проходит контроль у службы, которую
 # systemd уже перезапускал сам, — и когда она снова работает, и в окне ожидания авто-перезапуска
 # (RestartSec=5s), где ручной перезапуск NRestarts не обнуляет. Значения счётчика — факты среды.
 nrestarts() { systemctl show -p NRestarts --value xray.service; }
