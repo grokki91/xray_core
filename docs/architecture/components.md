@@ -214,7 +214,7 @@ type Preset interface {  // каталог пресетов: config/preset
   - `dns` — из `state.dns`; пока `doh` пуст (до фазы 4), раздела нет;
   - `inbounds` — пресет и клиенты из `state.profiles`;
   - `outbounds`, `routing` — в том числе запрет частных и петлевых адресов назначения
-    ([policy.md](../security/policy.md) §4; способ — [Q12](../open-questions.md)).
+    ([policy.md](../security/policy.md) §4; способ — [ADR-0027](../adr/0027-private-destinations-via-final-rules.md)).
 - В запрет не входят `100.64.0.0/10` (CGNAT) и `::ffff:0:0/96` (IPv4 в IPv6): политика их не требует,
   обработка второго в `ip`-правиле Xray не проверена. Цель REALITY проверяется по синтаксису;
   отказ от частных и петлевых целей — вместе с выбором цели (Q3, фаза 4).
@@ -224,7 +224,8 @@ type Preset interface {  // каталог пресетов: config/preset
   изменённый файл в снимок и перезаписывает.
 - Входящий в MVP один; в `clients` попадают только включённые профили. Ошибки отрисовки несут
   имена полей, не значения. Адреса назначения `0.0.0.0/8`, частные, петлевые и link-local
-  уходят в `blackhole` правилом с `domainStrategy: IPOnDemand`.
+  уходят в `blackhole` правилом с `domainStrategy: IPOnDemand`; задача A1 заменяет его на
+  `freedom.finalRules` (ADR-0027).
 - Проверка — `core.Validate` перед записью. Набор полей сверяется с upstream по скилу
   `xray-upstream`. Фаза 2.
 
@@ -291,7 +292,8 @@ type Manager interface {
   автозапуск, число перезапусков, PID). `CheckRunning(ctx, port)` — контроль после изменения: активна,
   `Restarts` не вырос от первого снимка контроля, порт слушается, повтор после выдержки; `CheckStopped` —
   неактивна и порт свободен. Срок — из `ctx`; провал — `ErrControl`
-  ([ADR-0023](../adr/0023-transaction-control-and-rollback-scope.md), [ADR-0026](../adr/0026-restart-counter-from-baseline.md)).
+  ([ADR-0023](../adr/0023-transaction-control-and-rollback-scope.md), [ADR-0026](../adr/0026-restart-counter-from-baseline.md)). С фазы 3 после `CheckRunning` контроль продолжает набор `control`
+  движка `diag` ([ADR-0024](../adr/0024-health-verdict-and-shared-checks.md)).
 - Расширение «несколько VPS»: реестр узлов (алиас SSH, без учётных данных) и исполнитель,
   вызывающий на узле тот же `xm … --json`. Фаза 2; реестр — после MVP.
 
@@ -381,7 +383,7 @@ type Engine interface {
 
 - Анализ — правила «наблюдения → вывод» с классом `fact | probable | hypothesis`; модель и
   каталог проверок — [diagnostics.md](../operations/diagnostics.md).
-- Отчёт всегда проходит `redact` перед сохранением и экспортом. Фаза 5 (минимум); полностью — после MVP.
+- Отчёт всегда проходит `redact` перед сохранением и экспортом. Движок, набор `control` и вердикт `health` — фаза 3 ([ADR-0024](../adr/0024-health-verdict-and-shared-checks.md)); каталог — фаза 5; полностью — после MVP.
 
 ### logging
 
