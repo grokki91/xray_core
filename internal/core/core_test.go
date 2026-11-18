@@ -341,3 +341,31 @@ func TestSubcommandsClosed(t *testing.T) {
 		t.Errorf("были запуски: %+v", f.Calls()[before:])
 	}
 }
+
+func TestValidateCurrent(t *testing.T) {
+	_, m, reply := env(t)
+	const cfg = "/usr/local/etc/xray/config.json"
+	if err := m.ValidateCurrent(ctx(t), cfg); err == nil {
+		t.Fatal("без активной версии проверка прошла")
+	}
+	if err := m.Stage(ctx(t), v1, release(t, elfBin(t))); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Stage(ctx(t), v2, release(t, elfBin(t))); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Activate(ctx(t), v2); err != nil {
+		t.Fatal(err)
+	}
+	var got platform.Command
+	*reply = func(c platform.Command) (platform.Result, error) {
+		got = c
+		return platform.Result{ExitCode: 23}, nil
+	}
+	if err := m.ValidateCurrent(ctx(t), cfg); !errors.Is(err, ErrConfig) {
+		t.Fatalf("err = %v, нужен ErrConfig", err)
+	}
+	if got.Version != string(v2) {
+		t.Fatalf("проверка не действующей версией: %q", got.Version)
+	}
+}

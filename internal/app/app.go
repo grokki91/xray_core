@@ -8,11 +8,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/grokki91/xray_core/internal/backup"
 	"github.com/grokki91/xray_core/internal/config"
 	"github.com/grokki91/xray_core/internal/core"
+	"github.com/grokki91/xray_core/internal/diag"
 	"github.com/grokki91/xray_core/internal/logging"
 	"github.com/grokki91/xray_core/internal/profile"
 	"github.com/grokki91/xray_core/internal/security"
@@ -213,9 +215,59 @@ func (a *App) change(ctx context.Context, ch Change, st store.State, r config.Re
 	if err := svc.Restart(ctx); err != nil {
 		return err
 	}
-	cctx, cancel := context.WithTimeout(ctx, a.s.ControlTimeout)
+	return a.control(ctx, st.Server.Port)
+}
+
+// control — контроль после перезапуска: служба активна и порт слушается (ожидание запуска), затем
+// набор control движка diag. Исход набора, отличный от ok, — непройденный контроль и откат
+// (ADR-0024). Один срок ControlTimeout на оба шага.
+func (a *App) control(ctx context.Context, port int) error {
+	ctx, cancel := context.WithTimeout(ctx, a.s.ControlTimeout)
 	defer cancel()
-	return svc.CheckRunning(cctx, st.Server.Port)
+	svc := a.s.Server.Service()
+	if err := svc.CheckRunning(ctx, port); err != nil {
+		return err
+	}
+	e, err := diag.NewControl(diag.ControlDeps{
+		Service: svc,
+		Net:     svc,
+		Port: func(context.Context) (int, error) {
+			st, err := a.s.Store.Load()
+			return st.Server.Port, err
+		},
+		Validate: func(ctx context.Context) (bool, error) {
+			err := a.s.Core.ValidateCurrent(ctx, config.Path)
+			if errors.Is(err, core.ErrConfig) {
+				return false, nil
+			}
+			return err == nil, err
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("%w: %w", server.ErrControl, err)
+	}
+	r, err := e.Run(ctx, diag.SetControl)
+	if err != nil {
+		return fmt.Errorf("%w: %w", server.ErrControl, err)
+	}
+	return controlErr(r)
+}
+
+// controlErr — ошибка по отчёту набора control; ok — nil. Текст — названия и причины проверок,
+// без значений измерений.
+func controlErr(r diag.Report) error {
+	if r.Summary.Fail+r.Summary.Skip+r.Summary.Error == 0 {
+		return nil
+	}
+	if f := r.Cause(); f != nil {
+		return fmt.Errorf("%w: %s (%s)", server.ErrControl, f.Title, strings.Join(f.Actions, "; "))
+	}
+	for _, o := range r.Observations {
+		if o.Status != diag.StatusOK {
+			return fmt.Errorf("%w: проверка %s: %s %s", server.ErrControl, o.Check, o.Status, o.Reason)
+		}
+	}
+	return server.ErrControl
 }
 
 // fail откатывает транзакцию после сбоя cause и сводит итог в одну из двух ошибок.
@@ -349,9 +401,7 @@ func (a *App) rollback(ctx context.Context, tx store.Tx) error {
 		if err := svc.Restart(ctx); err != nil {
 			return err
 		}
-		cctx, cancel := context.WithTimeout(ctx, a.s.ControlTimeout)
-		defer cancel()
-		if err := svc.CheckRunning(cctx, tx.PortBefore); err != nil {
+		if err := a.control(ctx, tx.PortBefore); err != nil {
 			return fmt.Errorf("после отката: %w", err)
 		}
 	}

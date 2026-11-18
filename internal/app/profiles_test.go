@@ -154,7 +154,7 @@ func TestProfileIDNotInJournalOrErrors(t *testing.T) {
 	if !errors.Is(addErr, ErrRolledBack) {
 		t.Fatalf("ждали откат: %v", addErr)
 	}
-	s.testExit = 23
+	s.nRestart, s.restartListens, s.testExit = 0, nil, 23 // отказ проверки до перезапуска
 	rmErr := s.app.ProfileRemove(ctx(t), "phone")
 	if !errors.Is(rmErr, ErrRolledBack) {
 		t.Fatalf("ждали откат: %v", rmErr)

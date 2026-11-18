@@ -158,3 +158,14 @@ func TestUnitAndRestoreUnit(t *testing.T) {
 		t.Fatal("юнит не удалён")
 	}
 }
+
+func TestListening(t *testing.T) {
+	f, svc := controlEnv(t, &unit{loaded: true, active: "active", sub: "running"}, nil)
+	for _, on := range []bool{true, false} {
+		f.SetListening(443, on)
+		got, err := svc.Listening(short(t), 443)
+		if err != nil || got != on {
+			t.Fatalf("слушает %t: %t, %v", on, got, err)
+		}
+	}
+}
