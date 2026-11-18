@@ -2,7 +2,7 @@
   "schema": {
     "name": "status",
     "major": 1,
-    "minor": 0
+    "minor": 1
   },
   "xm": {
     "version": "0.1.0"
@@ -27,6 +27,23 @@
       "domain": ""
     },
     "port": 443,
-    "drift": false
+    "drift": false,
+    "profiles": 2,
+    "clients": [
+      {
+        "name": "v2rayN",
+        "works": true,
+        "condition": "ядро Xray клиента не старше v25.7.26",
+        "reason": "",
+        "min_client": ""
+      },
+      {
+        "name": "Hiddify 4.x",
+        "works": false,
+        "condition": "",
+        "reason": "вырезает X25519MLKEM768",
+        "min_client": "Hiddify 5.x"
+      }
+    ]
   }
 }

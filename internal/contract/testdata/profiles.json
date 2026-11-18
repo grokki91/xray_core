@@ -1,0 +1,25 @@
+{
+  "schema": {
+    "name": "profiles",
+    "major": 1,
+    "minor": 0
+  },
+  "xm": {
+    "version": "0.1.0"
+  },
+  "time": 1767225600,
+  "data": {
+    "profiles": [
+      {
+        "name": "phone",
+        "created": 1767225600,
+        "enabled": true
+      },
+      {
+        "name": "laptop",
+        "created": 1767229200,
+        "enabled": false
+      }
+    ]
+  }
+}

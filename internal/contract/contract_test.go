@@ -21,6 +21,23 @@ func TestGolden(t *testing.T) {
 			Versions:  Versions{XM: "0.1.0", Xray: "26.11.9"},
 			Addresses: ServerAddress{IPv4: "203.0.113.10"},
 			Port:      443,
+			Profiles:  2,
+			Clients: []ClientSupport{
+				{Name: "v2rayN", Works: true, Condition: "ядро Xray клиента не старше v25.7.26"},
+				{Name: "Hiddify 4.x", Reason: "вырезает X25519MLKEM768", MinClient: "Hiddify 5.x"},
+			},
+		}),
+		"profiles": New("0.1.0", at, Profiles{Profiles: []ProfileItem{
+			{Name: "phone", Created: 1767225600, Enabled: true},
+			{Name: "laptop", Created: 1767229200},
+		}}),
+		"profile": New("0.1.0", at, Profile{
+			ProfileItem: ProfileItem{Name: "phone", Created: 1767225600, Enabled: true},
+			Links: []ProfileLink{
+				{Address: "vpn.example.com", URI: "vless://00000000-0000-4000-8000-000000000001@vpn.example.com:443?encryption=none#phone"},
+			},
+			QRAddress: "vpn.example.com",
+			Unfit:     []UnfitClient{{Client: "Hiddify 4.x", Reason: "вырезает X25519MLKEM768; нужен Hiddify 5.x"}},
 		}),
 		"error": NewError("0.1.0", at, Error{
 			Code:    "cli.unknown_command",

@@ -1,0 +1,29 @@
+{
+  "schema": {
+    "name": "profile",
+    "major": 1,
+    "minor": 0
+  },
+  "xm": {
+    "version": "0.1.0"
+  },
+  "time": 1767225600,
+  "data": {
+    "name": "phone",
+    "created": 1767225600,
+    "enabled": true,
+    "links": [
+      {
+        "address": "vpn.example.com",
+        "uri": "vless://00000000-0000-4000-8000-000000000001@vpn.example.com:443?encryption=none#phone"
+      }
+    ],
+    "qr_address": "vpn.example.com",
+    "unfit": [
+      {
+        "client": "Hiddify 4.x",
+        "reason": "вырезает X25519MLKEM768; нужен Hiddify 5.x"
+      }
+    ]
+  }
+}

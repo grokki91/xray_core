@@ -139,15 +139,28 @@ check "restart в окне: служба активна" systemctl is-active --q
 ((before > 0)) || bad "restart в окне: счётчик до restart $before, ожидался больше 0"
 eq "restart в окне: NRestarts сохранён" "$(nrestarts)" "$before"
 
-# 8. Секреты не попали в вывод команд: значения из состояния — канарейка. Значения идут через
-# файл, а не аргументы процесса; пустой список — провал, а не «чисто».
+# 8. Первый профиль: установка завершается его ссылкой (секрет печатают только install, add и
+# show), а xm list ссылки не содержит. Идентификатор идёт в grep через подстановку, на экран не попадает.
+pid=$(jq -r '.profiles[0].id' /etc/xm/state.json 2>/dev/null)
+[[ -n $pid && $pid != null ]] || bad "первый профиль: в состоянии его нет"
+check "install: ссылка первого профиля в выводе" grep -qF "vless://$pid@" "$out/install"
+"$xm" list >"$out/list" 2>&1
+eq "list: код" "$?" 0
+check "list: профиль profile-1" grep -q '^profile-1 ' "$out/list"
+"$xm" show profile-1 >"$out/show" 2>&1
+eq "show: код" "$?" 0
+check "show: ссылка профиля" grep -qF "vless://$pid@" "$out/show"
+
+# 9. Секреты не попали в вывод команд, чьё назначение — не показывать их: значения из состояния —
+# канарейка (install, add и show показывают ссылку намеренно, поэтому не проверяются). Значения
+# идут через файл, а не аргументы процесса; пустой список — провал, а не «чисто».
 jq -r '(.inbounds[].reality | .private_key, .public_key, .short_ids[]), (.profiles[]?.id)' /etc/xm/state.json >"$out/.secrets" 2>/dev/null
 chmod 600 "$out/.secrets"
 n=$(grep -c . "$out/.secrets")
 if ((n < 3)); then
 	bad "канарейка: в состоянии найдено $n значений, нужно не меньше 3"
 else
-	grep -qF -f "$out/.secrets" "$out/install" "$out/status" "$out/again" "$out/stop" "$out/start" "$out/restart" "$out/restart-window"
+	grep -qF -f "$out/.secrets" "$out/list" "$out/status" "$out/again" "$out/stop" "$out/start" "$out/restart" "$out/restart-window"
 	case $? in
 	0) bad "секрет состояния в выводе команд" ;;
 	1) ok "вывод команд без секретов состояния" ;;

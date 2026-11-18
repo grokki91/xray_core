@@ -36,6 +36,10 @@ type App interface {
 	Install(ctx context.Context, o app.InstallOptions) (app.InstallResult, error)
 	Service(ctx context.Context, a app.Action) error
 	Status(ctx context.Context) (contract.Status, error)
+	ProfileAdd(ctx context.Context, name string, o app.ShareOptions) (app.ProfileView, error)
+	ProfileList(ctx context.Context) (contract.Profiles, error)
+	ProfileShow(ctx context.Context, name string, o app.ShareOptions) (app.ProfileView, error)
+	ProfileRemove(ctx context.Context, name string) error
 }
 
 // Env — то, что получает команда: потоки вывода, версия сборки, часы и прикладной слой. Ctx
@@ -57,7 +61,10 @@ type command struct {
 	summary string
 	json    bool                   // команда поддерживает --json
 	flags   func(fs *flag.FlagSet) // объявление собственных флагов
-	run     func(e Env, fs *flag.FlagSet, asJSON bool) int
+	// args — позиционные аргументы: сколько обязательных и сколько допустимых; флаги можно
+	// ставить до, между и после них.
+	minArgs, maxArgs int
+	run              func(e Env, fs *flag.FlagSet, args []string, asJSON bool) int
 }
 
 // commands — закрытый список команд в порядке справки.
@@ -70,6 +77,12 @@ func commands() []command {
 		{name: "restart", usage: "xm restart", summary: "перезапустить службу Xray", run: service(app.Restart)},
 		{name: "status", usage: "xm status [--json]", summary: "состояние службы, версии, адреса, порт",
 			json: true, run: runStatus},
+		{name: "add", usage: "xm add [имя] [--client <id>] [--address <адрес>] [--json]",
+			summary: "создать профиль, показать ссылки и QR", json: true, flags: shareFlags, maxArgs: 1, run: runAdd},
+		{name: "list", usage: "xm list [--json]", summary: "профили: имя, дата, состояние", json: true, run: runList},
+		{name: "show", usage: "xm show <имя> [--client <id>] [--address <адрес>] [--json]",
+			summary: "ссылки и QR профиля повторно", json: true, flags: shareFlags, minArgs: 1, maxArgs: 1, run: runShow},
+		{name: "rm", usage: "xm rm <имя>", summary: "удалить профиль", minArgs: 1, maxArgs: 1, run: runRemove},
 		{name: "version", usage: "xm version [--json]", summary: "версия xm", json: true, run: runVersion},
 		{name: "help", usage: "xm help", summary: "эта справка", run: runHelp},
 	}
@@ -105,22 +118,36 @@ func Run(args []string, e Env) int {
 			// Parse его принял.
 			fs.Bool("json", false, "машинный вывод")
 		}
-		if err := fs.Parse(args[1:]); err != nil {
-			if errors.Is(err, flag.ErrHelp) {
-				fmt.Fprintf(e.Stdout, "Использование: %s\n%s\n", c.usage, c.summary)
-				return exitOK
+		// Флаги и позиционные аргументы чередуются: flag останавливается на первом
+		// позиционном, поэтому разбор повторяется по остатку.
+		var pos []string
+		rest := args[1:]
+		for {
+			if err := fs.Parse(rest); err != nil {
+				if errors.Is(err, flag.ErrHelp) {
+					fmt.Fprintf(e.Stdout, "Использование: %s\n%s\n", c.usage, c.summary)
+					return exitOK
+				}
+				return usageError(e, asJSON, codeBadArguments, flagMessage(err))
 			}
-			return usageError(e, asJSON, codeBadArguments, flagMessage(err))
+			if fs.NArg() == 0 {
+				break
+			}
+			pos = append(pos, fs.Arg(0))
+			rest = fs.Args()[1:]
 		}
-		if fs.NArg() > 0 {
-			return usageError(e, asJSON, codeBadArguments, "лишний аргумент «"+quote(fs.Arg(0))+"»")
+		if len(pos) > c.maxArgs {
+			return usageError(e, asJSON, codeBadArguments, "лишний аргумент «"+quote(pos[c.maxArgs])+"»")
 		}
-		return c.run(e, fs, asJSON)
+		if len(pos) < c.minArgs {
+			return usageError(e, asJSON, codeBadArguments, "не хватает аргумента: "+c.usage)
+		}
+		return c.run(e, fs, pos, asJSON)
 	}
 	return usageError(e, asJSON, codeUnknownCommand, "неизвестная команда «"+quote(args[0])+"»")
 }
 
-func runVersion(e Env, _ *flag.FlagSet, asJSON bool) int {
+func runVersion(e Env, _ *flag.FlagSet, _ []string, asJSON bool) int {
 	if asJSON {
 		return writeJSON(e, contract.New(e.Version, e.Clock.Now(), contract.Version{XM: e.Version}))
 	}
@@ -128,7 +155,7 @@ func runVersion(e Env, _ *flag.FlagSet, asJSON bool) int {
 	return exitOK
 }
 
-func runHelp(e Env, _ *flag.FlagSet, _ bool) int {
+func runHelp(e Env, _ *flag.FlagSet, _ []string, _ bool) int {
 	writeUsage(e.Stdout)
 	return exitOK
 }

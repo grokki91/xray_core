@@ -73,11 +73,12 @@ type InstallOptions struct {
 	Port    int
 }
 
-// InstallResult — итог установки; секретов в нём нет.
+// InstallResult — итог установки; секретов в нём нет. Ссылки первого профиля — ProfileShow.
 type InstallResult struct {
 	Xray    string `json:"xray"`
 	Address string `json:"address"`
 	Port    int    `json:"port"`
+	Profile string `json:"profile"` // имя первого профиля
 }
 
 // Releases — источник релизов Xray; настоящий — update.GitHub.
@@ -178,6 +179,11 @@ func (a *App) Install(ctx context.Context, o InstallOptions) (InstallResult, err
 	if err != nil {
 		return InstallResult{}, err
 	}
+	clientID, err := a.s.Security.NewClientID()
+	if err != nil {
+		return InstallResult{}, err
+	}
+	a.s.Redactor.Register("uuid", clientID)
 	st := store.State{
 		SchemaVersion: 1,
 		Server:        store.Server{Addresses: addr, Port: o.Port},
@@ -192,6 +198,11 @@ func (a *App) Install(ctx context.Context, o InstallOptions) (InstallResult, err
 		Profiles: []store.Profile{},
 		Core:     store.Core{Version: string(version)},
 	}
+	// Первый профиль создаётся в той же транзакции: установка завершается рабочей ссылкой.
+	st, first, err := a.s.Profile.Add(st, a.s.Profile.NextName(st), clientID, a.s.Now())
+	if err != nil {
+		return InstallResult{}, err
+	}
 	var spec server.UnitSpec
 	for _, o := range a.s.Security.UnitHardening() {
 		spec.Hardening = append(spec.Hardening, server.UnitOption{Key: o.Key, Value: o.Value})
@@ -199,7 +210,7 @@ func (a *App) Install(ctx context.Context, o InstallOptions) (InstallResult, err
 	if err := a.Apply(ctx, Change{Reason: "install", State: st, Unit: &spec, Core: version, Create: true}); err != nil {
 		return InstallResult{}, err
 	}
-	return InstallResult{Xray: string(version), Address: o.Address, Port: o.Port}, nil
+	return InstallResult{Xray: string(version), Address: o.Address, Port: o.Port, Profile: first.Name}, nil
 }
 
 // installed читает состояние: есть ли установка.
@@ -279,6 +290,10 @@ func (a *App) Status(ctx context.Context) (contract.Status, error) {
 		return out, err
 	}
 	a4 := st.Server.Addresses
+	clients := []contract.ClientSupport{}
+	for _, c := range a.s.Profile.Clients(st) {
+		clients = append(clients, contract.ClientSupport{Name: c.Name, Works: c.Works, Condition: c.Condition, Reason: c.Reason, MinClient: c.MinClient})
+	}
 	return contract.Status{
 		Installed: true,
 		Service:   contract.ServiceState{Loaded: us.Loaded, Active: us.Active, Sub: us.Sub, Enabled: us.Enabled, Restarts: us.Restarts},
@@ -286,6 +301,8 @@ func (a *App) Status(ctx context.Context) (contract.Status, error) {
 		Addresses: contract.ServerAddress{IPv4: a4.IPv4, IPv6: a4.IPv6, Domain: a4.Domain},
 		Port:      st.Server.Port,
 		Drift:     drift,
+		Profiles:  len(st.Profiles),
+		Clients:   clients,
 	}, nil
 }
 
