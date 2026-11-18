@@ -37,6 +37,7 @@
 |---|---|---|
 | 2026-11-15 | Последний стабильный релиз — v26.11.9 (`prerelease: false`, `draft: false`, он же `/releases/latest`); v26.10.31 и v26.10.21 — тоже стабильные; v26.9.30 и v26.9.9 — предварительные (`prerelease: true`). Признак стабильности — поле `prerelease` в API, по тегу его не видно | API GitHub `/repos/XTLS/Xray-core/releases`, запрос владельца |
 | 2026-11-15 | API GitHub отдаёт у файла релиза поле `digest` вида `sha256:<hex>`; для `Xray-linux-64.zip` v26.11.9 оно совпадает с `SHA2-256=` из `.dgst` и с суммой скачанного архива; SHA2-512 не сверялась | API GitHub `/releases/latest`, запрос владельца; файл `.dgst` релиза |
+| 2026-11-18 | Токены установки приложения GitHub, в том числе `GITHUB_TOKEN` в Actions, — JWT с префиксом `ghs_`: около 520 символов, две точки, символы `[A-Za-z0-9._-]`; прежний формат — 40 символов `[A-Za-z0-9_]`. Рекомендуемый шаблон GitHub — `ghs_[A-Za-z0-9\.\-_]{36,}`. Отказ проверки `xm` старого формата наблюдался в CI 2026-11-18 | [changelog GitHub 2026-10-02](https://github.blog/changelog/2026-10-02-stateless-github-app-installation-tokens-rolled-out/); задание `l4` PR 98 |
 | 2026-11-13 | v26.11.9 собирается Go 1.27; REALITY — `xtls/reality` 4bb46b2 (2026-11-08) | `go.mod` тега |
 | 2026-11-13 | REALITY отвергает ClientHello без X25519MLKEM768 перед X25519 (правило действует с v26.9.9): такой клиент уходит к цели и видит таймаут | `XTLS/REALITY` `tls.go`, коммит 8cdf7bf и текущая ветка |
 | 2026-11-13 | `minClientVer` по умолчанию не задан | `infra/conf/transport_security.go` тега v26.11.9 |

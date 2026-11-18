@@ -86,12 +86,15 @@ var ErrIntegrity = errors.New("целостность архива не подт
 // лимит запросов к API делят все клиенты с тем же внешним адресом.
 const TokenEnv = "XM_GITHUB_TOKEN"
 
-// tokenRe — формат токена: короче 40 символов токенов GitHub не бывает, а короткое значение
-// редактор заменял бы во всём выводе.
-var tokenRe = regexp.MustCompile(`^[A-Za-z0-9_]{40,255}$`)
+// tokenRe — формат токена: символы токенов GitHub, в том числе JWT установки приложения и
+// GITHUB_TOKEN (около 520 символов, с «.» и «-»; docs/compatibility.md §2). Короче 40 символов
+// токенов нет, а короткое значение редактор заменял бы во всём выводе; верхняя граница —
+// предел ввода, не длина токена.
+var tokenRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
-// ValidToken сообщает, подходит ли значение TokenEnv под формат.
-func ValidToken(s string) bool { return tokenRe.MatchString(s) }
+// ValidToken сообщает, подходит ли значение TokenEnv под формат: 40–4096 символов tokenRe
+// (длину RE2 повтором больше 1000 не задаёт).
+func ValidToken(s string) bool { return len(s) >= 40 && len(s) <= 4096 && tokenRe.MatchString(s) }
 
 // GitHub — единственная реализация источника: релизы XTLS/Xray-core.
 type GitHub struct {
@@ -113,7 +116,7 @@ func validTag(tag string) bool {
 // Latest возвращает последний стабильный релиз.
 func (g *GitHub) Latest(ctx context.Context) (Release, error) {
 	if g.token != "" && !ValidToken(g.token) {
-		return Release{}, fmt.Errorf("последний релиз: %s: допустимы 40–255 символов A-Z, a-z, 0-9, _", TokenEnv)
+		return Release{}, fmt.Errorf("последний релиз: %s: допустимы 40–4096 символов A-Z, a-z, 0-9, «.», «-», «_»", TokenEnv)
 	}
 	body, err := g.p.Net().Get(ctx, platform.Request{URL: latestURL, Hosts: apiHosts, Max: maxRelease, Token: g.token})
 	if err != nil {

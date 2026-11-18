@@ -239,8 +239,9 @@ func TestLatestRejects(t *testing.T) {
 
 // Токен API (ADR-0031) уходит только в запрос к API, не в загрузку файлов релиза.
 func TestTokenOnlyForAPI(t *testing.T) {
-	f, g := env(t)
-	g = NewGitHub(f, "xm_fake_github_token_000000000000000000001")
+	f, _ := env(t)
+	// Длинный, с точками и дефисом — как токен установки приложения GitHub в формате JWT.
+	g := NewGitHub(f, "xm_fake_github_token_1."+strings.Repeat("a", 500)+".b-c")
 	r := latest(t, g)
 	if _, err := g.Fetch(ctx(t), r, ArchAMD64); err != nil {
 		t.Fatal(err)
@@ -262,9 +263,9 @@ func TestTokenOnlyForAPI(t *testing.T) {
 
 // Токен не по правилу отвергается до сети, и его значения нет в ошибке.
 func TestTokenRejected(t *testing.T) {
-	long, short := strings.Repeat("a", 256), strings.Repeat("a", 39)
+	long, short := strings.Repeat("a", 4097), strings.Repeat("a", 39)
 	for _, token := range []string{"xm_fake_github token_00000000000000000001", "xm_fake_github_token_000000000000\r\nX-Evil: 1",
-		"xm-fake-github-token-000000000000000000001", "тoken_fake_github_token_00000000000000001", short, long} {
+		"xm_fake_github_token/000000000000000000001", "тoken_fake_github_token_00000000000000001", short, long} {
 		f, _ := env(t)
 		_, err := NewGitHub(f, token).Latest(ctx(t))
 		if err == nil {
