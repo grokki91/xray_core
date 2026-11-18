@@ -16,6 +16,7 @@ import (
 	"github.com/grokki91/xray_core/internal/core"
 	"github.com/grokki91/xray_core/internal/logging"
 	"github.com/grokki91/xray_core/internal/platform"
+	"github.com/grokki91/xray_core/internal/profile"
 	"github.com/grokki91/xray_core/internal/redact"
 	"github.com/grokki91/xray_core/internal/security"
 	"github.com/grokki91/xray_core/internal/server"
@@ -175,7 +176,7 @@ func build(t *testing.T, installed bool) *sys {
 	cfgPath := config.Path
 	s.app = New(Services{
 		Store: store.New(p.FS()), Backup: backup.New(p), Config: config.New(p), Core: core.New(p),
-		Server: server.New(p, cfgPath), Logging: logging.New(p, reg, slog.LevelInfo),
+		Server: server.New(p, cfgPath), Logging: logging.New(p, reg, slog.LevelInfo), Profile: profile.New(),
 		Security: security.New(p), Releases: s.rel, Redactor: regAdapter{reg},
 		XM: "0.1.0", Now: f.Clock().Now, ControlTimeout: 150 * time.Millisecond,
 	})

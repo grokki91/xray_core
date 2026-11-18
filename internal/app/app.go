@@ -14,6 +14,7 @@ import (
 	"github.com/grokki91/xray_core/internal/config"
 	"github.com/grokki91/xray_core/internal/core"
 	"github.com/grokki91/xray_core/internal/logging"
+	"github.com/grokki91/xray_core/internal/profile"
 	"github.com/grokki91/xray_core/internal/security"
 	"github.com/grokki91/xray_core/internal/server"
 	"github.com/grokki91/xray_core/internal/store"
@@ -41,6 +42,7 @@ type Services struct {
 	Core    *core.Manager
 	Server  *server.Manager
 	Logging *logging.Manager
+	Profile *profile.Manager
 	// Security — базовая защита в начале каждой транзакции и ключи установки.
 	Security *security.Manager
 	// Releases — источник релизов Xray для установки.
@@ -70,6 +72,10 @@ type Change struct {
 	State  store.State      // новое состояние; поле Applied заполняет транзакция
 	Unit   *server.UnitSpec // nil — юнит не меняется
 	Core   core.Version     // пусто — ядро не меняется; иначе версия уже выложена (core.Stage)
+	// Edit — изменение поверх текущего состояния, вычисляется под блокировкой: чтение и запись
+	// не разделены, параллельная команда не потеряет чужое изменение. Задан Edit — State не
+	// используется, а установка должна быть (иначе ErrNotInstalled).
+	Edit func(store.State) (store.State, error)
 	// Create — установка: состояния быть не должно, иначе ErrInstalled. Проверка идёт под
 	// блокировкой: две одновременные установки не перезапишут друг друга.
 	Create bool
@@ -102,6 +108,17 @@ func (a *App) Apply(ctx context.Context, ch Change) error {
 	}
 	if ch.Create && hadState {
 		return ErrInstalled
+	}
+	if ch.Edit != nil {
+		if ch.State.SchemaVersion != 0 {
+			return errors.New("изменение задаёт и State, и Edit")
+		}
+		if !hadState {
+			return ErrNotInstalled
+		}
+		if ch.State, err = ch.Edit(prev); err != nil {
+			return err
+		}
 	}
 	a.register(ch.State)
 	coreBefore, err := a.s.Core.Current(ctx)
@@ -238,6 +255,9 @@ func (a *App) register(st store.State) {
 		for _, n := range in.Reality.ServerNames {
 			r.Register("domain", n)
 		}
+	}
+	for _, p := range st.Profiles {
+		r.Register("uuid", p.ID)
 	}
 	ad := st.Server.Addresses
 	r.Register("server-ip", ad.IPv4)

@@ -234,11 +234,11 @@ type Preset interface {  // каталог пресетов: config/preset
 Клиентские профили и всё, что отдаётся клиентам.
 
 ```go
-type Manager interface {
-    Create(name string) (Profile, error)   // имя проверяется, учётные данные — от security
-    List() []Profile
-    Get(name string) (Profile, error)
-    Delete(name string) error
+type Manager interface {  // над store.State, без записи: изменение проводит транзакция app
+    Add(st store.State, name, id string, now time.Time) (store.State, store.Profile, error)
+    List(st store.State) []store.Profile          // в порядке создания
+    Get(st store.State, name string) (store.Profile, error)
+    Remove(st store.State, name string) (store.State, error)
 }
 
 type Exporter interface {  // profile/export — единственное место форматов клиентов
@@ -251,7 +251,10 @@ type Compat interface {    // profile/compat — таблица данных с 
 }
 ```
 
-- Имя профиля: `[a-z0-9][a-z0-9_-]{0,31}`; оно же — метка в URI.
+- Имя профиля: `[a-z0-9][a-z0-9_-]{0,31}`; оно же — метка в URI. Идентификатор клиента — UUID v4
+  от `security.NewClientID`; передаёт его `app` (менеджеры друг друга не импортируют). Ошибки:
+  `ErrInput` (имя, идентификатор, повтор идентификатора), `ErrExists`, `ErrNotFound`; в ошибках нет
+  идентификатора. Профиль создаётся включённым. Фаза 3, шаг 2.
 - `Endpoint` — адрес (IPv4, IPv6 в скобках, домен), порт и параметры пресета; один профиль
   экспортируется для каждого адреса сервера.
 - Экспорт под пресет, который клиент не поддерживает, — ошибка с причиной из таблицы
@@ -519,6 +522,13 @@ type App interface {
   транзакцией; `Status` — служба, версии, адреса, порт, дрейф (схема `status`). Сроки операций задаёт
   `app`. Ошибки сценариев: `ErrInput` (код 2), `ErrPreflight` с перечнем причин, `ErrInstalled`,
   `ErrNotInstalled` (код 3). Остальные сценарии — следующие фазы.
+- `Change.Edit` — изменение поверх текущего состояния, вычисляется под блокировкой транзакции
+  ([ADR-0005](../adr/0005-transactions-and-rollback.md)): чтение и запись не разделены. `State` —
+  для установки (`Create`), `Edit` — для изменения существующей; заданы оба — ошибка. Сценарии
+  профилей фазы 3: `ProfileAdd`, `ProfileRemove` — транзакции через `Edit`; `ProfileList`,
+  `ProfileShow` — чтение. До шага 6 (схемы `profiles` и `profile`) они возвращают `store.Profile`;
+  `ProfileView` и `ProfileSummary` из `contract` заменяют его вместе с командами. Все требуют root и установку; ошибки
+  `profile` сводятся к `ErrInput` (код 2). Идентификаторы клиентов регистрируются в редакторе.
 - Возвращает типы `contract`; о терминале и HTTP не знает. Фаза 2 и далее.
 
 ---
