@@ -22,7 +22,7 @@
     "unfit": [
       {
         "client": "Hiddify 4.x",
-        "reason": "вырезает X25519MLKEM768; нужен Hiddify 5.x"
+        "reason": "вырезает X25519MLKEM768"
       }
     ]
   }

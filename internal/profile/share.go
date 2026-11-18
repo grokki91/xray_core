@@ -42,7 +42,6 @@ type ClientInfo struct {
 	Works     bool
 	Condition string
 	Reason    string
-	MinClient string
 }
 
 // Share строит ссылки профиля name по состоянию. client — необязательный ID клиента из таблицы:
@@ -98,11 +97,7 @@ func (m *Manager) Share(st store.State, name, client, address string) (Share, er
 	sh.QRAddress, sh.QR = address, q.Text
 	for _, c := range m.Clients(st) {
 		if !c.Works {
-			reason := c.Reason
-			if c.MinClient != "" {
-				reason += "; нужен " + c.MinClient
-			}
-			sh.Unfit = append(sh.Unfit, Unfit{Client: c.Name, Reason: reason})
+			sh.Unfit = append(sh.Unfit, Unfit{Client: c.Name, Reason: c.Reason})
 		}
 	}
 	return sh, nil
@@ -116,7 +111,7 @@ func (m *Manager) Clients(st store.State) []ClientInfo {
 	}
 	var out []ClientInfo
 	for _, c := range compat.Clients(st.Inbounds[0].Preset, st.Core.Version) {
-		out = append(out, ClientInfo{Name: c.Name, Works: c.Works, Condition: c.Condition, Reason: c.Reason, MinClient: c.MinClient})
+		out = append(out, ClientInfo{Name: c.Name, Works: c.Works, Condition: c.Condition, Reason: c.Reason})
 	}
 	return out
 }

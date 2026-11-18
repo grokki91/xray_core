@@ -89,7 +89,7 @@
 (`loaded`, `active`, `sub`, `enabled`, `restarts`), `versions` (`xm`, `xray`), `addresses`
 (`ipv4`, `ipv6`, `domain`), `port`, `drift`; не установлено — `installed: false`. Добавлены (`minor 1`): `profiles` —
 число профилей и `clients` — таблица совместимости клиентов с пресетом и ядром сервера (`name`,
-`works`, `condition`, `reason`, `min_client`; пусто — `[]`). Доступное обновление и вердикт
+`works`, `condition`, `reason`; пусто — `[]`). Доступное обновление и вердикт
 здоровья добавятся полями (`minor + 1`). Схема `profiles` — `profiles[]` из `name`, `created`
 (секунды Unix), `enabled`, без секретов. Схема `profile` — те же поля и `links[]` (`address`, `uri` —
 секрет), `qr_address`, `unfit[]` (`client`, `reason`); QR в документ не входит.

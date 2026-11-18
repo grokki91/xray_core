@@ -131,7 +131,7 @@ var installed = contract.Status{
 	Profiles:  2,
 	Clients: []contract.ClientSupport{
 		{Name: "v2rayN", Works: true, Condition: "ядро Xray клиента не старше v25.7.26"},
-		{Name: "Hiddify 4.x", Reason: "вырезает X25519MLKEM768", MinClient: "Hiddify 5.x"},
+		{Name: "Hiddify 4.x", Reason: "вырезает X25519MLKEM768"},
 	},
 }
 
@@ -150,7 +150,7 @@ func TestStatusJSONMatchesGolden(t *testing.T) {
 func TestStatusHuman(t *testing.T) {
 	code, stdout, _ := runWith(&fakeApp{status: installed}, "status")
 	for _, want := range []string{"active (running)", "Xray 26.11.9", "IPv4: 203.0.113.10", "Порт: 443", "совпадает с состоянием",
-		"Профилей: 2", "Клиент v2rayN: подключится, если ядро Xray клиента", "Клиент Hiddify 4.x: не подключится (вырезает X25519MLKEM768); нужен Hiddify 5.x"} {
+		"Профилей: 2", "Клиент v2rayN: подключится, если ядро Xray клиента", "Клиент Hiddify 4.x: не подключится (вырезает X25519MLKEM768)"} {
 		if code != exitOK || !strings.Contains(stdout, want) {
 			t.Errorf("нет %q: код %d, stdout:\n%s", want, code, stdout)
 		}
@@ -186,7 +186,7 @@ var phone = app.ProfileView{
 			{Address: "vpn.example.com", URI: "vless://00000000-0000-4000-8000-000000000001@vpn.example.com:443?encryption=none#phone"},
 		},
 		QRAddress: "vpn.example.com",
-		Unfit:     []contract.UnfitClient{{Client: "Hiddify 4.x", Reason: "вырезает X25519MLKEM768; нужен Hiddify 5.x"}},
+		Unfit:     []contract.UnfitClient{{Client: "Hiddify 4.x", Reason: "вырезает X25519MLKEM768"}},
 	},
 	QR: "QR-РИСУНОК\n",
 }

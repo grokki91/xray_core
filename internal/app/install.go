@@ -292,7 +292,7 @@ func (a *App) Status(ctx context.Context) (contract.Status, error) {
 	a4 := st.Server.Addresses
 	clients := []contract.ClientSupport{}
 	for _, c := range a.s.Profile.Clients(st) {
-		clients = append(clients, contract.ClientSupport{Name: c.Name, Works: c.Works, Condition: c.Condition, Reason: c.Reason, MinClient: c.MinClient})
+		clients = append(clients, contract.ClientSupport{Name: c.Name, Works: c.Works, Condition: c.Condition, Reason: c.Reason})
 	}
 	return contract.Status{
 		Installed: true,

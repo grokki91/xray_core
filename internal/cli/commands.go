@@ -149,8 +149,6 @@ func runStatus(e Env, _ *flag.FlagSet, _ []string, asJSON bool) int {
 	fmt.Fprintf(e.Stdout, "Профилей: %d\n", st.Profiles)
 	for _, c := range st.Clients {
 		switch {
-		case !c.Works && c.MinClient != "":
-			fmt.Fprintf(e.Stdout, "Клиент %s: не подключится (%s); нужен %s\n", quote(c.Name), quote(c.Reason), quote(c.MinClient))
 		case !c.Works:
 			fmt.Fprintf(e.Stdout, "Клиент %s: не подключится (%s)\n", quote(c.Name), quote(c.Reason))
 		case c.Condition != "":

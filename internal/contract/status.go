@@ -18,14 +18,12 @@ type Status struct {
 }
 
 // ClientSupport — строка таблицы совместимости: подключится ли клиент к серверу и при каком
-// условии. Reason — только когда не подключится; MinClient — с какой версии клиента, если
-// таблица её называет.
+// условии. Reason — только когда не подключится.
 type ClientSupport struct {
 	Name      string `json:"name"`
 	Works     bool   `json:"works"`
 	Condition string `json:"condition"`
 	Reason    string `json:"reason"`
-	MinClient string `json:"min_client"`
 }
 
 // ServiceState — состояние службы xray.service глазами systemd.

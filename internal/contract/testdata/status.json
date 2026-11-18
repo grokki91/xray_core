@@ -34,15 +34,13 @@
         "name": "v2rayN",
         "works": true,
         "condition": "ядро Xray клиента не старше v25.7.26",
-        "reason": "",
-        "min_client": ""
+        "reason": ""
       },
       {
         "name": "Hiddify 4.x",
         "works": false,
         "condition": "",
-        "reason": "вырезает X25519MLKEM768",
-        "min_client": "Hiddify 5.x"
+        "reason": "вырезает X25519MLKEM768"
       }
     ]
   }

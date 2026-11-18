@@ -140,16 +140,26 @@ check "restart в окне: служба активна" systemctl is-active --q
 eq "restart в окне: NRestarts сохранён" "$(nrestarts)" "$before"
 
 # 8. Первый профиль: установка завершается его ссылкой (секрет печатают только install, add и
-# show), а xm list ссылки не содержит. Идентификатор идёт в grep через подстановку, на экран не попадает.
-pid=$(jq -r '.profiles[0].id' /etc/xm/state.json 2>/dev/null)
-[[ -n $pid && $pid != null ]] || bad "первый профиль: в состоянии его нет"
-check "install: ссылка первого профиля в выводе" grep -qF "vless://$pid@" "$out/install"
+# show), а xm list ссылки не содержит. Идентификатор клиента — секрет: он идёт через файл с
+# правами 600, а не аргументами процесса (их видно в ps и /proc).
+touch "$out/.link" && chmod 600 "$out/.link"
+jq -j '"vless://" + .profiles[0].id + "@"' /etc/xm/state.json >"$out/.link" 2>/dev/null
+if [[ $(wc -c <"$out/.link") -lt 20 ]]; then bad "первый профиль: в состоянии его нет"; fi
+check "install: ссылка первого профиля в выводе" grep -qF -f "$out/.link" "$out/install"
 "$xm" list >"$out/list" 2>&1
 eq "list: код" "$?" 0
 check "list: профиль profile-1" grep -q '^profile-1 ' "$out/list"
 "$xm" show profile-1 >"$out/show" 2>&1
 eq "show: код" "$?" 0
-check "show: ссылка профиля" grep -qF "vless://$pid@" "$out/show"
+check "show: ссылка профиля" grep -qF -f "$out/.link" "$out/show"
+# Приватный ключ REALITY не печатает ни одна команда, в том числе install и show.
+jq -r '.inbounds[].reality.private_key' /etc/xm/state.json >"$out/.private" 2>/dev/null
+chmod 600 "$out/.private"
+if [[ -s $out/.private ]]; then
+	if grep -qF -f "$out/.private" "$out/install" "$out/show"; then bad "приватный ключ в выводе install или show"; else ok "install и show без приватного ключа"; fi
+else
+	bad "приватный ключ не найден в состоянии"
+fi
 
 # 9. Секреты не попали в вывод команд, чьё назначение — не показывать их: значения из состояния —
 # канарейка (install, add и show показывают ссылку намеренно, поэтому не проверяются). Значения

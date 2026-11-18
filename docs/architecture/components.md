@@ -255,7 +255,7 @@ type Exporter interface {  // profile/export — единственное мес
 
 // profile/compat — таблица данных с датой и источником
 func Clients(presetID, core string) []ClientSupport  // core — версия Xray сервера N.N.N; ниже 26.9.9 — nil
-func Check(client, presetID string) error            // ErrIncompatible с причиной и «нужен …»; ErrUnknown
+func Check(client, presetID string) error            // ErrIncompatible с причиной; ErrUnknown
 ```
 
 - Имя профиля: `[a-z0-9][a-z0-9_-]{0,31}`; оно же — метка в URI. Идентификатор клиента — UUID v4
