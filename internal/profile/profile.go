@@ -38,7 +38,7 @@ func New() *Manager { return &Manager{} }
 // Add возвращает состояние с новым включённым профилем. id — UUID v4 от security.
 func (m *Manager) Add(st store.State, name, id string, now time.Time) (store.State, store.Profile, error) {
 	if !ValidName(name) {
-		return st, store.Profile{}, fmt.Errorf("%w: имя %q", ErrInput, name)
+		return st, store.Profile{}, fmt.Errorf("%w: имя: [a-z0-9][a-z0-9_-]{0,31}", ErrInput)
 	}
 	if !idRe.MatchString(id) {
 		return st, store.Profile{}, fmt.Errorf("%w: идентификатор клиента", ErrInput)
@@ -63,7 +63,7 @@ func (m *Manager) List(st store.State) []store.Profile { return slices.Clone(st.
 // Get — профиль по имени.
 func (m *Manager) Get(st store.State, name string) (store.Profile, error) {
 	if !ValidName(name) {
-		return store.Profile{}, fmt.Errorf("%w: имя %q", ErrInput, name)
+		return store.Profile{}, fmt.Errorf("%w: имя: [a-z0-9][a-z0-9_-]{0,31}", ErrInput)
 	}
 	for _, p := range st.Profiles {
 		if p.Name == name {

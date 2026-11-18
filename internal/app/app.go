@@ -110,6 +110,9 @@ func (a *App) Apply(ctx context.Context, ch Change) error {
 		return ErrInstalled
 	}
 	if ch.Edit != nil {
+		if ch.State.SchemaVersion != 0 {
+			return errors.New("изменение задаёт и State, и Edit")
+		}
 		if !hadState {
 			return ErrNotInstalled
 		}

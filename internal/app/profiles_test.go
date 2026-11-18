@@ -35,7 +35,7 @@ func readConfig(t *testing.T, s *sys) string {
 func TestProfileAddListShowRemove(t *testing.T) {
 	s := installed(t)
 	restarts := s.restarts
-	p, err := s.app.AddProfile(ctx(t), "phone")
+	p, err := s.app.ProfileAdd(ctx(t), "phone")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,23 +48,23 @@ func TestProfileAddListShowRemove(t *testing.T) {
 	if s.restarts == restarts || s.snap(t).tx {
 		t.Fatal("изменение не применено транзакцией")
 	}
-	if _, err := s.app.AddProfile(ctx(t), "laptop"); err != nil {
+	if _, err := s.app.ProfileAdd(ctx(t), "laptop"); err != nil {
 		t.Fatal(err)
 	}
-	list, err := s.app.Profiles(ctx(t))
+	list, err := s.app.ProfileList(ctx(t))
 	if err != nil || len(list) != 2 || list[0].Name != "phone" || list[1].Name != "laptop" {
 		t.Fatalf("список: %+v %v", list, err)
 	}
-	if got, err := s.app.Profile(ctx(t), "phone"); err != nil || got.ID != p.ID {
+	if got, err := s.app.ProfileShow(ctx(t), "phone"); err != nil || got.ID != p.ID {
 		t.Fatalf("показ: %+v %v", got, err)
 	}
-	if err := s.app.RemoveProfile(ctx(t), "phone"); err != nil {
+	if err := s.app.ProfileRemove(ctx(t), "phone"); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(readConfig(t, s), p.ID) {
 		t.Fatal("ключ удалённого профиля остался в конфигурации")
 	}
-	if _, err := s.app.Profile(ctx(t), "phone"); !errors.Is(err, ErrInput) || !errors.Is(err, profile.ErrNotFound) {
+	if _, err := s.app.ProfileShow(ctx(t), "phone"); !errors.Is(err, ErrInput) || !errors.Is(err, profile.ErrNotFound) {
 		t.Fatalf("удалённый профиль: %v", err)
 	}
 }
@@ -72,17 +72,17 @@ func TestProfileAddListShowRemove(t *testing.T) {
 // Отказ до изменения: система не тронута, снимка нет.
 func TestProfileRefusals(t *testing.T) {
 	s := installed(t)
-	if _, err := s.app.AddProfile(ctx(t), "phone"); err != nil {
+	if _, err := s.app.ProfileAdd(ctx(t), "phone"); err != nil {
 		t.Fatal(err)
 	}
 	before := s.snap(t)
 	restarts := s.restarts
 	for name, run := range map[string]func() error{
-		"плохое имя":  func() error { _, err := s.app.AddProfile(ctx(t), "Phone"); return err },
-		"повтор":      func() error { _, err := s.app.AddProfile(ctx(t), "phone"); return err },
-		"rm нет":      func() error { return s.app.RemoveProfile(ctx(t), "none") },
-		"rm плохое":   func() error { return s.app.RemoveProfile(ctx(t), "../x") },
-		"show плохое": func() error { _, err := s.app.Profile(ctx(t), "a b"); return err },
+		"плохое имя":  func() error { _, err := s.app.ProfileAdd(ctx(t), "Phone"); return err },
+		"повтор":      func() error { _, err := s.app.ProfileAdd(ctx(t), "phone"); return err },
+		"rm нет":      func() error { return s.app.ProfileRemove(ctx(t), "none") },
+		"rm плохое":   func() error { return s.app.ProfileRemove(ctx(t), "../x") },
+		"show плохое": func() error { _, err := s.app.ProfileShow(ctx(t), "a b"); return err },
 	} {
 		if err := run(); !errors.Is(err, ErrInput) {
 			t.Errorf("%s: %v, нужен ErrInput", name, err)
@@ -95,15 +95,15 @@ func TestProfileRefusals(t *testing.T) {
 
 func TestProfileNeedsInstallAndRoot(t *testing.T) {
 	s := newFresh(t)
-	if _, err := s.app.AddProfile(ctx(t), "phone"); !errors.Is(err, ErrNotInstalled) {
+	if _, err := s.app.ProfileAdd(ctx(t), "phone"); !errors.Is(err, ErrNotInstalled) {
 		t.Fatalf("add без установки: %v", err)
 	}
-	if _, err := s.app.Profiles(ctx(t)); !errors.Is(err, ErrNotInstalled) {
+	if _, err := s.app.ProfileList(ctx(t)); !errors.Is(err, ErrNotInstalled) {
 		t.Fatalf("list без установки: %v", err)
 	}
 	s.f.SetEffective(platform.Owner{UID: 1000, GID: 1000})
 	var pe *PreflightError
-	if _, err := s.app.Profiles(ctx(t)); !errors.As(err, &pe) || pe.Issues[0].Code != server.CodeNotRoot {
+	if _, err := s.app.ProfileList(ctx(t)); !errors.As(err, &pe) || pe.Issues[0].Code != server.CodeNotRoot {
 		t.Fatalf("list не от root: %v", err)
 	}
 }
@@ -114,13 +114,63 @@ func TestProfileAddRollsBack(t *testing.T) {
 	s := installed(t)
 	before := s.snap(t)
 	s.nRestart, s.restartListens = 0, []bool{false}
-	if _, err := s.app.AddProfile(ctx(t), "phone"); !errors.Is(err, ErrRolledBack) {
+	if _, err := s.app.ProfileAdd(ctx(t), "phone"); !errors.Is(err, ErrRolledBack) {
 		t.Fatalf("ждали ErrRolledBack: %v", err)
 	}
 	if after := s.snap(t); !before.equal(after) {
 		t.Fatal("откат не вернул исходное")
 	}
-	if list, err := s.app.Profiles(ctx(t)); err != nil || len(list) != 0 {
+	if list, err := s.app.ProfileList(ctx(t)); err != nil || len(list) != 0 {
 		t.Fatalf("профиль остался: %+v %v", list, err)
+	}
+}
+
+// Идентификатор клиента — ключ доступа: его нет ни в ошибках, ни в журнале xm, в том числе при
+// откате после добавления и после удаления профиля.
+func TestProfileIDNotInJournalOrErrors(t *testing.T) {
+	s := installed(t)
+	p, err := s.app.ProfileAdd(ctx(t), "phone")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.nRestart, s.restartListens = 0, []bool{false}
+	_, addErr := s.app.ProfileAdd(ctx(t), "laptop")
+	if !errors.Is(addErr, ErrRolledBack) {
+		t.Fatalf("ждали откат: %v", addErr)
+	}
+	s.testExit = 23
+	rmErr := s.app.ProfileRemove(ctx(t), "phone")
+	if !errors.Is(rmErr, ErrRolledBack) {
+		t.Fatalf("ждали откат: %v", rmErr)
+	}
+	for _, e := range []error{addErr, rmErr} {
+		if strings.Contains(e.Error(), p.ID) {
+			t.Fatalf("идентификатор в ошибке: %v", e)
+		}
+	}
+	for _, j := range s.f.Journaled() {
+		if strings.Contains(j.Message, p.ID) {
+			t.Fatalf("идентификатор в журнале xm: %q", j.Message)
+		}
+	}
+}
+
+// Параллельные добавления не теряют друг друга: чтение и запись состояния — под одной
+// блокировкой (Change.Edit).
+func TestProfileAddConcurrent(t *testing.T) {
+	s := installed(t)
+	names := []string{"a1", "a2", "a3", "a4"}
+	errs := make(chan error, len(names))
+	for _, n := range names {
+		go func() { _, err := s.app.ProfileAdd(ctx(t), n); errs <- err }()
+	}
+	for range names {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+	list, err := s.app.ProfileList(ctx(t))
+	if err != nil || len(list) != len(names) {
+		t.Fatalf("профили: %+v %v", list, err)
 	}
 }

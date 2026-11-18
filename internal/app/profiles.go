@@ -20,11 +20,11 @@ func profileErr(err error) error {
 	return err
 }
 
-// AddProfile создаёт включённый профиль транзакцией. Имя проверяется до любых действий;
+// ProfileAdd создаёт включённый профиль транзакцией. Имя проверяется до любых действий;
 // повтор имени проверяется под блокировкой — две команды не создадут один профиль дважды.
-func (a *App) AddProfile(ctx context.Context, name string) (store.Profile, error) {
+func (a *App) ProfileAdd(ctx context.Context, name string) (store.Profile, error) {
 	if !profile.ValidName(name) {
-		return store.Profile{}, fmt.Errorf("%w: имя профиля %q: [a-z0-9][a-z0-9_-]{0,31}", ErrInput, name)
+		return store.Profile{}, fmt.Errorf("%w: имя профиля: [a-z0-9][a-z0-9_-]{0,31}", ErrInput)
 	}
 	if err := a.needRoot(); err != nil {
 		return store.Profile{}, err
@@ -48,10 +48,10 @@ func (a *App) AddProfile(ctx context.Context, name string) (store.Profile, error
 	return added, nil
 }
 
-// RemoveProfile удаляет профиль транзакцией: после фиксации клиент с его ключом не принимается.
-func (a *App) RemoveProfile(ctx context.Context, name string) error {
+// ProfileRemove удаляет профиль транзакцией: после фиксации клиент с его ключом не принимается.
+func (a *App) ProfileRemove(ctx context.Context, name string) error {
 	if !profile.ValidName(name) {
-		return fmt.Errorf("%w: имя профиля %q", ErrInput, name)
+		return fmt.Errorf("%w: имя профиля: [a-z0-9][a-z0-9_-]{0,31}", ErrInput)
 	}
 	if err := a.needRoot(); err != nil {
 		return err
@@ -64,8 +64,8 @@ func (a *App) RemoveProfile(ctx context.Context, name string) error {
 	}})
 }
 
-// Profiles — профили установки в порядке создания.
-func (a *App) Profiles(context.Context) ([]store.Profile, error) {
+// ProfileList — профили установки в порядке создания.
+func (a *App) ProfileList(context.Context) ([]store.Profile, error) {
 	st, err := a.profileState()
 	if err != nil {
 		return nil, err
@@ -73,8 +73,8 @@ func (a *App) Profiles(context.Context) ([]store.Profile, error) {
 	return a.s.Profile.List(st), nil
 }
 
-// Profile — один профиль по имени.
-func (a *App) Profile(_ context.Context, name string) (store.Profile, error) {
+// ProfileShow — один профиль по имени.
+func (a *App) ProfileShow(_ context.Context, name string) (store.Profile, error) {
 	st, err := a.profileState()
 	if err != nil {
 		return store.Profile{}, err
