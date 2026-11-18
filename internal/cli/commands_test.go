@@ -30,7 +30,7 @@ type fakeApp struct {
 
 func (f *fakeApp) Install(_ context.Context, o app.InstallOptions) (app.InstallResult, error) {
 	f.opts = o
-	return app.InstallResult{Xray: "26.11.9", Address: o.Address, Port: o.Port, Profile: "profile-1"}, f.err
+	return app.InstallResult{Xray: "26.11.9", Address: o.Address, Port: o.Port, Profile: "profile-1", Health: contract.Health{Verdict: contract.HealthOK}}, f.err
 }
 
 func (f *fakeApp) ProfileAdd(_ context.Context, name string, o app.ShareOptions) (app.ProfileView, error) {
@@ -133,6 +133,7 @@ var installed = contract.Status{
 		{Name: "v2rayN", Works: true, Condition: "ядро Xray клиента не старше v25.7.26"},
 		{Name: "Hiddify 4.x", Reason: "вырезает X25519MLKEM768"},
 	},
+	Health: contract.Health{Verdict: contract.HealthDown, Cause: "порт сервера не слушается", Action: "ss -ltn; journalctl -u xray -n 50"},
 }
 
 // Вывод xm status --json побайтно совпадает с эталоном схемы status.
@@ -163,6 +164,42 @@ func TestStatusHuman(t *testing.T) {
 	none := contract.Status{Versions: contract.Versions{XM: "0.1.0"}}
 	if code, stdout, _ := runWith(&fakeApp{status: none}, "status"); code != exitOK || !strings.Contains(stdout, "не установлен") {
 		t.Fatalf("не установлено: код %d, stdout %q", code, stdout)
+	}
+}
+
+// Последняя строка вывода status — вердикт: слово, первопричина и действие; при ok — что
+// извне не проверено; при unknown — что проверить не удалось (ADR-0024).
+func TestStatusEndsWithVerdict(t *testing.T) {
+	last := func(h contract.Health) string {
+		st := installed
+		st.Health = h
+		_, stdout, _ := runWith(&fakeApp{status: st}, "status")
+		lines := strings.Split(strings.TrimSpace(stdout), "\n")
+		return lines[len(lines)-1]
+	}
+	for name, c := range map[string]struct {
+		h    contract.Health
+		want []string
+	}{
+		"down":    {installed.Health, []string{"Вердикт: не работает", "порт сервера не слушается", "ss -ltn"}},
+		"ok":      {contract.Health{Verdict: contract.HealthOK}, []string{"Вердикт: работает", "извне не проверена"}},
+		"unknown": {contract.Health{Verdict: contract.HealthUnknown, Cause: "проверка не измерила"}, []string{"Вердикт: не определён", "проверка не измерила"}},
+	} {
+		got := last(c.h)
+		for _, w := range c.want {
+			if !strings.Contains(got, w) {
+				t.Errorf("%s: в последней строке нет %q: %q", name, w, got)
+			}
+		}
+	}
+}
+
+// Установка тоже заканчивается строкой вердикта — после ссылки и QR.
+func TestInstallEndsWithVerdict(t *testing.T) {
+	_, stdout, _ := runWith(&fakeApp{view: phone}, "install", "--sni", "example.com", "--address", "203.0.113.10")
+	lines := strings.Split(strings.TrimSpace(stdout), "\n")
+	if got := lines[len(lines)-1]; !strings.Contains(got, "Вердикт: работает") || !strings.Contains(got, "извне не проверена") {
+		t.Fatalf("последняя строка: %q", got)
 	}
 }
 

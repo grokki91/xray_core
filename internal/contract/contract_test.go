@@ -26,6 +26,7 @@ func TestGolden(t *testing.T) {
 				{Name: "v2rayN", Works: true, Condition: "ядро Xray клиента не старше v25.7.26"},
 				{Name: "Hiddify 4.x", Reason: "вырезает X25519MLKEM768"},
 			},
+			Health: Health{Verdict: HealthDown, Cause: "порт сервера не слушается", Action: "ss -ltn; journalctl -u xray -n 50"},
 		}),
 		"profiles": New("0.1.0", at, Profiles{Profiles: []ProfileItem{
 			{Name: "phone", Created: 1767225600, Enabled: true},
