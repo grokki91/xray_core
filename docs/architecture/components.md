@@ -391,26 +391,43 @@ type Manager interface {
 
 ```go
 type Check interface {
-    ID() string         // "xray.service.active", "net.v6.outbound", …
-    Category() string   // xray | reach | ipv4 | ipv6 | dns | tls | conn | route | ssh | change | filter
-    Run(ctx context.Context, env Env) []Observation
+    ID() string         // "xray.service.active", …; категория — первая часть:
+                        // xray | reach | ipv4 | ipv6 | dns | tls | conn | route | ssh | change | filter | host
+    Requires() []string // проверки, без успеха которых эта не измеряет
+    Run(ctx context.Context) []Observation
+    Fact(o Observation) Finding // вывод fact по наблюдению fail: код, текст, влияние, действие
 }
+
+type Rule func(obs []Observation) []Finding // выводы probable и hypothesis
+
+func New(checks []Check, sets map[string][]string, rules []Rule) (*Engine, error)
+func (e *Engine) Run(ctx context.Context, set string) (Report, error) // Report.Health, Report.Cause()
 
 type Vantage interface { // точка наблюдения: сейчас local; позже probe (внешний узел), client
     ID() string
     Collect(ctx context.Context, sel Selector) ([]Observation, error)
 }
-
-type Engine interface {
-    Run(ctx context.Context, sel Selector) (Report, error)
-    History(limit int) []ReportMeta
-    Import(obs []Observation) error  // наблюдения другой точки, тот же формат
-}
+// позже: Engine.History(limit) и Engine.Import(obs) — наблюдения другой точки, тот же формат
 ```
 
-- Анализ — правила «наблюдения → вывод» с классом `fact | probable | hypothesis`; модель и
+- Измерения проверка получает через конструктор — интерфейсы потребителя, объявленные в `diag`;
+  реализации от `server`, `core`, `config`, `profile` подставляет `cmd/xm` (ADR-0024).
+- Время наблюдения и точка наблюдения (`vantage`) войдут в отчёт вместе со схемой `diag-report`;
+  сейчас отчёт живёт только внутри процесса.
+- Реестр проверяется в `New`: ID по правилу и без повторов;
+  зависимость зарегистрирована раньше зависимой и входит в те же наборы; набор `control` есть.
+  Нарушение — `ErrRegistry`.
+- `Run` идёт по набору в порядке реестра. Зависимость не дала `ok` — проверка не запускается, её
+  наблюдение — `skip` с причиной. Наблюдение без `limits` у `ok` и `fail`, `skip` и `error` без
+  причины, неизвестное состояние, пустой результат, факт провала без влияния, истёкший срок —
+  `error`, а не тихий успех. Факт даёт только проверка по своему `fail` ([ADR-0029](../adr/0029-facts-from-checks.md)); правило, вернувшее `fact`,
+  `probable` без альтернатив или `hypothesis` без «подтвердит» и «опровергнет», — `ErrRule`.
+- Вердикт `Health`: факт с влиянием `down` → `down`; `skip` или `error` проверки набора `control`
+  → `unknown`; факт `degraded` → `degraded`; иначе `ok`. `Cause()` — первый факт `down`, иначе
+  `degraded`: зависимые не запускаются, поэтому он без проваленных зависимостей.
+- Анализ — правила «наблюдения → вывод» классов `probable | hypothesis`; факт строит проверка (ADR-0029); модель и
   каталог проверок — [diagnostics.md](../operations/diagnostics.md).
-- Отчёт всегда проходит `redact` перед сохранением и экспортом. Движок, набор `control` и вердикт `health` — фаза 3 ([ADR-0024](../adr/0024-health-verdict-and-shared-checks.md)); каталог — фаза 5; полностью — после MVP.
+- Отчёт всегда проходит `redact` перед сохранением и экспортом. Движок и вердикт есть; набор `control`, поле `health` схем и строка вердикта — фаза 3 ([ADR-0024](../adr/0024-health-verdict-and-shared-checks.md), задача A2 в [roadmap.md](../roadmap.md) §7); каталог — фаза 5; полностью — после MVP.
 
 ### logging
 
