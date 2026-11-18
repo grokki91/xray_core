@@ -91,7 +91,8 @@ type Net interface {
 	// узел (с портом, если он есть в адресе) из r.Hosts, иначе ErrURL; тело больше r.Max —
 	// ErrTooLarge; не больше 5 перенаправлений; прокси — из окружения (HTTPS_PROXY), как у
 	// http.DefaultTransport: список сверяется с узлом назначения, TLS — до него; контекст
-	// обязан нести срок.
+	// обязан нести срок. Непустой r.Token — заголовок Authorization: Bearer только у первого
+	// запроса.
 	Get(ctx context.Context, r Request) ([]byte, error)
 	// Listening сообщает, слушает ли хост TCP-порт на любом адресе (IPv4 или IPv6): по таблицам
 	// сокетов ядра, без соединения. Новых портов не открывает.
@@ -99,10 +100,13 @@ type Net interface {
 }
 
 // Request — загрузка: адрес, закрытый список узлов потребителя и предел тела в байтах.
+// Token — токен Bearer: уходит только в первый запрос, в перенаправления — нет (ADR-0031);
+// формат проверяет потребитель.
 type Request struct {
 	URL   string
 	Hosts []string
 	Max   int64
+	Token string
 }
 
 // Clock — время.

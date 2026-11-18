@@ -16,20 +16,22 @@ import (
 // ключи создаются при каждом вызове New.
 type Canaries struct {
 	UUID, PrivateKey, PublicKey, ShortID, IPv4, IPv6, Domain, Path string
+	GitHubToken                                                    string // из окружения xm, не из состояния
 }
 
 // New возвращает набор канареек со свежими ключами.
 func New(t testing.TB) Canaries {
 	t.Helper()
 	return Canaries{
-		UUID:       "00000000-0000-4000-8000-0000000ca4a1",
-		PrivateKey: key(t),
-		PublicKey:  key(t),
-		ShortID:    "0123456789abcdef",
-		IPv4:       "203.0.113.77",
-		IPv6:       "2001:db8::77",
-		Domain:     "canary.example.com",
-		Path:       "/canary-path-7f3a",
+		UUID:        "00000000-0000-4000-8000-0000000ca4a1",
+		PrivateKey:  key(t),
+		PublicKey:   key(t),
+		ShortID:     "0123456789abcdef",
+		IPv4:        "203.0.113.77",
+		IPv6:        "2001:db8::77",
+		Domain:      "canary.example.com",
+		Path:        "/canary-path-7f3a",
+		GitHubToken: "xm_fake_github_token_000000000000000000001",
 	}
 }
 
@@ -46,6 +48,7 @@ func (c Canaries) All() map[string]string {
 	return map[string]string{
 		"UUID": c.UUID, "PrivateKey": c.PrivateKey, "PublicKey": c.PublicKey, "ShortID": c.ShortID,
 		"IPv4": c.IPv4, "IPv6": c.IPv6, "Domain": c.Domain, "Path": c.Path,
+		"GitHubToken": c.GitHubToken,
 	}
 }
 

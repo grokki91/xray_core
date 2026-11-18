@@ -43,6 +43,7 @@ func main() {
 func run(ctx context.Context) int {
 	p := platform.New()
 	reg := redact.New()
+	token := githubToken(os.Getenv, reg)
 	a := app.New(app.Services{
 		Store:    store.New(p.FS()),
 		Backup:   backup.New(p),
@@ -53,11 +54,22 @@ func run(ctx context.Context) int {
 		Profile:  profile.New(),
 		Security: security.New(p),
 		Redactor: registry{reg},
-		Releases: update.NewGitHub(p),
+		Releases: update.NewGitHub(p, token),
 		XM:       version,
 		Now:      p.Clock().Now,
 	})
 	return cli.Run(os.Args[1:], cli.Env{
 		Ctx: ctx, Stdout: os.Stdout, Stderr: os.Stderr, Version: version, Clock: p.Clock(), App: a, Redact: reg.Text,
 	})
+}
+
+// githubToken — значение update.TokenEnv (ADR-0031). Верное по формату регистрируется в
+// редакторе; неверное — нет: короткое значение редактор заменял бы во всём выводе, а команду,
+// которой нужен релиз, всё равно остановит проверка формата в update.
+func githubToken(getenv func(string) string, reg *redact.Redactor) string {
+	t := getenv(update.TokenEnv)
+	if update.ValidToken(t) {
+		reg.Register(redact.Token, t)
+	}
+	return t
 }

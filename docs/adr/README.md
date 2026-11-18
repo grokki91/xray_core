@@ -46,3 +46,4 @@
 | [0028](0028-qr-library-and-selftest-address.md) | Библиотека QR и адрес самопроверки | Принято |
 | [0029](0029-facts-from-checks.md) | Факт строит проверка, предположения — правила анализа | Принято |
 | [0030](0030-diag-checks-in-package.md) | Проверки diag — в пакете diag, без подпакета checks | Принято |
+| [0031](0031-github-api-token.md) | Токен API GitHub из окружения | Принято |

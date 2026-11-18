@@ -38,6 +38,7 @@ type Call struct {
 	Path    string // путь файла, имя программы или адрес
 	Version string // версия xray
 	Args    []string
+	Auth    bool // get: у первого запроса был токен
 }
 
 // NewFake возвращает поддельную реализацию с файлами под root и часами, стоящими на now.
