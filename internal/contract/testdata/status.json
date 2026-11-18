@@ -2,7 +2,7 @@
   "schema": {
     "name": "status",
     "major": 1,
-    "minor": 1
+    "minor": 2
   },
   "xm": {
     "version": "0.1.0"
@@ -42,6 +42,11 @@
         "condition": "",
         "reason": "вырезает X25519MLKEM768"
       }
-    ]
+    ],
+    "health": {
+      "verdict": "down",
+      "cause": "порт сервера не слушается",
+      "action": "ss -ltn; journalctl -u xray -n 50"
+    }
   }
 }

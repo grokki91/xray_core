@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/grokki91/xray_core/internal/contract"
 	"github.com/grokki91/xray_core/internal/core"
 	"github.com/grokki91/xray_core/internal/platform"
 	"github.com/grokki91/xray_core/internal/redact"
@@ -426,6 +427,25 @@ func TestStatus(t *testing.T) {
 	}
 	if st, err = s.app.Status(ctx(t)); err != nil || !st.Drift {
 		t.Fatalf("дрейф не виден: %+v %v", st, err)
+	}
+}
+
+// Вердикт status — по набору control: ok при здоровом сервере; порт закрыт — down с причиной и
+// действием; проверку не измерить — unknown, а не ok.
+func TestStatusHealth(t *testing.T) {
+	s := fresh(t)
+	res, err := s.app.Install(ctx(t), okOpts)
+	if err != nil || res.Health.Verdict != contract.HealthOK {
+		t.Fatalf("итог установки: %+v %v", res.Health, err)
+	}
+	st, err := s.app.Status(ctx(t))
+	if err != nil || st.Health != (contract.Health{Verdict: contract.HealthOK}) {
+		t.Fatalf("здоровый сервер: %+v %v", st.Health, err)
+	}
+	s.f.SetListening(443, false)
+	if st, err = s.app.Status(ctx(t)); err != nil || st.Health.Verdict != contract.HealthDown ||
+		st.Health.Cause == "" || st.Health.Action == "" {
+		t.Fatalf("порт закрыт: %+v %v", st.Health, err)
 	}
 }
 

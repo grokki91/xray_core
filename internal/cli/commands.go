@@ -31,7 +31,23 @@ func runInstall(e Env, fs *flag.FlagSet, _ []string, _ bool) int {
 		return fail(e, false, err)
 	}
 	printProfile(e, "Первый профиль", v)
+	printHealth(e, res.Health)
 	return exitOK
+}
+
+// printHealth — последняя строка: вердикт, первопричина и действие. При ok честно называет, чего
+// не доказывает проверка: доступность порта снаружи (фаервол хостера, маршрут) она не измеряет.
+func printHealth(e Env, h contract.Health) {
+	switch h.Verdict {
+	case contract.HealthOK:
+		fmt.Fprintln(e.Stdout, "Вердикт: работает. Доступность извне не проверена: сервер готов принимать подключения, но проходит ли порт снаружи, эта проверка не доказывает.")
+	case contract.HealthDegraded:
+		fmt.Fprintf(e.Stdout, "Вердикт: работает с ограничениями. %s. Действие: %s\n", quote(h.Cause), quote(h.Action))
+	case contract.HealthDown:
+		fmt.Fprintf(e.Stdout, "Вердикт: не работает. %s. Действие: %s\n", quote(h.Cause), quote(h.Action))
+	default:
+		fmt.Fprintf(e.Stdout, "Вердикт: не определён. %s. Действие: %s\n", quote(h.Cause), quote(h.Action))
+	}
 }
 
 func shareFlags(fs *flag.FlagSet) {
@@ -162,6 +178,7 @@ func runStatus(e Env, _ *flag.FlagSet, _ []string, asJSON bool) int {
 	} else {
 		fmt.Fprintln(e.Stdout, "Конфигурация Xray совпадает с состоянием.")
 	}
+	printHealth(e, st.Health)
 	return exitOK
 }
 

@@ -13,6 +13,7 @@ import (
 
 	"github.com/grokki91/xray_core/internal/backup"
 	"github.com/grokki91/xray_core/internal/config"
+	"github.com/grokki91/xray_core/internal/contract"
 	"github.com/grokki91/xray_core/internal/core"
 	"github.com/grokki91/xray_core/internal/diag"
 	"github.com/grokki91/xray_core/internal/logging"
@@ -231,6 +232,16 @@ func (a *App) control(ctx context.Context, port int) error {
 	}
 	ctx, cancelSet := context.WithTimeout(ctx, a.s.ControlTimeout)
 	defer cancelSet()
+	r, err := a.runControl(ctx, port)
+	if err != nil {
+		return fmt.Errorf("%w: %w", server.ErrControl, err)
+	}
+	return controlErr(r)
+}
+
+// runControl — прогон набора control по порту сервера: общий для контроля транзакции и вердикта.
+func (a *App) runControl(ctx context.Context, port int) (diag.Report, error) {
+	svc := a.s.Server.Service()
 	e, err := diag.NewControl(diag.ControlDeps{
 		Service: svc,
 		Net:     svc,
@@ -244,13 +255,37 @@ func (a *App) control(ctx context.Context, port int) error {
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("%w: %w", server.ErrControl, err)
+		return diag.Report{}, err
 	}
-	r, err := e.Run(ctx, diag.SetControl)
+	return e.Run(ctx, diag.SetControl)
+}
+
+// health — вердикт для владельца по набору control: слово, первопричина и одно действие. Первопричина
+// — первый факт; без факта (unknown) — первая проверка, которую не удалось измерить. Тексты берутся
+// из проверок и не содержат значений измерений.
+func (a *App) health(ctx context.Context, port int) contract.Health {
+	ctx, cancel := context.WithTimeout(ctx, a.s.ControlTimeout)
+	defer cancel()
+	r, err := a.runControl(ctx, port)
 	if err != nil {
-		return fmt.Errorf("%w: %w", server.ErrControl, err)
+		return contract.Health{Verdict: contract.HealthUnknown, Cause: "набор проверок не выполнен", Action: "повторить xm status"}
 	}
-	return controlErr(r)
+	h := contract.Health{Verdict: string(r.Health)}
+	if f := r.Cause(); f != nil {
+		h.Cause = f.Title
+		if len(f.Actions) > 0 {
+			h.Action = f.Actions[0]
+		}
+		return h
+	}
+	for _, o := range r.Observations {
+		if o.Status == diag.StatusSkip || o.Status == diag.StatusError {
+			h.Cause = "проверка " + o.Check + ": " + o.Reason
+			h.Action = "повторить xm status; не прошло — journalctl -u xm"
+			break
+		}
+	}
+	return h
 }
 
 // controlErr — ошибка по отчёту набора control; ok — nil. Текст — названия и причины проверок,

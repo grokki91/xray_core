@@ -79,6 +79,8 @@ type InstallResult struct {
 	Address string `json:"address"`
 	Port    int    `json:"port"`
 	Profile string `json:"profile"` // имя первого профиля
+	// Health — вердикт по набору control: транзакция фиксируется только при ok (ADR-0024).
+	Health contract.Health `json:"health"`
 }
 
 // Releases — источник релизов Xray; настоящий — update.GitHub.
@@ -210,7 +212,8 @@ func (a *App) Install(ctx context.Context, o InstallOptions) (InstallResult, err
 	if err := a.Apply(ctx, Change{Reason: "install", State: st, Unit: &spec, Core: version, Create: true}); err != nil {
 		return InstallResult{}, err
 	}
-	return InstallResult{Xray: string(version), Address: o.Address, Port: o.Port, Profile: first.Name}, nil
+	return InstallResult{Xray: string(version), Address: o.Address, Port: o.Port, Profile: first.Name,
+		Health: contract.Health{Verdict: contract.HealthOK}}, nil
 }
 
 // installed читает состояние: есть ли установка.
@@ -303,6 +306,7 @@ func (a *App) Status(ctx context.Context) (contract.Status, error) {
 		Drift:     drift,
 		Profiles:  len(st.Profiles),
 		Clients:   clients,
+		Health:    a.health(ctx, st.Server.Port),
 	}, nil
 }
 
