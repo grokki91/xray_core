@@ -10,6 +10,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/grokki91/xray_core/internal/profile/compat"
+	"github.com/grokki91/xray_core/internal/profile/export"
 	"github.com/grokki91/xray_core/internal/store"
 )
 
@@ -80,4 +82,17 @@ func (m *Manager) Remove(st store.State, name string) (store.State, error) {
 	}
 	st.Profiles = slices.DeleteFunc(slices.Clone(st.Profiles), func(p store.Profile) bool { return p.Name == name })
 	return st, nil
+}
+
+// Export — артефакт профиля p для клиента client одним экспортёром x. Имя проверяется правилом
+// профиля, пара «клиент × пресет» — таблицей compat до экспортёра: несовместимый клиент получает
+// ошибку с причиной, а не «приблизительную» ссылку (ADR-0008).
+func (m *Manager) Export(p store.Profile, e export.Endpoint, client string, x export.Exporter) (export.Artifact, error) {
+	if !ValidName(p.Name) {
+		return export.Artifact{}, fmt.Errorf("%w: имя: [a-z0-9][a-z0-9_-]{0,31}", ErrInput)
+	}
+	if err := compat.Check(client, e.Preset); err != nil {
+		return export.Artifact{}, err
+	}
+	return x.Export(p, e)
 }

@@ -239,26 +239,38 @@ type Manager interface {  // над store.State, без записи: измен
     List(st store.State) []store.Profile          // в порядке создания
     Get(st store.State, name string) (store.Profile, error)
     Remove(st store.State, name string) (store.State, error)
+    // имя по правилу и compat.Check(client, e.Preset) — до экспортёра
+    Export(p store.Profile, e export.Endpoint, client string, x export.Exporter) (export.Artifact, error)
 }
 
 type Exporter interface {  // profile/export — единственное место форматов клиентов
-    Format() string                        // "uri", "qr", "sing-box"
-    Export(p Profile, e Endpoint) (Artifact, error)
+    Format() string                        // "uri", "qr"; файл sing-box — после MVP
+    Export(p store.Profile, e Endpoint) (Artifact, error)
 }
 
-type Compat interface {    // profile/compat — таблица данных с датой и источником
-    Clients(presetID string, core Version) []ClientSupport
-}
+// profile/compat — таблица данных с датой и источником
+func Clients(presetID, core string) []ClientSupport  // core — версия Xray сервера N.N.N; ниже 26.9.9 — nil
+func Check(client, presetID string) error            // ErrIncompatible с причиной и «нужен …»; ErrUnknown
 ```
 
 - Имя профиля: `[a-z0-9][a-z0-9_-]{0,31}`; оно же — метка в URI. Идентификатор клиента — UUID v4
   от `security.NewClientID`; передаёт его `app` (менеджеры друг друга не импортируют). Ошибки:
   `ErrInput` (имя, идентификатор, повтор идентификатора), `ErrExists`, `ErrNotFound`; в ошибках нет
   идентификатора. Профиль создаётся включённым. Фаза 3, шаг 2.
-- `Endpoint` — адрес (IPv4, IPv6 в скобках, домен), порт и параметры пресета; один профиль
-  экспортируется для каждого адреса сервера.
-- Экспорт под пресет, который клиент не поддерживает, — ошибка с причиной из таблицы
-  совместимости, а не «приблизительная» ссылка. Фаза 3.
+- `Endpoint` — адрес (IPv4, IPv6 без скобок и зоны, домен), порт и параметры пресета явными
+  полями (`Preset`, `SNI`, `PublicKey`, `ShortID`, `Path`); один профиль экспортируется для
+  каждого адреса сервера. `Artifact` — `Format` и `Text`. Ошибки `ErrInput`, `ErrPreset` — без
+  значений ввода.
+- Формат `uri` — ссылка `vless://` для `reality-xhttp`: фиксированный порядок параметров,
+  `fp=chrome`, без `flow`, `mode=auto`; значения и имя после `#` — %-кодирование без `+`; IPv6 —
+  в `[]`. Имя профиля проверяет `profile` до вызова; экспортёр его только кодирует. Фаза 3, шаг 3.
+- `profile/compat` — строки клиентов из [compatibility.md](../compatibility.md) §3 для
+  `reality-xhttp`; ID клиентов: `v2rayn`, `v2rayng`, `hiddify-5`, `hiddify-4`, `sing-box`. Тест
+  сверки читает `compatibility.md` §3 и падает при расхождении имени, ядра или «да»/«нет».
+  Экспорт под пресет, который клиент не поддерживает, — ошибка `Check` с причиной из таблицы, а
+  не «приблизительная» ссылка: `profile.Manager.Export` вызывает `Check` до экспортёра. `export`
+  и `compat` друг друга не импортируют; ID пресета приходит в `Endpoint.Preset` от `app`, их
+  константы — только проверка. Фаза 3, шаг 4.
 
 ### server
 
