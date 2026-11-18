@@ -1,8 +1,7 @@
 package contract
 
 // Status — данные схемы status: состояние установки. Не установлено — Installed=false, прочие
-// поля пусты. Число профилей, доступное обновление и вердикт здоровья добавятся полями
-// (minor+1) в своих фазах.
+// поля пусты. Доступное обновление и вердикт здоровья добавятся полями (minor+1) в своих фазах.
 type Status struct {
 	Installed bool          `json:"installed"`
 	Service   ServiceState  `json:"service"`
@@ -11,6 +10,20 @@ type Status struct {
 	Port      int           `json:"port"`
 	// Drift — конфигурация Xray на диске расходится с отрисованной из состояния (ADR-0004).
 	Drift bool `json:"drift"`
+	// Profiles — число клиентских профилей (minor 1).
+	Profiles int `json:"profiles"`
+	// Clients — таблица совместимости клиентов с пресетом сервера (minor 1); пусто — таблица о
+	// таком сервере не говорит.
+	Clients []ClientSupport `json:"clients"`
+}
+
+// ClientSupport — строка таблицы совместимости: подключится ли клиент к серверу и при каком
+// условии. Reason — только когда не подключится.
+type ClientSupport struct {
+	Name      string `json:"name"`
+	Works     bool   `json:"works"`
+	Condition string `json:"condition"`
+	Reason    string `json:"reason"`
 }
 
 // ServiceState — состояние службы xray.service глазами systemd.
@@ -36,4 +49,4 @@ type ServerAddress struct {
 }
 
 // Schema возвращает схему status.
-func (Status) Schema() Schema { return Schema{Name: "status", Major: 1, Minor: 0} }
+func (Status) Schema() Schema { return Schema{Name: "status", Major: 1, Minor: 1} }

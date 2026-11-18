@@ -241,6 +241,11 @@ type Manager interface {  // над store.State, без записи: измен
     Remove(st store.State, name string) (store.State, error)
     // имя по правилу и compat.Check(client, e.Preset) — до экспортёра
     Export(p store.Profile, e export.Endpoint, client string, x export.Exporter) (export.Artifact, error)
+    // ссылки на каждый адрес сервера (домен, IPv4, IPv6), QR одного из них, клиенты, которым
+    // ссылка не подойдёт; client и address необязательны
+    Share(st store.State, name, client, address string) (Share, error)
+    Clients(st store.State) []ClientInfo   // таблица совместимости для пресета и ядра сервера
+    NextName(st store.State) string        // profile-N для `xm add` без имени
 }
 
 type Exporter interface {  // profile/export — единственное место форматов клиентов
@@ -250,7 +255,7 @@ type Exporter interface {  // profile/export — единственное мес
 
 // profile/compat — таблица данных с датой и источником
 func Clients(presetID, core string) []ClientSupport  // core — версия Xray сервера N.N.N; ниже 26.9.9 — nil
-func Check(client, presetID string) error            // ErrIncompatible с причиной и «нужен …»; ErrUnknown
+func Check(client, presetID string) error            // ErrIncompatible с причиной; ErrUnknown
 ```
 
 - Имя профиля: `[a-z0-9][a-z0-9_-]{0,31}`; оно же — метка в URI. Идентификатор клиента — UUID v4
@@ -271,6 +276,12 @@ func Check(client, presetID string) error            // ErrIncompatible с пр�
   не «приблизительная» ссылка: `profile.Manager.Export` вызывает `Check` до экспортёра. `export`
   и `compat` друг друга не импортируют; ID пресета приходит в `Endpoint.Preset` от `app`, их
   константы — только проверка. Фаза 3, шаг 4.
+- `Share` берёт параметры ссылки из состояния (первое входящее: `server_names[0]`, `public_key`,
+  `short_ids[0]`, `params.path`, порт сервера) и строит `uri` на каждый заданный адрес. `client`
+  задан — совместимость проверяется до построения: `ErrIncompatible` с причиной из таблицы без
+  ссылок, `ErrUnknownClient` — ошибка ввода. `client` пуст — ссылки строятся, а клиенты, которым
+  они не подойдут, возвращаются в `Unfit` (предупреждение, не ошибка). `address` вне адресов
+  сервера — `ErrInput`; пуст — QR первого адреса. Фаза 3, шаг 6.
 - Формат `qr` — QR-код для терминала (`rsc.io/qr`, [ADR-0028](../adr/0028-qr-library-and-selftest-address.md)): строит ссылку экспортёром `uri` и рисует её, другого источника нет; отказ ссылки — отказ QR. Две строки модулей — одна строка терминала (`▀ ▄ █`), поле тишины 4 модуля, чёрное на белом задано явно (не зависит от темы терминала), уровень коррекции L. Фаза 3, шаг 5.
 
 ### server
@@ -508,9 +519,9 @@ type App interface {
     Uninstall(ctx context.Context, purge bool) error
     Status(ctx context.Context) (Status, error)
     Service(ctx context.Context, a Action) error            // start | stop | restart
-    ProfileAdd(ctx context.Context, name string) (ProfileView, error)
-    ProfileList(ctx context.Context) ([]ProfileSummary, error)
-    ProfileShow(ctx context.Context, name string) (ProfileView, error)
+    ProfileAdd(ctx context.Context, name string, o ShareOptions) (ProfileView, error)  // name пусто — profile-N
+    ProfileList(ctx context.Context) (contract.Profiles, error)
+    ProfileShow(ctx context.Context, name string, o ShareOptions) (ProfileView, error)
     ProfileRemove(ctx context.Context, name string) error
     UpdateCheck(ctx context.Context) (UpdateInfo, error)
     Update(ctx context.Context, o UpdateOptions) (UpdateResult, error)
@@ -539,9 +550,14 @@ type App interface {
   ([ADR-0005](../adr/0005-transactions-and-rollback.md)): чтение и запись не разделены. `State` —
   для установки (`Create`), `Edit` — для изменения существующей; заданы оба — ошибка. Сценарии
   профилей фазы 3: `ProfileAdd`, `ProfileRemove` — транзакции через `Edit`; `ProfileList`,
-  `ProfileShow` — чтение. До шага 6 (схемы `profiles` и `profile`) они возвращают `store.Profile`;
-  `ProfileView` и `ProfileSummary` из `contract` заменяют его вместе с командами. Все требуют root и установку; ошибки
-  `profile` сводятся к `ErrInput` (код 2). Идентификаторы клиентов регистрируются в редакторе.
+  `ProfileShow` — чтение. `ProfileView` — схема `profile` (`contract.Profile`) и QR для терминала
+  (в машинный документ не входит); `ProfileList` — схема `profiles`, без секретов. Все требуют
+  root и установку; ошибки `profile` сводятся к `ErrInput` (код 2), кроме `ErrIncompatible`
+  (код 1: аргументы верны, клиенту сервер не подходит). `ProfileAdd` строит ссылки внутри
+  `Edit`: несовместимый клиент отказывает до изменения, профиль не создаётся. `Install` создаёт
+  первый профиль `profile-1` в той же транзакции, `InstallResult.Profile` называет его, ссылки —
+  `ProfileShow`. `Status` несёт число профилей и таблицу клиентов. Идентификаторы клиентов
+  регистрируются в редакторе.
 - Возвращает типы `contract`; о терминале и HTTP не знает. Фаза 2 и далее.
 
 ---

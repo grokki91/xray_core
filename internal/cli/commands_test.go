@@ -20,12 +20,32 @@ type fakeApp struct {
 	action app.Action
 	status contract.Status
 	err    error
+	// профили: что просили и что отвечать
+	name     string
+	share    app.ShareOptions
+	view     app.ProfileView
+	profiles contract.Profiles
+	removed  string
 }
 
 func (f *fakeApp) Install(_ context.Context, o app.InstallOptions) (app.InstallResult, error) {
 	f.opts = o
-	return app.InstallResult{Xray: "26.11.9", Address: o.Address, Port: o.Port}, f.err
+	return app.InstallResult{Xray: "26.11.9", Address: o.Address, Port: o.Port, Profile: "profile-1"}, f.err
 }
+
+func (f *fakeApp) ProfileAdd(_ context.Context, name string, o app.ShareOptions) (app.ProfileView, error) {
+	f.name, f.share = name, o
+	return f.view, f.err
+}
+
+func (f *fakeApp) ProfileShow(_ context.Context, name string, o app.ShareOptions) (app.ProfileView, error) {
+	f.name, f.share = name, o
+	return f.view, f.err
+}
+
+func (f *fakeApp) ProfileList(context.Context) (contract.Profiles, error) { return f.profiles, f.err }
+
+func (f *fakeApp) ProfileRemove(_ context.Context, name string) error { f.removed = name; return f.err }
 
 func (f *fakeApp) Service(_ context.Context, a app.Action) error { f.action = a; return f.err }
 
@@ -78,6 +98,7 @@ func TestFailureExitCodes(t *testing.T) {
 		{app.ErrNotInstalled, 3, "app.not_installed"},
 		{fmt.Errorf("%w: %w", app.ErrRolledBack, errors.New("порт не слушается")), 1, "app.rolled_back"},
 		{fmt.Errorf("%w: %w (причина: %w)", app.ErrRollbackFailed, errors.New("служба"), errors.New("контроль")), 5, "app.rollback_failed"},
+		{fmt.Errorf("%w: sing-box: вырезает X25519MLKEM768", app.ErrIncompatible), 1, "profile.incompatible"},
 		{errors.New("что-то иное"), 1, "app.failed"},
 	}
 	for _, tc := range cases {
@@ -107,6 +128,11 @@ var installed = contract.Status{
 	Versions:  contract.Versions{XM: "0.1.0", Xray: "26.11.9"},
 	Addresses: contract.ServerAddress{IPv4: "203.0.113.10"},
 	Port:      443,
+	Profiles:  2,
+	Clients: []contract.ClientSupport{
+		{Name: "v2rayN", Works: true, Condition: "ядро Xray клиента не старше v25.7.26"},
+		{Name: "Hiddify 4.x", Reason: "вырезает X25519MLKEM768"},
+	},
 }
 
 // Вывод xm status --json побайтно совпадает с эталоном схемы status.
@@ -123,7 +149,8 @@ func TestStatusJSONMatchesGolden(t *testing.T) {
 
 func TestStatusHuman(t *testing.T) {
 	code, stdout, _ := runWith(&fakeApp{status: installed}, "status")
-	for _, want := range []string{"active (running)", "Xray 26.11.9", "IPv4: 203.0.113.10", "Порт: 443", "совпадает с состоянием"} {
+	for _, want := range []string{"active (running)", "Xray 26.11.9", "IPv4: 203.0.113.10", "Порт: 443", "совпадает с состоянием",
+		"Профилей: 2", "Клиент v2rayN: подключится, если ядро Xray клиента", "Клиент Hiddify 4.x: не подключится (вырезает X25519MLKEM768)"} {
 		if code != exitOK || !strings.Contains(stdout, want) {
 			t.Errorf("нет %q: код %d, stdout:\n%s", want, code, stdout)
 		}
@@ -148,5 +175,134 @@ func TestFailureMessageGoesThroughRedactor(t *testing.T) {
 		if strings.Contains(out, "CANARY") || !strings.Contains(out, "[секрет]") {
 			t.Errorf("%s: %q", name, out)
 		}
+	}
+}
+
+// Профиль для проверок вывода: совпадает с эталоном схемы profile.
+var phone = app.ProfileView{
+	Profile: contract.Profile{
+		ProfileItem: contract.ProfileItem{Name: "phone", Created: 1767225600, Enabled: true},
+		Links: []contract.ProfileLink{
+			{Address: "vpn.example.com", URI: "vless://00000000-0000-4000-8000-000000000001@vpn.example.com:443?encryption=none#phone"},
+		},
+		QRAddress: "vpn.example.com",
+		Unfit:     []contract.UnfitClient{{Client: "Hiddify 4.x", Reason: "вырезает X25519MLKEM768"}},
+	},
+	QR: "QR-РИСУНОК\n",
+}
+
+// add: имя и флаги доходят до app в любом порядке; в stdout ссылка и QR, предупреждение о
+// клиентах — в stderr.
+func TestAddPrintsLinksAndQR(t *testing.T) {
+	f := &fakeApp{view: phone}
+	for _, args := range [][]string{
+		{"add", "phone", "--client", "hiddify-5", "--address", "192.0.2.10"},
+		{"add", "--client", "hiddify-5", "phone", "--address", "192.0.2.10"},
+		{"add", "--client", "hiddify-5", "--address", "192.0.2.10", "phone"},
+	} {
+		code, stdout, stderr := runWith(f, args...)
+		if code != exitOK || f.name != "phone" || f.share != (app.ShareOptions{Client: "hiddify-5", Address: "192.0.2.10"}) {
+			t.Fatalf("%v: код %d, имя %q, опции %+v", args, code, f.name, f.share)
+		}
+		for _, want := range []string{"Профиль создан «phone»", "vpn.example.com", "vless://", "QR для vpn.example.com:\nQR-РИСУНОК"} {
+			if !strings.Contains(stdout, want) {
+				t.Errorf("%v: в stdout нет %q:\n%s", args, want, stdout)
+			}
+		}
+		if !strings.Contains(stderr, "Hiddify 4.x не подключится: вырезает X25519MLKEM768") || strings.Contains(stdout, "Предупреждение") {
+			t.Errorf("предупреждение: stderr %q", stderr)
+		}
+	}
+	runWith(f, "add")
+	if f.name != "" || f.share != (app.ShareOptions{}) {
+		t.Fatalf("add без аргументов: %q %+v", f.name, f.share)
+	}
+}
+
+func TestShowNeedsOneName(t *testing.T) {
+	f := &fakeApp{view: phone}
+	for _, args := range [][]string{{"show"}, {"show", "a", "b"}, {"rm"}, {"rm", "a", "b"}, {"add", "a", "b"}, {"list", "x"}} {
+		if code, _, stderr := runWith(f, args...); code != exitUsage || !strings.HasPrefix(stderr, "xm: ") {
+			t.Errorf("%v: код %d, stderr %q", args, code, stderr)
+		}
+	}
+	if code, stdout, _ := runWith(f, "show", "phone"); code != exitOK || f.name != "phone" || !strings.Contains(stdout, "Профиль «phone»") {
+		t.Fatalf("show: код %d, имя %q", code, f.name)
+	}
+}
+
+// Машинный вывод add и show — документ profile побайтно как эталон; QR в него не входит.
+func TestProfileJSONMatchesGolden(t *testing.T) {
+	want, err := os.ReadFile("../contract/testdata/profile.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "phone", "--json"}, {"show", "phone", "--json"}} {
+		code, stdout, stderr := runWith(&fakeApp{view: phone}, args...)
+		if code != exitOK || stderr != "" || stdout != string(want) || strings.Contains(stdout, "QR-РИСУНОК") {
+			t.Fatalf("%v: код %d, stderr %q, stdout:\n%s", args, code, stderr, stdout)
+		}
+	}
+}
+
+func TestListHumanAndJSON(t *testing.T) {
+	f := &fakeApp{profiles: contract.Profiles{Profiles: []contract.ProfileItem{
+		{Name: "phone", Created: 1767225600, Enabled: true}, {Name: "laptop", Created: 1767229200},
+	}}}
+	code, stdout, _ := runWith(f, "list")
+	if code != exitOK || !strings.Contains(stdout, "phone") || !strings.Contains(stdout, "2026-01-01  включён") || !strings.Contains(stdout, "выключен") {
+		t.Fatalf("list: код %d\n%s", code, stdout)
+	}
+	if strings.Contains(stdout, "vless") {
+		t.Fatal("в списке ссылка")
+	}
+	want, err := os.ReadFile("../contract/testdata/profiles.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, stdout, _ := runWith(f, "list", "--json"); code != exitOK || stdout != string(want) {
+		t.Fatalf("list --json: код %d\n%s", code, stdout)
+	}
+	if _, stdout, _ := runWith(&fakeApp{}, "list"); !strings.Contains(stdout, "Профилей нет") {
+		t.Fatalf("пустой список: %q", stdout)
+	}
+}
+
+func TestRemove(t *testing.T) {
+	f := &fakeApp{}
+	if code, stdout, _ := runWith(f, "rm", "phone"); code != exitOK || f.removed != "phone" || !strings.Contains(stdout, "удалён") {
+		t.Fatalf("rm: код %d, удалён %q, stdout %q", code, f.removed, stdout)
+	}
+	if code, _, _ := runWith(&fakeApp{err: fmt.Errorf("%w: профиля нет", app.ErrInput)}, "rm", "x"); code != exitUsage {
+		t.Fatalf("rm чужого: код %d", code)
+	}
+}
+
+// Установка завершается ссылкой и QR первого профиля.
+func TestInstallPrintsFirstProfile(t *testing.T) {
+	f := &fakeApp{view: phone}
+	code, stdout, _ := runWith(f, "install", "--sni", "example.com", "--address", "203.0.113.10")
+	if code != exitOK || f.name != "profile-1" {
+		t.Fatalf("код %d, показан профиль %q", code, f.name)
+	}
+	for _, want := range []string{"Xray 26.11.9 установлен", "Первый профиль «phone»", "vless://", "QR-РИСУНОК"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("нет %q:\n%s", want, stdout)
+		}
+	}
+	if strings.Contains(stdout, "пока нет") {
+		t.Fatal("устаревшее сообщение об отсутствии профилей")
+	}
+}
+
+// Ошибки профильных команд идут через общий разбор: неверное имя — код 2, несовместимый
+// клиент — код 1 с причиной.
+func TestProfileFailures(t *testing.T) {
+	code, _, stderr := runWith(&fakeApp{err: fmt.Errorf("%w: sing-box: вырезает X25519MLKEM768", app.ErrIncompatible)}, "add", "--client", "sing-box")
+	if code != exitFail || !strings.Contains(stderr, "X25519MLKEM768") {
+		t.Fatalf("код %d, stderr %q", code, stderr)
+	}
+	if code, _, _ := runWith(&fakeApp{err: fmt.Errorf("%w: имя", app.ErrInput)}, "show", "Bad"); code != exitUsage {
+		t.Fatalf("код %d", code)
 	}
 }

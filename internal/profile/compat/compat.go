@@ -36,7 +36,6 @@ type ClientSupport struct {
 	Works     bool   // подключается ли
 	Condition string // условие, при котором подключается; пусто — без условий
 	Reason    string // почему не подключается; только при Works == false
-	MinClient string // с какой версии клиента подключается; пусто — таблица не называет
 	Checked   string // дата проверки, ГГГГ-ММ-ДД
 	Source    string // статус и источник
 }
@@ -67,10 +66,9 @@ func table() []ClientSupport {
 		{
 			Client: "hiddify-4", Name: "Hiddify 4.x", Core: "форк sing-box 1.13",
 			Preset: PresetRealityXHTTP, Works: false,
-			Reason:    "вырезает X25519MLKEM768 из ClientHello",
-			MinClient: "Hiddify 5.x",
-			Checked:   "2026-10-28",
-			Source:    "предшественник, 2026-10-28",
+			Reason:  "вырезает X25519MLKEM768 из ClientHello",
+			Checked: "2026-10-28",
+			Source:  "предшественник, 2026-10-28",
 		},
 		{
 			Client: "sing-box", Name: "sing-box (upstream) 1.14.4 и 1.15.0-alpha.13", Core: "sing-box",
@@ -97,8 +95,7 @@ func Clients(presetID, core string) []ClientSupport {
 	return out
 }
 
-// Check — nil, если клиент подключается к пресету; иначе ErrIncompatible с причиной и
-// версией клиента, с которой подключится, или ErrUnknown. Ввод в ошибку не попадает.
+// Check — nil, если клиент подключается к пресету; иначе ErrIncompatible с причиной или ErrUnknown. Ввод в ошибку не попадает.
 func Check(client, presetID string) error {
 	knownClient, knownPreset := false, false
 	for _, r := range table() {
@@ -110,11 +107,7 @@ func Check(client, presetID string) error {
 		if r.Works {
 			return nil
 		}
-		need := ""
-		if r.MinClient != "" {
-			need = "; нужен " + r.MinClient
-		}
-		return fmt.Errorf("%w: %s не подключится к %s: %s%s", ErrIncompatible, r.Name, r.Preset, r.Reason, need)
+		return fmt.Errorf("%w: %s не подключится к %s: %s", ErrIncompatible, r.Name, r.Preset, r.Reason)
 	}
 	switch {
 	case !knownClient:

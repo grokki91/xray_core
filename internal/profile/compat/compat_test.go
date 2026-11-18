@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -65,6 +66,11 @@ func readDocClients(t *testing.T) []docRow {
 	return rows
 }
 
+var versionRe = regexp.MustCompile(`v\d+\.\d+\.\d+`)
+
+// versions — номера вида vN.N.N в тексте.
+func versions(s string) []string { return versionRe.FindAllString(s, -1) }
+
 // verdict — «да» или «нет» в начале ячейки «Подключение по REALITY».
 func verdict(t *testing.T, cell string) bool {
 	t.Helper()
@@ -105,6 +111,16 @@ func TestTableMatchesCompatibilityDoc(t *testing.T) {
 		if w := verdict(t, d.reality); r.Works != w {
 			t.Errorf("%s: работает=%v в данных, в документе %q", d.name, r.Works, d.reality)
 		}
+		// Версия ядра в условии есть в колонке REALITY документа: условие не придумано в коде.
+		for _, v := range versions(r.Condition) {
+			found := false
+			for _, o := range doc {
+				found = found || strings.Contains(o.reality, v)
+			}
+			if !found {
+				t.Errorf("%s: версии %s из условия нет в docs/compatibility.md §3", d.name, v)
+			}
+		}
 	}
 	for name := range data {
 		if !seen[name] {
@@ -141,7 +157,7 @@ func TestCheck(t *testing.T) {
 	if !errors.Is(err, ErrIncompatible) {
 		t.Fatalf("hiddify-4: %v, нужна ErrIncompatible", err)
 	}
-	for _, want := range []string{"X25519MLKEM768", "Hiddify 5.x"} {
+	for _, want := range []string{"X25519MLKEM768"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("hiddify-4: в ошибке %q нет %q", err, want)
 		}

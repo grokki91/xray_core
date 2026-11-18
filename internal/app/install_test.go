@@ -103,7 +103,7 @@ func TestInstallFreshMachine(t *testing.T) {
 	in := st.Inbounds[0]
 	if st.Server.Port != 443 || st.Server.Addresses.IPv4 != "203.0.113.10" || in.Preset != "reality-xhttp" ||
 		in.Reality.Target != "example.com:443" || len(in.Reality.ServerNames) != 1 || in.Reality.ServerNames[0] != "example.com" ||
-		in.Reality.PrivateKey == "" || in.Reality.PublicKey == "" || len(in.Reality.ShortIDs) != 1 || len(st.Profiles) != 0 {
+		in.Reality.PrivateKey == "" || in.Reality.PublicKey == "" || len(in.Reality.ShortIDs) != 1 || len(st.Profiles) != 1 || st.Profiles[0].Name != res.Profile {
 		t.Fatalf("состояние: %+v", st)
 	}
 	if drift, err := s.app.s.Config.Drift(st); err != nil || drift {
@@ -536,5 +536,34 @@ func TestInstallRecoversPendingTransactionFirst(t *testing.T) {
 	}
 	if _, err := s.app.Install(ctx(t), okOpts); !errors.Is(err, ErrRollbackFailed) || s.rel.latestCalls != 0 {
 		t.Fatalf("%v", err)
+	}
+}
+
+// Установка завершается рабочим первым профилем: он в состоянии и в конфигурации Xray, ссылка
+// строится, а идентификатор клиента не попадает ни в журнал xm, ни в итог установки.
+func TestInstallCreatesFirstProfile(t *testing.T) {
+	s := fresh(t)
+	res, err := s.app.Install(ctx(t), okOpts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Profile != "profile-1" {
+		t.Fatalf("имя первого профиля %q", res.Profile)
+	}
+	pid := idOf(t, s, res.Profile)
+	if !strings.Contains(readConfig(t, s), pid) {
+		t.Fatal("ключ первого профиля не в конфигурации")
+	}
+	v, err := s.app.ProfileShow(ctx(t), res.Profile, ShareOptions{})
+	if err != nil || len(v.Links) != 1 || !strings.Contains(v.Links[0].URI, pid) || v.QR == "" {
+		t.Fatalf("показ: %+v %v", v.Profile, err)
+	}
+	if doc, _ := json.Marshal(res); strings.Contains(string(doc), pid) {
+		t.Fatalf("в итоге установки ключ профиля: %s", doc)
+	}
+	for _, j := range s.f.Journaled() {
+		if strings.Contains(j.Message, pid) {
+			t.Fatalf("ключ профиля в журнале xm: %q", j.Message)
+		}
 	}
 }
