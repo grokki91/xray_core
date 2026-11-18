@@ -108,6 +108,12 @@ func usesFake(f *ast.File, module string) bool {
 	return found
 }
 
+// thirdParty — сторонние модули с согласием владельца: модуль → каталог, которому его можно
+// импортировать. Каждая строка есть в docs/dev/dependencies.md.
+var thirdParty = map[string]string{
+	"rsc.io/qr": "internal/profile/export", // ADR-0028
+}
+
 // forbidden возвращает причину запрета импорта target из каталога dir или пустую строку.
 func forbidden(dir, target, module string) string {
 	from := strings.Split(strings.TrimPrefix(dir, "internal/"), "/")
@@ -117,6 +123,9 @@ func forbidden(dir, target, module string) string {
 	}
 	if !strings.HasPrefix(target+"/", module+"/") {
 		if strings.Contains(strings.Split(target, "/")[0], ".") {
+			if thirdParty[target] == dir {
+				return ""
+			}
 			return "сторонний модуль: нужны согласие владельца и строка в dependencies.md"
 		}
 		if (target == "os/exec" || target == "syscall") && from[0] != "platform" {
