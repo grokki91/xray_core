@@ -178,5 +178,22 @@ else
 	esac
 fi
 
+# 10. Токен API GitHub (ADR-0031): только в памяти xm — его нет в выводе команд, в файлах xm и
+# Xray и в их записях журнала (весь журнал машины — не предмет проверки: там пишет и CI).
+# Значение — через файл, не аргументом; при провале печатаются только имена файлов. Без токена
+# проверять нечего.
+if [[ -n ${XM_GITHUB_TOKEN:-} ]]; then
+	(umask 077 && printf '%s\n' "$XM_GITHUB_TOKEN" >"$out/.token")
+	journalctl --no-pager -o cat -t xm -u xray >"$out/.journal" 2>/dev/null
+	hits=$(grep -rlF -f "$out/.token" "$out"/[!.]* "$out/.journal" /etc/xm /var/lib/xm /usr/local/etc/xray)
+	case $? in
+	0) bad "токен API найден: $(tr '\n' ' ' <<<"$hits")" ;;
+	1) ok "токен API только в памяти" ;;
+	*) bad "токен API: grep не прочитал файлы" ;;
+	esac
+else
+	echo "env  XM_GITHUB_TOKEN не задан: проверка токена не выполнялась"
+fi
+
 if ((fails == 0)); then echo "l4: PASS"; else echo "l4: FAIL ($fails)"; fi
 ((fails == 0))

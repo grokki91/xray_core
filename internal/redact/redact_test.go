@@ -19,6 +19,7 @@ func register(r *Redactor, c redacttest.Canaries) {
 	r.Register(ServerIP, c.IPv6)
 	r.Register(Domain, c.Domain)
 	r.Register(Path, c.Path)
+	r.Register(Token, c.GitHubToken) // так регистрирует cmd/xm из окружения
 }
 
 // Канареечный тест: сценарий с узнаваемыми значениями — журнал, ошибка, отчёт в JSON — после
@@ -30,7 +31,8 @@ func TestCanary(t *testing.T) {
 
 	log := "accepted tcp:" + c.IPv4 + ":443 [" + c.IPv6 + "]:443 email=" + c.UUID +
 		" sni=" + c.Domain + " path=" + c.Path + " sid=" + c.ShortID
-	errText := "render: reality key " + c.PrivateKey + " / " + c.PublicKey + " rejected for " + c.Domain
+	errText := "render: reality key " + c.PrivateKey + " / " + c.PublicKey + " rejected for " + c.Domain +
+		"; api: Authorization: Bearer " + c.GitHubToken
 	report := map[string]any{
 		"server": map[string]any{"ipv4": c.IPv4, "ipv6": c.IPv6, "sni": []string{c.Domain}},
 		"link":   "vless://" + c.UUID + "@" + c.Domain + ":443?sid=" + c.ShortID + "&path=" + c.Path,

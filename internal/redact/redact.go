@@ -26,8 +26,9 @@ const (
 	ServerIP Kind = "server-ip"
 	Domain   Kind = "domain"
 	Path     Kind = "path"
-	IP       Kind = "ip"  // шаблон: публичный IPv4 или IPv6
-	URI      Kind = "uri" // шаблон: ссылка клиента вида vless://
+	Token    Kind = "token" // токен API GitHub из окружения (ADR-0031)
+	IP       Kind = "ip"    // шаблон: публичный IPv4 или IPv6
+	URI      Kind = "uri"   // шаблон: ссылка клиента вида vless://
 )
 
 // Шаблоны. Ключ — 43 символа base64url или 43 символа base64 с «=» (X25519 REALITY);
