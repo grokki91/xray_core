@@ -152,9 +152,12 @@ func TestURIRejects(t *testing.T) {
 			if a != (Artifact{}) {
 				t.Fatalf("при отказе артефакт пуст, получен %q", a.Format)
 			}
-			for _, s := range []string{testID, testPBK, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"} {
-				if strings.Contains(err.Error(), s) {
-					t.Fatal("в ошибке значение секрета")
+			// Ни одно входное значение — исходное или изменённое — не попадает в ошибку
+			// (secrets.md §3). Значения короче трёх знаков совпали бы со словами сообщения.
+			for _, s := range []string{testID, testPBK, testSID, "192.0.2.10", "www.example.com",
+				p.ID, p.Name, e.Host, e.SNI, e.PublicKey, e.ShortID, e.Path} {
+				if len(s) >= 3 && strings.Contains(err.Error(), s) {
+					t.Fatalf("в ошибке входное значение (длина %d)", len(s))
 				}
 			}
 		})
