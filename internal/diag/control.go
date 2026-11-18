@@ -18,8 +18,7 @@ type ControlDeps struct {
 	Net interface {
 		Listening(ctx context.Context, port int) (bool, error)
 	}
-	// Port — порт сервера из состояния на момент вызова: транзакция сохраняет состояние до
-	// перезапуска, откат — восстанавливает до контроля.
+	// Port — порт сервера, который контролируется: тот же, что у ожидания запуска.
 	Port func(ctx context.Context) (int, error)
 	// Validate — `xray run -test` действующей версией на действующей конфигурации: false без
 	// ошибки — конфигурация не принята; ошибка — проверить не удалось.

@@ -1,7 +1,7 @@
 # ADR-0030: Проверки diag — в пакете diag, без подпакета checks
 
 - Статус: Принято (владелец, 2026-11-18)
-- Уточняет: [ADR-0024](0024-health-verdict-and-shared-checks.md) в части «реестр `diag/checks`»
+- Уточняет: [ADR-0024](0024-health-verdict-and-shared-checks.md) в части «реестр `diag/checks`» и места сборки реализаций: `app`, а не `cmd/xm`
 - Дата: 2026-11-18
 
 ## Контекст
@@ -28,6 +28,11 @@ ADR-0024 и [repository.md](../architecture/repository.md) называют ре
 
 ## Последствия
 
+- Набор `control` относится к транзакции `Apply` и к откату; `start`, `stop`, `restart` — не
+  транзакции и проходят только `CheckRunning` и `CheckStopped` ([ADR-0025](0025-stopped-service-and-install-scenario.md)).
+- Служба и порт измеряются дважды — ожиданием запуска `server.CheckRunning` и проверками набора
+  `control`: ADR-0024 требует оба шага; первый ждёт и ловит цикл перезапусков, второй — снимок и
+  `xray.config.valid`. Каждый шаг идёт под своим сроком `ControlTimeout`.
 - Пакет `diag` растёт вместе с каталогом фазы 5; выделить подпакет можно, когда типы вынесены в
   отдельный пакет, — отдельным ADR.
 - Строки о `diag/checks` в `repository.md` и `overview.md` заменены на «проверки пакета `diag`».

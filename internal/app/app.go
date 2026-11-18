@@ -220,21 +220,21 @@ func (a *App) change(ctx context.Context, ch Change, st store.State, r config.Re
 
 // control — контроль после перезапуска: служба активна и порт слушается (ожидание запуска), затем
 // набор control движка diag. Исход набора, отличный от ok, — непройденный контроль и откат
-// (ADR-0024). Один срок ControlTimeout на оба шага.
+// (ADR-0024). У каждого шага свой срок ControlTimeout: ожидание запуска не отнимает время у
+// `xray run -test`.
 func (a *App) control(ctx context.Context, port int) error {
-	ctx, cancel := context.WithTimeout(ctx, a.s.ControlTimeout)
-	defer cancel()
 	svc := a.s.Server.Service()
-	if err := svc.CheckRunning(ctx, port); err != nil {
+	rctx, cancel := context.WithTimeout(ctx, a.s.ControlTimeout)
+	defer cancel()
+	if err := svc.CheckRunning(rctx, port); err != nil {
 		return err
 	}
+	ctx, cancelSet := context.WithTimeout(ctx, a.s.ControlTimeout)
+	defer cancelSet()
 	e, err := diag.NewControl(diag.ControlDeps{
 		Service: svc,
 		Net:     svc,
-		Port: func(context.Context) (int, error) {
-			st, err := a.s.Store.Load()
-			return st.Server.Port, err
-		},
+		Port:    func(context.Context) (int, error) { return port, nil }, // тот же порт, что у CheckRunning
 		Validate: func(ctx context.Context) (bool, error) {
 			err := a.s.Core.ValidateCurrent(ctx, config.Path)
 			if errors.Is(err, core.ErrConfig) {
