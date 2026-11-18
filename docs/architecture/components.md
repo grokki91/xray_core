@@ -425,7 +425,7 @@ type Vantage interface { // точка наблюдения: сейчас local;
 - Вердикт `Health`: факт с влиянием `down` → `down`; `skip` или `error` проверки набора `control`
   → `unknown`; факт `degraded` → `degraded`; иначе `ok`. `Cause()` — первый факт `down`, иначе
   `degraded`: зависимые не запускаются, поэтому он без проваленных зависимостей.
-- Анализ — правила «наблюдения → вывод» с классом `fact | probable | hypothesis`; модель и
+- Анализ — правила «наблюдения → вывод» классов `probable | hypothesis`; факт строит проверка (ADR-0029); модель и
   каталог проверок — [diagnostics.md](../operations/diagnostics.md).
 - Отчёт всегда проходит `redact` перед сохранением и экспортом. Движок и вердикт есть; набор `control`, поле `health` схем и строка вердикта — фаза 3 ([ADR-0024](../adr/0024-health-verdict-and-shared-checks.md), задача A2 в [roadmap.md](../roadmap.md) §7); каталог — фаза 5; полностью — после MVP.
 

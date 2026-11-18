@@ -124,8 +124,7 @@ var idRule = regexp.MustCompile(`^[a-z0-9]+(\.[a-z0-9_-]+)+$`)
 // зависимой (циклов нет) и входит в те же наборы, набор control есть.
 func New(checks []Check, sets map[string][]string, rules []Rule) (*Engine, error) {
 	e := &Engine{byID: map[string]Check{}, sets: map[string][]string{}, control: map[string]bool{}}
-	order := map[string]int{}
-	for i, c := range checks {
+	for _, c := range checks {
 		id := c.ID()
 		if !idRule.MatchString(id) {
 			return nil, fmt.Errorf("%w: ID %q не по правилу", ErrRegistry, id)
@@ -138,7 +137,7 @@ func New(checks []Check, sets map[string][]string, rules []Rule) (*Engine, error
 				return nil, fmt.Errorf("%w: %q требует %q, которой нет раньше в реестре", ErrRegistry, id, r)
 			}
 		}
-		e.byID[id], order[id] = c, i
+		e.byID[id] = c
 		e.checks = append(e.checks, c)
 	}
 	if _, ok := sets[SetControl]; !ok {
