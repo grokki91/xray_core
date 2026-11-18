@@ -45,3 +45,4 @@
 | [0027](0027-private-destinations-via-final-rules.md) | Запрет частных адресов назначения — `freedom.finalRules` | Принято |
 | [0028](0028-qr-library-and-selftest-address.md) | Библиотека QR и адрес самопроверки | Принято |
 | [0029](0029-facts-from-checks.md) | Факт строит проверка, предположения — правила анализа | Принято |
+| [0031](0031-github-api-token.md) | Токен API GitHub из окружения | Принято |

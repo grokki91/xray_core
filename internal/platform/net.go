@@ -70,12 +70,17 @@ func (n realNet) Get(ctx context.Context, r Request) ([]byte, error) {
 			if len(via) > maxRedirects { // via — уже выполненные запросы: N-е перенаправление при len(via) == N
 				return fmt.Errorf("больше %d перенаправлений", maxRedirects)
 			}
+			// Токен — только узлу первого запроса: net/http снимает заголовок лишь при смене узла.
+			req.Header.Del("Authorization")
 			return checkURL(req.URL.String(), r.Hosts)
 		},
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.URL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("загрузка: %w", err)
+	}
+	if r.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+r.Token)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -111,7 +116,7 @@ func (n fakeNet) Get(ctx context.Context, r Request) ([]byte, error) {
 		return nil, err
 	}
 	n.f.mu.Lock()
-	n.f.calls = append(n.f.calls, Call{Op: "get", Path: r.URL})
+	n.f.calls = append(n.f.calls, Call{Op: "get", Path: r.URL, Auth: r.Token != ""})
 	n.f.mu.Unlock()
 	cur := r.URL
 	for hop := 0; ; hop++ {

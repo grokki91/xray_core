@@ -57,7 +57,7 @@ func env(t *testing.T) (*platform.Fake, *GitHub) {
 	f.Serve(dgstURL, dgstFor(archive))
 	f.Redirect(zipURL, assetURL)
 	f.Serve(assetURL, archive)
-	return f, NewGitHub(f)
+	return f, NewGitHub(f, "")
 }
 
 func ctx(t *testing.T) context.Context {
@@ -234,5 +234,48 @@ func TestLatestRejects(t *testing.T) {
 				t.Errorf("принят релиз %+v", r)
 			}
 		})
+	}
+}
+
+// Токен API (ADR-0031) уходит только в запрос к API, не в загрузку файлов релиза.
+func TestTokenOnlyForAPI(t *testing.T) {
+	f, g := env(t)
+	g = NewGitHub(f, "xm_fake_github_token_000000000000000000001")
+	r := latest(t, g)
+	if _, err := g.Fetch(ctx(t), r, ArchAMD64); err != nil {
+		t.Fatal(err)
+	}
+	var gets int
+	for _, c := range f.Calls() {
+		if c.Op != "get" {
+			continue
+		}
+		gets++
+		if want := c.Path == latestURL; c.Auth != want {
+			t.Errorf("%s: токен %v, нужен %v", c.Path, c.Auth, want)
+		}
+	}
+	if gets != 3 {
+		t.Errorf("загрузок %d, нужно 3: API, .dgst, архив", gets)
+	}
+}
+
+// Токен не по правилу отвергается до сети, и его значения нет в ошибке.
+func TestTokenRejected(t *testing.T) {
+	long, short := strings.Repeat("a", 256), strings.Repeat("a", 39)
+	for _, token := range []string{"xm_fake_github token_00000000000000000001", "xm_fake_github_token_000000000000\r\nX-Evil: 1",
+		"xm-fake-github-token-000000000000000000001", "тoken_fake_github_token_00000000000000001", short, long} {
+		f, _ := env(t)
+		_, err := NewGitHub(f, token).Latest(ctx(t))
+		if err == nil {
+			t.Errorf("%q принят", token)
+			continue
+		}
+		if strings.Contains(err.Error(), token) {
+			t.Errorf("значение токена в ошибке: %v", err)
+		}
+		if len(f.Calls()) != 0 {
+			t.Errorf("%q: обращение к сети до проверки: %+v", token, f.Calls())
+		}
 	}
 }

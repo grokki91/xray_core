@@ -82,12 +82,25 @@ type Archive struct {
 // ErrIntegrity — суммы не совпали: архив не используется.
 var ErrIntegrity = errors.New("целостность архива не подтверждена")
 
+// TokenEnv — переменная окружения с необязательным токеном API GitHub (ADR-0031): без неё
+// лимит запросов к API делят все клиенты с тем же внешним адресом.
+const TokenEnv = "XM_GITHUB_TOKEN"
+
+// tokenRe — формат токена: короче 40 символов токенов GitHub не бывает, а короткое значение
+// редактор заменял бы во всём выводе.
+var tokenRe = regexp.MustCompile(`^[A-Za-z0-9_]{40,255}$`)
+
+// ValidToken сообщает, подходит ли значение TokenEnv под формат.
+func ValidToken(s string) bool { return tokenRe.MatchString(s) }
+
 // GitHub — единственная реализация источника: релизы XTLS/Xray-core.
 type GitHub struct {
-	p platform.Platform
+	p     platform.Platform
+	token string // пусто — запросы без токена
 }
 
-func NewGitHub(p platform.Platform) *GitHub { return &GitHub{p: p} }
+// NewGitHub — источник; token — значение TokenEnv, формат проверяет Latest.
+func NewGitHub(p platform.Platform, token string) *GitHub { return &GitHub{p: p, token: token} }
 
 var hexRe = regexp.MustCompile(`^[0-9a-f]+$`)
 
@@ -99,7 +112,10 @@ func validTag(tag string) bool {
 
 // Latest возвращает последний стабильный релиз.
 func (g *GitHub) Latest(ctx context.Context) (Release, error) {
-	body, err := g.p.Net().Get(ctx, platform.Request{URL: latestURL, Hosts: apiHosts, Max: maxRelease})
+	if g.token != "" && !ValidToken(g.token) {
+		return Release{}, fmt.Errorf("последний релиз: %s: допустимы 40–255 символов A-Z, a-z, 0-9, _", TokenEnv)
+	}
+	body, err := g.p.Net().Get(ctx, platform.Request{URL: latestURL, Hosts: apiHosts, Max: maxRelease, Token: g.token})
 	if err != nil {
 		return Release{}, fmt.Errorf("последний релиз: %w", err)
 	}

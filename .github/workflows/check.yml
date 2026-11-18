@@ -95,4 +95,7 @@ jobs:
         run: go build -o "$RUNNER_TEMP/xm" ./cmd/xm
 
       - name: tests/system/l4.sh
-        run: sudo bash tests/system/l4.sh "$RUNNER_TEMP/xm"
+        # Токен — только для лимита запросов к API GitHub (ADR-0031); права — contents: read.
+        env:
+          XM_GITHUB_TOKEN: ${{ github.token }}
+        run: sudo --preserve-env=XM_GITHUB_TOKEN bash tests/system/l4.sh "$RUNNER_TEMP/xm"

@@ -15,7 +15,8 @@ import (
 
 // netCase — реализация сети и адрес её «своего» узла, на котором заданы ответы:
 // /ok — тело, /hop — перенаправление на /ok, /out — перенаправление на чужой узел,
-// /loop — перенаправление на себя, /chainN — цепочка из N перенаправлений до /ok.
+// /loop — перенаправление на себя, /chainN — цепочка из N перенаправлений до /ok;
+// у настоящей: /auth — заголовок Authorization запроса, /authhop — перенаправление на /auth.
 type netCase struct {
 	name string
 	net  Net
@@ -43,6 +44,10 @@ func netCases(t *testing.T) []netCase {
 			w.Write(netBody)
 		case "/hop":
 			http.Redirect(w, r, "/ok", http.StatusFound)
+		case "/auth":
+			w.Write([]byte(r.Header.Get("Authorization")))
+		case "/authhop":
+			http.Redirect(w, r, "/auth", http.StatusFound)
 		case "/out":
 			http.Redirect(w, r, foreign, http.StatusFound)
 		case "/loop":
@@ -174,5 +179,42 @@ func TestFakeListeningAndSleep(t *testing.T) {
 	}
 	if err := f.Clock().Sleep(c, 3*time.Second); err != nil || !f.Clock().Now().Equal(time.Date(2026, 1, 1, 0, 0, 3, 0, time.UTC)) {
 		t.Fatalf("Sleep: %v %v", err, f.Clock().Now())
+	}
+}
+
+// Токен уходит заголовком Bearer только в первый запрос: в перенаправление, даже на тот же узел,
+// — нет. Подделка отмечает, был ли токен у загрузки.
+func TestNetToken(t *testing.T) {
+	cases := netCases(t)
+	c := cases[0]
+	ctx := deadline(t, 5*time.Second)
+	get := func(path, token string) string {
+		t.Helper()
+		got, err := c.net.Get(ctx, Request{URL: c.base + path, Hosts: []string{c.host}, Max: 1 << 10, Token: token})
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		return string(got)
+	}
+	if got := get("/auth", "tok_1"); got != "Bearer tok_1" {
+		t.Errorf("первый запрос: заголовок %q", got)
+	}
+	if got := get("/authhop", "tok_1"); got != "" {
+		t.Errorf("перенаправление: заголовок %q, нужен пустой", got)
+	}
+	if got := get("/auth", ""); got != "" {
+		t.Errorf("без токена: заголовок %q", got)
+	}
+
+	fake := newFake(t.TempDir(), time.Time{}, nil)
+	fake.Serve("https://own.test/ok", netBody)
+	for _, token := range []string{"tok_1", ""} {
+		if _, err := fake.Net().Get(ctx, Request{URL: "https://own.test/ok", Hosts: []string{"own.test"}, Max: 1 << 10, Token: token}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	calls := fake.Calls()
+	if len(calls) != 2 || !calls[0].Auth || calls[1].Auth {
+		t.Errorf("подделка: %+v", calls)
 	}
 }
