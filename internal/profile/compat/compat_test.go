@@ -82,7 +82,7 @@ func verdict(t *testing.T, cell string) bool {
 func TestTableMatchesCompatibilityDoc(t *testing.T) {
 	doc := readDocClients(t)
 	data := map[string]ClientSupport{}
-	for _, r := range table {
+	for _, r := range table() {
 		if r.Preset != PresetRealityXHTTP {
 			continue
 		}
@@ -115,7 +115,7 @@ func TestTableMatchesCompatibilityDoc(t *testing.T) {
 
 func TestTableRowsComplete(t *testing.T) {
 	ids := map[string]bool{}
-	for _, r := range table {
+	for _, r := range table() {
 		if r.Client == "" || r.Name == "" || r.Core == "" || r.Preset == "" || r.Checked == "" || r.Source == "" {
 			t.Errorf("%q: пустое обязательное поле", r.Client)
 		}

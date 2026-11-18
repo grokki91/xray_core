@@ -239,10 +239,12 @@ type Manager interface {  // над store.State, без записи: измен
     List(st store.State) []store.Profile          // в порядке создания
     Get(st store.State, name string) (store.Profile, error)
     Remove(st store.State, name string) (store.State, error)
+    // имя по правилу и compat.Check(client, e.Preset) — до экспортёра
+    Export(p store.Profile, e export.Endpoint, client string, x export.Exporter) (export.Artifact, error)
 }
 
 type Exporter interface {  // profile/export — единственное место форматов клиентов
-    Format() string                        // "uri", "qr", "sing-box"
+    Format() string                        // "uri", "qr"; файл sing-box — после MVP
     Export(p store.Profile, e Endpoint) (Artifact, error)
 }
 
@@ -266,7 +268,9 @@ func Check(client, presetID string) error            // ErrIncompatible с пр�
   `reality-xhttp`; ID клиентов: `v2rayn`, `v2rayng`, `hiddify-5`, `hiddify-4`, `sing-box`. Тест
   сверки читает `compatibility.md` §3 и падает при расхождении имени, ядра или «да»/«нет».
   Экспорт под пресет, который клиент не поддерживает, — ошибка `Check` с причиной из таблицы, а
-  не «приблизительная» ссылка. Фаза 3, шаг 4.
+  не «приблизительная» ссылка: `profile.Manager.Export` вызывает `Check` до экспортёра. `export`
+  и `compat` друг друга не импортируют; ID пресета приходит в `Endpoint.Preset` от `app`, их
+  константы — только проверка. Фаза 3, шаг 4.
 
 ### server
 

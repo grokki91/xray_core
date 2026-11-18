@@ -41,43 +41,45 @@ type ClientSupport struct {
 	Source    string // статус и источник
 }
 
-// table — данные; не меняется, наружу — только копии.
-var table = []ClientSupport{
-	{
-		Client: "v2rayn", Name: "v2rayN (Windows, Linux, macOS)", Core: "Xray-core",
-		Preset: PresetRealityXHTTP, Works: true,
-		Condition: "ядро Xray клиента не старше v25.7.26, отпечаток chrome",
-		Checked:   "2026-10-28",
-		Source:    "предшественник, 2026-10-28; последний тег клиента 7.25.6 (2026-11-13)",
-	},
-	{
-		Client: "v2rayng", Name: "v2rayNG (Android)", Core: "Xray-core",
-		Preset: PresetRealityXHTTP, Works: true,
-		Condition: "ядро Xray клиента не старше v25.7.26, отпечаток chrome",
-		Checked:   "2026-10-28",
-		Source:    "предшественник, 2026-10-28",
-	},
-	{
-		Client: "hiddify-5", Name: "Hiddify 5.x", Core: "форк sing-box",
-		Preset: PresetRealityXHTTP, Works: true,
-		Checked: "2026-11-06",
-		Source:  "предшественник, 2026-11-06; по исходникам v5.2.0 и v5.5.5; последний стабильный — v5.5.5, 5.9.x — предварительные (2026-11-17)",
-	},
-	{
-		Client: "hiddify-4", Name: "Hiddify 4.x", Core: "форк sing-box 1.13",
-		Preset: PresetRealityXHTTP, Works: false,
-		Reason:    "вырезает X25519MLKEM768 из ClientHello",
-		MinClient: "Hiddify 5.x",
-		Checked:   "2026-10-28",
-		Source:    "предшественник, 2026-10-28",
-	},
-	{
-		Client: "sing-box", Name: "sing-box (upstream) 1.14.4 и 1.15.0-alpha.13", Core: "sing-box",
-		Preset: PresetRealityXHTTP, Works: false,
-		Reason:  "REALITY-клиент вырезает X25519MLKEM768; транспорта XHTTP нет",
-		Checked: "2026-11-13",
-		Source:  "по исходникам, 2026-11-13: common/tls/reality_client.go, каталог transport/",
-	},
+// table — данные; каждый вызов строит новый срез, поэтому изменить таблицу снаружи нельзя.
+func table() []ClientSupport {
+	return []ClientSupport{
+		{
+			Client: "v2rayn", Name: "v2rayN (Windows, Linux, macOS)", Core: "Xray-core",
+			Preset: PresetRealityXHTTP, Works: true,
+			Condition: "ядро Xray клиента не старше v25.7.26, отпечаток chrome",
+			Checked:   "2026-10-28",
+			Source:    "предшественник, 2026-10-28; последний тег клиента 7.25.6 (2026-11-13)",
+		},
+		{
+			Client: "v2rayng", Name: "v2rayNG (Android)", Core: "Xray-core",
+			Preset: PresetRealityXHTTP, Works: true,
+			Condition: "ядро Xray клиента не старше v25.7.26, отпечаток chrome",
+			Checked:   "2026-10-28",
+			Source:    "предшественник, 2026-10-28",
+		},
+		{
+			Client: "hiddify-5", Name: "Hiddify 5.x", Core: "форк sing-box",
+			Preset: PresetRealityXHTTP, Works: true,
+			Checked: "2026-11-06",
+			Source:  "предшественник, 2026-11-06; по исходникам v5.2.0 и v5.5.5; последний стабильный — v5.5.5, 5.9.x — предварительные (2026-11-17)",
+		},
+		{
+			Client: "hiddify-4", Name: "Hiddify 4.x", Core: "форк sing-box 1.13",
+			Preset: PresetRealityXHTTP, Works: false,
+			Reason:    "вырезает X25519MLKEM768 из ClientHello",
+			MinClient: "Hiddify 5.x",
+			Checked:   "2026-10-28",
+			Source:    "предшественник, 2026-10-28",
+		},
+		{
+			Client: "sing-box", Name: "sing-box (upstream) 1.14.4 и 1.15.0-alpha.13", Core: "sing-box",
+			Preset: PresetRealityXHTTP, Works: false,
+			Reason:  "REALITY-клиент вырезает X25519MLKEM768; транспорта XHTTP нет",
+			Checked: "2026-11-13",
+			Source:  "по исходникам, 2026-11-13: common/tls/reality_client.go, каталог transport/",
+		},
+	}
 }
 
 // Clients — строки пресета presetID для сервера Xray версии core (N.N.N). Пресета нет, версия
@@ -87,7 +89,7 @@ func Clients(presetID, core string) []ClientSupport {
 		return nil
 	}
 	var out []ClientSupport
-	for _, r := range table {
+	for _, r := range table() {
 		if r.Preset == presetID {
 			out = append(out, r)
 		}
@@ -99,7 +101,7 @@ func Clients(presetID, core string) []ClientSupport {
 // версией клиента, с которой подключится, или ErrUnknown. Ввод в ошибку не попадает.
 func Check(client, presetID string) error {
 	knownClient, knownPreset := false, false
-	for _, r := range table {
+	for _, r := range table() {
 		knownClient = knownClient || r.Client == client
 		knownPreset = knownPreset || r.Preset == presetID
 		if r.Client != client || r.Preset != presetID {
