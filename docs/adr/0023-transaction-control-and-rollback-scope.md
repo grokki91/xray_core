@@ -2,6 +2,7 @@
 
 - Статус: Принято
 - Уточняет: [ADR-0005](0005-transactions-and-rollback.md)
+- Изменён: [ADR-0024](0024-health-verdict-and-shared-checks.md) — контроль продолжается набором `control` движка `diag`
 - Дата: 2026-11-16
 
 ## Контекст

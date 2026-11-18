@@ -39,6 +39,8 @@
 | [0021](0021-owner-integration-check.md) | Проверка владельцем на реальной интеграции | Принято |
 | [0022](0022-journald-from-platform.md) | Журнал `xm` — запись в journald через `platform` | Принято |
 | [0023](0023-transaction-control-and-rollback-scope.md) | Контроль и границы отката транзакции | Принято |
-| [0024](0024-health-verdict-and-shared-checks.md) | Вердикт здоровья и один набор проверок | Ждёт решения (Q13) |
+| [0024](0024-health-verdict-and-shared-checks.md) | Вердикт здоровья и один набор проверок | Принято |
 | [0025](0025-stopped-service-and-install-scenario.md) | Остановленная служба в транзакции и сценарий `xm install` фазы 2 | Принято |
 | [0026](0026-restart-counter-from-baseline.md) | Контроль перезапусков от базы | Принято |
+| [0027](0027-private-destinations-via-final-rules.md) | Запрет частных адресов назначения — `freedom.finalRules` | Принято |
+| [0028](0028-qr-library-and-selftest-address.md) | Библиотека QR и адрес самопроверки | Принято |
