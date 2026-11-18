@@ -169,6 +169,7 @@ type Manager interface {
     Stage(ctx context.Context, v Version, archive []byte) error  // распаковать xray в каталог версии, проверить
     Activate(ctx context.Context, v Version) error               // проверить версию, атомарно переключить current
     Validate(ctx context.Context, v Version, configPath string) error // xray run -test бинарником версии v
+    ValidateCurrent(ctx context.Context, configPath string) error     // то же действующей версией (контроль)
     Previous() (Version, bool)                                   // фаза 5
     Prune(keep int) error                                        // фаза 5
     Tool(ctx context.Context, v Version, sub Subcommand, args ...string) ([]byte, error) // сигнатура — с первым потребителем (api statsquery)
@@ -317,12 +318,12 @@ type Manager interface {
   до всякой записи. `ExecStart` идёт через ссылку `current` (ADR-0019). `InstallUnit` пишет файл
   `root:root 0644`, `daemon-reload`, `enable`; службу не запускает. `RemoveUnit` — `disable`, удаление,
   `daemon-reload`; юнита нет — не ошибка; чужой юнит не трогают оба (`ErrForeign`).
-- `Service()` — `Start`, `Stop`, `Restart`, `Status` (`platform.UnitStatus`: загружен, состояние,
+- `Service()` — `Start`, `Stop`, `Restart`, `Listening(ctx, port)` (один замер порта), `Status` (`platform.UnitStatus`: загружен, состояние,
   автозапуск, число перезапусков, PID). `CheckRunning(ctx, port)` — контроль после изменения: активна,
   `Restarts` не вырос от первого снимка контроля, порт слушается, повтор после выдержки; `CheckStopped` —
   неактивна и порт свободен. Срок — из `ctx`; провал — `ErrControl`
-  ([ADR-0023](../adr/0023-transaction-control-and-rollback-scope.md), [ADR-0026](../adr/0026-restart-counter-from-baseline.md)). С фазы 3 после `CheckRunning` контроль продолжает набор `control`
-  движка `diag` ([ADR-0024](../adr/0024-health-verdict-and-shared-checks.md)).
+  ([ADR-0023](../adr/0023-transaction-control-and-rollback-scope.md), [ADR-0026](../adr/0026-restart-counter-from-baseline.md)). После `CheckRunning` контроль транзакции продолжает набор `control`
+  движка `diag` (`app.control`, [ADR-0024](../adr/0024-health-verdict-and-shared-checks.md)).
 - Расширение «несколько VPS»: реестр узлов (алиас SSH, без учётных данных) и исполнитель,
   вызывающий на узле тот же `xm … --json`. Фаза 2; реестр — после MVP.
 
@@ -413,7 +414,8 @@ type Vantage interface { // точка наблюдения: сейчас local;
 ```
 
 - Измерения проверка получает через конструктор — интерфейсы потребителя, объявленные в `diag`;
-  реализации от `server`, `core`, `config`, `profile` подставляет `cmd/xm` (ADR-0024).
+  реализации от `server`, `core`, `config`, `profile` подставляет `app` (ADR-0024); проверки —
+  файлы пакета `diag` ([ADR-0030](../adr/0030-diag-checks-in-package.md)).
 - Время наблюдения и точка наблюдения (`vantage`) войдут в отчёт вместе со схемой `diag-report`;
   сейчас отчёт живёт только внутри процесса.
 - Реестр проверяется в `New`: ID по правилу и без повторов;
@@ -429,7 +431,7 @@ type Vantage interface { // точка наблюдения: сейчас local;
   `degraded`: зависимые не запускаются, поэтому он без проваленных зависимостей.
 - Анализ — правила «наблюдения → вывод» классов `probable | hypothesis`; факт строит проверка (ADR-0029); модель и
   каталог проверок — [diagnostics.md](../operations/diagnostics.md).
-- Отчёт всегда проходит `redact` перед сохранением и экспортом. Движок и вердикт есть; набор `control`, поле `health` схем и строка вердикта — фаза 3 ([ADR-0024](../adr/0024-health-verdict-and-shared-checks.md), задача A2 в [roadmap.md](../roadmap.md) §7); каталог — фаза 5; полностью — после MVP.
+- Отчёт всегда проходит `redact` перед сохранением и экспортом. Движок, вердикт и набор `control` есть; поле `health` схем и строка вердикта — фаза 3 ([ADR-0024](../adr/0024-health-verdict-and-shared-checks.md), задача A2 в [roadmap.md](../roadmap.md) §7); каталог — фаза 5; полностью — после MVP.
 
 ### logging
 
@@ -560,6 +562,12 @@ type App interface {
   откат ([ADR-0005](../adr/0005-transactions-and-rollback.md), [ADR-0023](../adr/0023-transaction-control-and-rollback-scope.md)).
   Базовая защита (`security.EnsureBaseline`) — первый шаг после блокировки. Службу, которую
   владелец остановил, транзакция не запускает ([ADR-0025](../adr/0025-stopped-service-and-install-scenario.md)).
+  Контроль (`app.control`, один срок `ControlTimeout`): `CheckRunning` — ожидание запуска, затем набор
+  `control` движка `diag` — `xray.service.active`, `reach.listen` (требует службу) и `xray.config.valid`
+  (`xray run -test` действующей версией на действующей конфигурации). Любой исход набора, кроме `ok`, —
+  `server.ErrControl` с названием первопричины и действием, без значений измерений. Тот же контроль
+  идёт после отката: не прошёл — `ErrRollbackFailed`. Движок собирается в `app` из менеджеров, порт —
+  из состояния ([ADR-0030](../adr/0030-diag-checks-in-package.md)).
   Ошибки: `ErrRolledBack` (код 1) и `ErrRollbackFailed` (код 5). `Recover` откатывает незавершённую
   транзакцию при следующем запуске.
 - Сценарии фазы 2 ([ADR-0025](../adr/0025-stopped-service-and-install-scenario.md)): `Install` —

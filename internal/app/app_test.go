@@ -73,7 +73,9 @@ type sys struct {
 
 	active             bool
 	failVerb           string // глагол systemctl, который отказывает
-	testExit           int    // код `xray run -test`
+	listenPort         int    // порт, который «слушает» поддельный хост после запуска; ноль — port
+	testExit           int    // код `xray run -test` до перезапуска службы
+	controlExits       []int  // коды `run -test` после перезапуска (набор control), по одному на запуск; пусто — 0
 	badVersion         string // версия, которую xray называет неверно
 	restartListens     []bool // слушает ли порт после очередного перезапуска; пусто — слушает
 	restarts, nRestart int
@@ -132,6 +134,13 @@ func build(t *testing.T, installed bool) *sys {
 			}
 			return platform.Result{Stdout: []byte("Xray " + name + " (Xray, Penetrates Everything.) abc (go1.27.4 linux/amd64)\n")}, nil
 		}
+		if s.nRestart > 0 { // после перезапуска Xray проверяет действующую конфигурацию
+			code := 0
+			if len(s.controlExits) > 0 {
+				code, s.controlExits = s.controlExits[0], s.controlExits[1:]
+			}
+			return platform.Result{ExitCode: code}, nil
+		}
 		return platform.Result{ExitCode: s.testExit}, nil
 	})
 	f.Handle("systemctl", func(c platform.Command) (platform.Result, error) {
@@ -164,10 +173,10 @@ func build(t *testing.T, installed bool) *sys {
 			s.nRestart++
 			s.restarts++
 			s.active = true
-			f.SetListening(port, listens)
+			f.SetListening(s.listen(), listens)
 		case "stop":
 			s.active = false
-			f.SetListening(port, false)
+			f.SetListening(s.listen(), false)
 		}
 		return platform.Result{}, nil
 	})
@@ -181,6 +190,13 @@ func build(t *testing.T, installed bool) *sys {
 		XM: "0.1.0", Now: f.Clock().Now, ControlTimeout: 150 * time.Millisecond,
 	})
 	return s
+}
+
+func (s *sys) listen() int {
+	if s.listenPort != 0 {
+		return s.listenPort
+	}
+	return port
 }
 
 func ctx(t *testing.T) context.Context {
@@ -331,14 +347,15 @@ func TestApplyFailureAtEachStepRestoresOriginal(t *testing.T) {
 		arm  func(s *sys)
 		want string // фрагмент причины: сбой случился именно на этом шаге
 	}{
-		"проверка xray run -test": {func(s *sys) { s.testExit = 23 }, "отверг конфигурацию"},
-		"переключение ядра":       {func(s *sys) { s.badVersion = v2 }, "не называет эту версию"},
-		"установка юнита":         {func(s *sys) { s.failVerb = "enable" }, "systemctl enable"},
-		"запись конфигурации":     {func(s *sys) { s.fs.path, s.fs.armed = config.Path, true }, "конфигурация: запись"},
-		"запись состояния":        {func(s *sys) { s.fs.path, s.fs.armed = store.StatePath, true }, "сбой записи"},
-		"перезапуск":              {func(s *sys) { s.failVerb = "restart" }, "systemctl restart"},
-		"удаление кандидата":      {func(s *sys) { s.fs.removePath = config.CandidatePath }, "сбой удаления"},
-		"контроль: порт закрыт":   {func(s *sys) { s.restartListens = []bool{false, true} }, "контроль не пройден"},
+		"проверка xray run -test":     {func(s *sys) { s.testExit = 23 }, "отверг конфигурацию"},
+		"переключение ядра":           {func(s *sys) { s.badVersion = v2 }, "не называет эту версию"},
+		"установка юнита":             {func(s *sys) { s.failVerb = "enable" }, "systemctl enable"},
+		"запись конфигурации":         {func(s *sys) { s.fs.path, s.fs.armed = config.Path, true }, "конфигурация: запись"},
+		"запись состояния":            {func(s *sys) { s.fs.path, s.fs.armed = store.StatePath, true }, "сбой записи"},
+		"перезапуск":                  {func(s *sys) { s.failVerb = "restart" }, "systemctl restart"},
+		"удаление кандидата":          {func(s *sys) { s.fs.removePath = config.CandidatePath }, "сбой удаления"},
+		"контроль: порт закрыт":       {func(s *sys) { s.restartListens = []bool{false, true} }, "контроль не пройден"},
+		"набор control: конфигурация": {func(s *sys) { s.controlExits = []int{23} }, "Xray не принимает действующую конфигурацию"},
 	}
 	for name, step := range steps {
 		t.Run(name, func(t *testing.T) {
@@ -565,5 +582,47 @@ func TestCandidateAndJournalHoldNoSecret(t *testing.T) {
 	}
 	if info, err := os.Stat(s.f.Path(store.TxPath)); err != nil || info.Mode().Perm() != 0o600 {
 		t.Fatalf("права журнала: %v %v", info, err)
+	}
+}
+
+// Откат проходит тот же набор control: действующая после отката конфигурация не принята — код 5.
+func TestRollbackControlFailureIsRollbackFailed(t *testing.T) {
+	s := newSys(t)
+	if err := s.app.Apply(ctx(t), Change{Reason: "install", State: stateOf("phone"), Unit: unit1}); err != nil {
+		t.Fatal(err)
+	}
+	s.nRestart, s.controlExits = 0, []int{23, 23} // и изменение, и откат
+	err := s.app.Apply(ctx(t), Change{Reason: "update", State: stateOf("phone", "laptop"), Unit: unit2})
+	if !errors.Is(err, ErrRollbackFailed) || errors.Is(err, ErrRolledBack) {
+		t.Fatalf("ждали ErrRollbackFailed, получено %v", err)
+	}
+	if !strings.Contains(err.Error(), "после отката") || !s.snap(t).tx {
+		t.Fatalf("откат не прошёл контроль набора, журнал сохранён: %v", err)
+	}
+}
+
+// Служба и порт в порядке, конфигурацию Xray не принимает — изменение не фиксируется, и это
+// видно только набору control: контроль запуска такого не измеряет.
+func TestApplyControlSetRunsAfterRunningCheck(t *testing.T) {
+	s := newSys(t)
+	s.controlExits = []int{23}
+	s.nRestart = 0
+	err := s.app.Apply(ctx(t), Change{Reason: "install", State: stateOf("phone"), Unit: unit1})
+	if !errors.Is(err, ErrRolledBack) || !errors.Is(err, server.ErrControl) {
+		t.Fatalf("%v", err)
+	}
+	if s.snap(t).active {
+		t.Fatal("служба осталась запущенной после отката чистой установки")
+	}
+}
+
+// Порт набора control — из состояния, а не константа: сервер на другом порту проходит контроль.
+func TestApplyControlUsesStatePort(t *testing.T) {
+	s := newSys(t)
+	s.listenPort = 8443
+	st := stateOf("phone")
+	st.Server.Port = 8443
+	if err := s.app.Apply(ctx(t), Change{Reason: "install", State: st, Unit: unit1}); err != nil {
+		t.Fatal(err)
 	}
 }

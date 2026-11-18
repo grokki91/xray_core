@@ -64,6 +64,12 @@ func (m *Manager) Service() Service { return Service{m.p.Systemd(), m.p.Net(), m
 func (s Service) Start(ctx context.Context) error   { return s.s.Start(ctx) }
 func (s Service) Stop(ctx context.Context) error    { return s.s.Stop(ctx) }
 func (s Service) Restart(ctx context.Context) error { return s.s.Restart(ctx) }
+
+// Listening — слушает ли хост TCP-порт на любом адресе; один замер, без ожидания.
+func (s Service) Listening(ctx context.Context, port int) (bool, error) {
+	return s.net.Listening(ctx, port)
+}
+
 func (s Service) Status(ctx context.Context) (Status, error) {
 	return s.s.Status(ctx)
 }

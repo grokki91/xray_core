@@ -156,6 +156,19 @@ func (m *Manager) Validate(ctx context.Context, v Version, configPath string) er
 	}
 }
 
+// ValidateCurrent проверяет конфигурацию действующей версией: контроль после изменения
+// проверяет то, что запущено, а не то, что собирались запустить. Версии нет — ошибка.
+func (m *Manager) ValidateCurrent(ctx context.Context, configPath string) error {
+	cur, err := m.Current(ctx)
+	if err != nil {
+		return err
+	}
+	if cur == "" {
+		return errors.New("ядро не установлено")
+	}
+	return m.Validate(ctx, cur, configPath)
+}
+
 // subcommands — закрытый список подкоманд Xray, которые запускает core.
 var subcommands = map[string]bool{"version": true, "run": true}
 
