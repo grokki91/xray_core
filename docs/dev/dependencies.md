@@ -71,5 +71,5 @@ govulncheck, staticcheck, shellcheck подключены 2026-11-15). Прав�
 |---|---|---|---|
 | `api.github.com` | `update` | последний стабильный релиз `XTLS/Xray-core` и хэши его файлов; с `XM_GITHUB_TOKEN` — с авторизацией | [ADR-0009](../adr/0009-update-source-and-verification.md), [ADR-0031](../adr/0031-github-api-token.md); [updates.md](../operations/updates.md) §1 |
 | `github.com` | `update` | архив релиза и `.dgst` | [ADR-0009](../adr/0009-update-source-and-verification.md); [updates.md](../operations/updates.md) §1 |
-| `cp.cloudflare.com` | самопроверка (`reach.selftest`) | `GET /generate_204` через сервер; успех — 204 | 2026-11-17, ответ владельца; [ADR-0028](../adr/0028-qr-library-and-selftest-address.md) |
+| `cp.cloudflare.com` | самопроверка (`reach.selftest`); цель сквозного теста L3 в CI | `GET /generate_204` через сервер; успех — 204 | 2026-11-17, ответ владельца; [ADR-0028](../adr/0028-qr-library-and-selftest-address.md); L3 — 2026-11-19, [ADR-0032](../adr/0032-selftest-client-and-l3-target.md) |
 | `release-assets.githubusercontent.com` | `update` | файлы релиза: на него перенаправляет `github.com` | [ADR-0009](../adr/0009-update-source-and-verification.md); [updates.md](../operations/updates.md) §1 |

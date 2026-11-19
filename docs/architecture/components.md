@@ -31,6 +31,9 @@
 ```go
 type Platform interface {
     Exec(ctx context.Context, c Command) (Result, error) // Command{Program, Args, Stdin}; без оболочки
+    // фаза 3, шаг 7 ([ADR-0032](../adr/0032-selftest-client-and-l3-target.md)): процесс в фоне; срок в контексте обязателен,
+    // группа процессов и пределы — как у Exec; остановка по контексту или Process.Stop
+    // Start(ctx context.Context, c Command) (Process, error)
     FS() FS            // ReadFile, WriteFile (temp + fchown + fchmod + fsync + rename), Mkdir, ReadDir, Remove, Symlink, Readlink, Lock (flock)
     Systemd() Systemd  // только xray.service: Running, Reload, Enable/Disable, Start/Stop/Restart, Status
     Net() Net          // Get по HTTPS, Listening — порт слушается (фаза 2); интерфейсы, маршруты — фаза 4
@@ -60,7 +63,8 @@ type Platform interface {
   самом пакете: подпакет `platform/fake` не мог бы импортировать `platform` по таблице слоёв;
   вызов `NewFake` вне `_test.go` запрещает тест границ. `Fake.RunUnderRoot(program)` запускает
   настоящий файл программы под корнем подделки путём `Real.Exec`, аргументы с ведущим `/` — под
-  корнем ([ADR-0020](../adr/0020-l3-stand.md)).
+  корнем ([ADR-0020](../adr/0020-l3-stand.md)); `Fake.Start` так же запустит настоящий файл в фоне
+  ([ADR-0032](../adr/0032-selftest-client-and-l3-target.md)).
 - `platform/xraytest` — стенд L3, только для `_test.go`: `Versions()` (границы проверенного
   диапазона) и `Archive(t, get, версия)` — архив Xray с закреплённой SHA-256, кэш по версии;
   `get` — `Net.Get` настоящей реализации.
@@ -71,7 +75,8 @@ type Platform interface {
   (`HTTPS_PROXY`), список сверяется с узлом назначения; срок обязателен; непустой `Token` —
   заголовок `Authorization: Bearer` только у первого запроса, перенаправления — без него
   ([ADR-0031](../adr/0031-github-api-token.md)); подделка отмечает его в `Call.Auth`. Поддельная сеть отвечает заданными телами и перенаправлениями
-  (`Serve`, `Redirect`) по тем же правилам.
+  (`Serve`, `Redirect`) по тем же правилам. Фаза 3, шаг 7 ([ADR-0032](../adr/0032-selftest-client-and-l3-target.md)): поля `Proxy` (сокет
+  Unix; окружение тогда не действует) и ожидаемый код ответа.
 - `Net.Listening(ctx, port)` — слушает ли хост TCP-порт: строки `LISTEN` в `/proc/net/tcp` и `tcp6`
   (нет `tcp6` на хосте без IPv6 — не ошибка); соединений не открывает. `Clock.Sleep(ctx, d)` — ожидание
   до конца `ctx`; у подделки сдвигает часы ([ADR-0023](../adr/0023-transaction-control-and-rollback-scope.md)).
@@ -187,6 +192,8 @@ type Manager interface {
 - Закрытый список подкоманд `core` — `version` и `run`; `x25519` и `uuid` не запускаются: секреты
   создаёт только `security`. Вывод `run -test` в ошибку не попадает — решение по коду выхода
   (23 — `ErrConfig`).
+- Клиент самопроверки — метод `core` (сигнатура — с потребителем `reach.selftest`): `xray run`
+  действующей версией от root, конфигурация через stdin, процесс `platform.Start` ([ADR-0032](../adr/0032-selftest-client-and-l3-target.md)); фаза 3, шаг 7.
 - Каталоги `/usr/local/lib/xm/`, `core/`, `core/<версия>/` создаёт `Stage`: ядро ставится до
   базовой защиты ([overview.md](overview.md) §6). Фаза 2.
 
@@ -204,6 +211,9 @@ type Manager interface {
 }
 
 type Rendered struct { Data []byte; SHA256 string }  // SHA256 → applied.config_sha256
+// фаза 3, шаг 7 ([ADR-0032](../adr/0032-selftest-client-and-l3-target.md)): конфигурация клиента самопроверки и L3 из
+// состояния — тот же источник, что у ссылки; входящий — HTTP на сокете Unix
+// RenderClient(st store.State, id, socket string) (Rendered, error)
 
 type Preset interface {  // каталог пресетов: config/preset
     ID() string                                   // например "reality-xhttp"
