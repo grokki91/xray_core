@@ -122,6 +122,13 @@ func (a *App) Apply(ctx context.Context, ch Change) error {
 			return err
 		}
 	}
+	// Служебный клиент самопроверки (ADR-0032): пустой id заполняет любая транзакция, в том
+	// числе установка и первая после миграции.
+	if ch.State.Selftest.ID == "" {
+		if ch.State.Selftest.ID, err = a.s.Security.NewClientID(); err != nil {
+			return err
+		}
+	}
 	a.register(ch.State)
 	coreBefore, err := a.s.Core.Current(ctx)
 	if err != nil {
@@ -322,6 +329,7 @@ func (a *App) register(st store.State) {
 	for _, p := range st.Profiles {
 		r.Register("uuid", p.ID)
 	}
+	r.Register("uuid", st.Selftest.ID)
 	ad := st.Server.Addresses
 	r.Register("server-ip", ad.IPv4)
 	r.Register("server-ip", ad.IPv6)

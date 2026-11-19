@@ -27,6 +27,17 @@ type Params struct {
 	Options     map[string]string
 }
 
+// ClientParams — всё, что нужно пресету для исходящего клиента: значения те же, что у ссылки.
+type ClientParams struct {
+	Host      string // адрес сервера: IPv4, IPv6 без скобок или домен
+	Port      int
+	ID        string // UUID клиента
+	SNI       string
+	PublicKey string // открытый ключ REALITY, base64 RawURL
+	ShortID   string
+	Options   map[string]string
+}
+
 // Requirements — что пресет требует от сервера.
 type Requirements struct {
 	MinXray     string // минимальная версия Xray (N.N.N)
@@ -38,6 +49,8 @@ type Requirements struct {
 type Preset interface {
 	ID() string
 	Inbound(p Params) (json.RawMessage, error)
+	// Outbound — исходящий клиента Xray к серверу с этим пресетом (самопроверка, L3).
+	Outbound(p ClientParams) (json.RawMessage, error)
 	Requires() Requirements
 }
 
@@ -66,7 +79,9 @@ var (
 	reUUID    = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 	reShortID = regexp.MustCompile(`^([0-9a-f]{2}){0,8}$`)
 	rePath    = regexp.MustCompile(`^/[A-Za-z0-9._~/-]{0,128}$`)
-	reHost    = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$`)
+	// reHostOrIP — адрес сервера: домен, IPv4 или IPv6 без скобок.
+	reHostOrIP = regexp.MustCompile(`^[A-Za-z0-9:]([A-Za-z0-9.:-]{0,251}[A-Za-z0-9:])?$`)
+	reHost     = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$`)
 )
 
 // checkPort — порт TCP 1…65535.
