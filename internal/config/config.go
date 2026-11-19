@@ -8,12 +8,15 @@ package config
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"strings"
 
 	"github.com/grokki91/xray_core/internal/config/preset"
 	"github.com/grokki91/xray_core/internal/platform"
@@ -56,6 +59,11 @@ func (m *Manager) Render(st store.State, logSection json.RawMessage) (Rendered, 
 			ids = append(ids, pf.ID)
 		}
 	}
+	// Служебный клиент самопроверки — последним: он не профиль, но входит в clients сервера
+	// (ADR-0032); пустой id — клиента ещё нет.
+	if st.Selftest.ID != "" {
+		ids = append(ids, st.Selftest.ID)
+	}
 	inbound, err := pr.Inbound(preset.Params{
 		Port:        st.Server.Port,
 		Target:      in.Reality.Target,
@@ -84,6 +92,50 @@ func (m *Manager) Render(st store.State, logSection json.RawMessage) (Rendered, 
 			Rules:          []rule{{Type: "field", IP: deniedCIDRs, OutboundTag: tagBlock}},
 		},
 	}
+	return finish(doc)
+}
+
+// RenderClient строит конфигурацию клиента самопроверки из состояния — тот же источник, что у
+// ссылки профиля (ADR-0032): входящий — HTTP на сокете Unix по пути socket (права 0600), исходящий —
+// VLESS к серверу с этим пресетом. Адрес сервера — первый из порядка «домен, IPv4, IPv6», как у
+// ссылки по умолчанию. Разборщика ссылок нет: параметры берутся из состояния.
+func (m *Manager) RenderClient(st store.State, id, socket string) (Rendered, error) {
+	if len(st.Inbounds) != 1 {
+		return Rendered{}, fmt.Errorf("%w: входящих %d, нужен один", ErrState, len(st.Inbounds))
+	}
+	in := st.Inbounds[0]
+	pr, err := preset.Get(in.Preset)
+	if err != nil {
+		return Rendered{}, fmt.Errorf("%w: %w", ErrState, err)
+	}
+	// Запятая в пути отделила бы суффикс прав: «путь,0600» — единственная форма.
+	if !filepath.IsAbs(socket) || filepath.Clean(socket) != socket || strings.ContainsAny(socket, ",@\x00") {
+		return Rendered{}, fmt.Errorf("%w: сокет клиента: нужен абсолютный очищенный путь", ErrState)
+	}
+	if len(in.Reality.ServerNames) == 0 || len(in.Reality.ShortIDs) == 0 {
+		return Rendered{}, fmt.Errorf("%w: во входящем нет имён или shortId", ErrState)
+	}
+	host := cmp.Or(st.Server.Addresses.Domain, st.Server.Addresses.IPv4, st.Server.Addresses.IPv6)
+	out, err := pr.Outbound(preset.ClientParams{
+		Host: host, Port: st.Server.Port, ID: id, SNI: in.Reality.ServerNames[0],
+		PublicKey: in.Reality.PublicKey, ShortID: in.Reality.ShortIDs[0], Options: in.Params,
+	})
+	if err != nil {
+		return Rendered{}, fmt.Errorf("%w: %w", ErrState, err)
+	}
+	inbound, err := json.Marshal(httpInbound{Tag: "in-selftest", Listen: socket + ",0600", Protocol: "http", Settings: struct{}{}})
+	if err != nil {
+		return Rendered{}, fmt.Errorf("конфигурация клиента: %w", err)
+	}
+	return finish(clientDocument{
+		Log:       json.RawMessage(`{"loglevel":"none"}`),
+		Inbounds:  []json.RawMessage{inbound},
+		Outbounds: []json.RawMessage{out},
+	})
+}
+
+// finish — единый вид файла: отступ в два пробела и перевод строки в конце; SHA-256 — по нему.
+func finish(doc any) (Rendered, error) {
 	raw, err := json.Marshal(doc)
 	if err != nil {
 		return Rendered{}, fmt.Errorf("конфигурация: %w", err)
@@ -95,6 +147,20 @@ func (m *Manager) Render(st store.State, logSection json.RawMessage) (Rendered, 
 	out.WriteByte('\n')
 	sum := sha256.Sum256(out.Bytes())
 	return Rendered{Data: out.Bytes(), SHA256: hex.EncodeToString(sum[:])}, nil
+}
+
+type clientDocument struct {
+	Log       json.RawMessage   `json:"log"`
+	Inbounds  []json.RawMessage `json:"inbounds"`
+	Outbounds []json.RawMessage `json:"outbounds"`
+}
+
+// httpInbound — входящий клиента: слушает только сокет Unix, порта нет.
+type httpInbound struct {
+	Tag      string   `json:"tag"`
+	Listen   string   `json:"listen"`
+	Protocol string   `json:"protocol"`
+	Settings struct{} `json:"settings"`
 }
 
 // Write атомарно пишет конфигурацию в Path: root:xray, 0640. Группу берёт у пользователя xray:

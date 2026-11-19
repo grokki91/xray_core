@@ -187,7 +187,7 @@ func (a *App) Install(ctx context.Context, o InstallOptions) (InstallResult, err
 	}
 	a.s.Redactor.Register("uuid", clientID)
 	st := store.State{
-		SchemaVersion: 1,
+		SchemaVersion: store.SchemaVersion,
 		Server:        store.Server{Addresses: addr, Port: o.Port},
 		Inbounds: []store.Inbound{{
 			Preset: presetID,

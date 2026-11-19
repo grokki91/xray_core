@@ -197,7 +197,7 @@ type Manager interface {
 - Закрытый список подкоманд `core` — `version` и `run`; `x25519` и `uuid` не запускаются: секреты
   создаёт только `security`. Вывод `run -test` в ошибку не попадает — решение по коду выхода
   (23 — `ErrConfig`).
-- Клиент самопроверки — метод `core` (сигнатура — с потребителем `reach.selftest`): `xray run`
+- Клиент самопроверки — метод `core` (запуск — с потребителем `reach.selftest`; конфигурация — `config.RenderClient`): `xray run`
   действующей версией от root, конфигурация — `-c stdin:`, процесс `platform.Start`; входящий
   `listen` — `<сокет>,0600`, рядом Xray создаёт `<сокет>.lock`; прежний сокет удаляется до запуска:
   Xray его не удаляет и не стартует; успех — ответ цели, а не `200` прокси на `CONNECT`
@@ -219,13 +219,12 @@ type Manager interface {
 }
 
 type Rendered struct { Data []byte; SHA256 string }  // SHA256 → applied.config_sha256
-// фаза 3, шаг 7 ([ADR-0032](../adr/0032-selftest-client-and-l3-target.md)): конфигурация клиента самопроверки и L3 из
-// состояния — тот же источник, что у ссылки; входящий — HTTP на сокете Unix
-// RenderClient(st store.State, id, socket string) (Rendered, error)
+RenderClient(st store.State, id, socket string) (Rendered, error) // клиент самопроверки и L3 из состояния ([ADR-0032](../adr/0032-selftest-client-and-l3-target.md))
 
 type Preset interface {  // каталог пресетов: config/preset
     ID() string                                   // например "reality-xhttp"
     Inbound(p Params) (json.RawMessage, error)
+    Outbound(p ClientParams) (json.RawMessage, error) // исходящий клиента: те же значения, что в ссылке
     Requires() Requirements                       // минимальная версия Xray, порт, нужна ли цель
 }
 ```
@@ -243,7 +242,14 @@ type Preset interface {  // каталог пресетов: config/preset
   версия Xray, порт, нужна ли цель) — типы `config/preset`.
 - Ручная правка файла — дрейф: `status` показывает его, следующее применение сохраняет
   изменённый файл в снимок и перезаписывает.
-- Входящий в MVP один; в `clients` попадают только включённые профили. Ошибки отрисовки несут
+- Входящий в MVP один; в `clients` попадают только включённые профили и служебный клиент
+  самопроверки (`selftest.id`, если он задан).
+- `RenderClient` — конфигурация клиента самопроверки из состояния, тот же источник, что у ссылки
+  профиля: входящий `http` на сокете Unix `<сокет>,0600` без порта, исходящий — `vless` к первому
+  из адресов «домен, IPv4, IPv6» с `Outbound` пресета (fp `chrome`, flow пустой, mode `auto`);
+  журнал `none`. Сокет — абсолютный очищенный путь без `,` и `@`; пустой или не UUID `id`,
+  нет входящего или адреса — `ErrState`. Разборщика ссылок нет: L3 сверяет параметры ссылки с
+  параметрами клиента. Ошибки отрисовки несут
   имена полей, не значения. Адреса назначения `0.0.0.0/8`, частные, петлевые и link-local
   уходят в `blackhole` правилом с `domainStrategy: IPOnDemand`; задача A1 заменяет его на
   `freedom.finalRules` (ADR-0027).

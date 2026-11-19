@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"regexp"
 
 	"github.com/grokki91/xray_core/internal/platform"
 )
@@ -20,8 +21,8 @@ const (
 	LockPath  = runDir + "/lock"
 )
 
-// schemaVersion — версия схемы, которую пишет эта сборка.
-const schemaVersion = 1
+// SchemaVersion — версия схемы, которую пишет эта сборка.
+const SchemaVersion = 2
 
 var (
 	ErrNoState     = errors.New("состояния нет: xm не установлен")
@@ -33,8 +34,20 @@ var (
 // старый документ в текущую структуру не ложится.
 type migration func(doc map[string]any) (map[string]any, error)
 
-// migrations — шаги миграции по исходной версии. Пусто, пока схема одна.
-func migrations() map[int]migration { return map[int]migration{} }
+// migrations — шаги миграции по исходной версии.
+func migrations() map[int]migration { return map[int]migration{1: addSelftest} }
+
+// addSelftest: версия 2 добавляет служебного клиента самопроверки; поле пустое, id создаёт
+// следующая транзакция app (ADR-0032).
+func addSelftest(doc map[string]any) (map[string]any, error) {
+	if _, ok := doc["selftest"]; ok {
+		return nil, errors.New("в версии 1 уже есть selftest")
+	}
+	doc["selftest"] = map[string]any{"id": ""}
+	return doc, nil
+}
+
+var reUUID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 // Store — доступ к состоянию.
 type Store struct {
@@ -45,7 +58,7 @@ type Store struct {
 
 // New возвращает Store поверх файлов порта.
 func New(fs platform.FS) *Store {
-	return &Store{fs: fs, current: schemaVersion, migrations: migrations()}
+	return &Store{fs: fs, current: SchemaVersion, migrations: migrations()}
 }
 
 // Load читает состояние, переводит его на текущую схему и проверяет. Мигрированное состояние
@@ -196,6 +209,8 @@ func (s *Store) check(st State) error {
 		return bad("нет входящих")
 	case st.Profiles == nil:
 		return bad("нет списка профилей")
+	case st.Selftest.ID != "" && !reUUID.MatchString(st.Selftest.ID):
+		return bad("selftest.id не UUID")
 	}
 	for i, in := range st.Inbounds {
 		r := in.Reality

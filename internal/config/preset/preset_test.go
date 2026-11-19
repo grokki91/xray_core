@@ -102,3 +102,70 @@ func TestInboundRejects(t *testing.T) {
 		})
 	}
 }
+
+func clientParams() ClientParams {
+	return ClientParams{
+		Host: "203.0.113.10", Port: 443, ID: "00000000-0000-4000-8000-000000000001",
+		SNI: "example.com", PublicKey: key, ShortID: "0123456789abcdef",
+		Options: map[string]string{"path": "/example"},
+	}
+}
+
+// Исходящий клиента берёт те же значения, что ссылка: fp chrome, flow пустой, mode auto.
+func TestOutboundFields(t *testing.T) {
+	p, _ := Get("reality-xhttp")
+	raw, err := p.Outbound(clientParams())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var o struct {
+		Protocol string
+		Settings struct {
+			Vnext []struct {
+				Address string
+				Port    int
+				Users   []struct{ ID, Encryption, Flow string }
+			}
+		}
+		StreamSettings struct {
+			Network, Security string
+			RealitySettings   struct{ ServerName, Fingerprint, PublicKey, ShortId string }
+			XhttpSettings     struct{ Path, Mode string }
+		}
+	}
+	if err := json.Unmarshal(raw, &o); err != nil {
+		t.Fatal(err)
+	}
+	v, s := o.Settings.Vnext, o.StreamSettings
+	if o.Protocol != "vless" || len(v) != 1 || v[0].Address != "203.0.113.10" || v[0].Port != 443 ||
+		len(v[0].Users) != 1 || v[0].Users[0].ID != clientParams().ID || v[0].Users[0].Encryption != "none" || v[0].Users[0].Flow != "" {
+		t.Errorf("vless: %+v", o)
+	}
+	if s.Network != "xhttp" || s.Security != "reality" || s.RealitySettings.ServerName != "example.com" ||
+		s.RealitySettings.Fingerprint != "chrome" || s.RealitySettings.PublicKey != key || s.RealitySettings.ShortId != "0123456789abcdef" ||
+		s.XhttpSettings.Path != "/example" || s.XhttpSettings.Mode != "auto" {
+		t.Errorf("stream: %+v", s)
+	}
+}
+
+func TestOutboundRejects(t *testing.T) {
+	p, _ := Get("reality-xhttp")
+	for name, mut := range map[string]func(*ClientParams){
+		"id":        func(c *ClientParams) { c.ID = "x" },
+		"публичный": func(c *ClientParams) { c.PublicKey = "x" },
+		"sni":       func(c *ClientParams) { c.SNI = "a b" },
+		"shortId":   func(c *ClientParams) { c.ShortID = "zz" },
+		"адрес":     func(c *ClientParams) { c.Host = "" },
+		"порт":      func(c *ClientParams) { c.Port = 0 },
+		"опция":     func(c *ClientParams) { c.Options = map[string]string{"x": "y"} },
+		"путь":      func(c *ClientParams) { c.Options = map[string]string{"path": "a?b"} },
+	} {
+		c := clientParams()
+		mut(&c)
+		if _, err := p.Outbound(c); err == nil {
+			t.Errorf("%s: принят", name)
+		} else if strings.Contains(err.Error(), key) {
+			t.Errorf("%s: значение в ошибке", name)
+		}
+	}
+}

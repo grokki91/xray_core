@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -30,7 +29,7 @@ func fakeStore(t *testing.T) (*Store, *platform.Fake) {
 
 func golden(t *testing.T) []byte {
 	t.Helper()
-	b, err := os.ReadFile("testdata/state-v1.json")
+	b, err := os.ReadFile("testdata/state-v2.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,12 +81,16 @@ func TestLoadRejects(t *testing.T) {
 		{"нет файла", "", ErrNoState},
 		{"не JSON", "{", ErrSchema},
 		{"нет schema_version", `{"server":{}}`, ErrSchema},
-		{"новее сборки", `{"schema_version":2}`, ErrNewerSchema},
+		{"новее сборки", `{"schema_version":3}`, ErrNewerSchema},
 		{"старее без миграции", `{"schema_version":0}`, ErrSchema},
 		{"неизвестное поле", strings.Replace(cur, `"server"`, `"bogus":1,"server"`, 1), ErrSchema},
 		{"данные после документа", cur + "{}", ErrSchema},
 		{"неверный тип", strings.Replace(cur, `"port": 443`, `"port": "443"`, 1), ErrSchema},
-		{"только версия", `{"schema_version":1}`, ErrSchema},
+		{"только версия", `{"schema_version":2}`, ErrSchema},
+		{"id служебного клиента не UUID", strings.Replace(cur, `"id": ""`, `"id": "x"`, 1), ErrSchema},
+		{"нет selftest", strings.Replace(cur, `"selftest": {
+    "id": ""
+  },`, ``, 1), ErrSchema},
 		{"null вместо списка", strings.Replace(cur, `"short_ids": [
           "0123456789abcdef"
         ]`, `"short_ids": null`, 1), ErrSchema},
@@ -125,36 +128,46 @@ func TestSaveRejectsForeignSchema(t *testing.T) {
 	}
 }
 
-// Механизм миграций: старый файл → Load → Save → новый файл. Схема «версии 2» здесь
-// условная: в версии 1 порт лежал в корне документа, в версии 2 — в server.port.
+// Миграция 1 → 2 (ADR-0032): старый файл → Load → Save → новый файл; служебный клиент остаётся
+// пустым — его заполняет транзакция app.
 func TestMigrationOldFileToNewFile(t *testing.T) {
 	s, f := fakeStore(t)
-	s.current = 2
-	s.migrations = map[int]migration{1: func(doc map[string]any) (map[string]any, error) {
-		server, _ := doc["server"].(map[string]any)
-		if server == nil {
-			return nil, fmt.Errorf("нет server")
-		}
-		server["port"] = doc["port"]
-		delete(doc, "port")
-		return doc, nil
-	}}
-	want := strings.Replace(string(golden(t)), `"schema_version": 1`, `"schema_version": 2`, 1)
-	old := strings.Replace(string(golden(t)), `    "port": 443`+"\n", "", 1)
-	old = strings.Replace(old, `      "domain": ""`+"\n    },", `      "domain": ""`+"\n    }", 1)
-	old = strings.Replace(old, `"schema_version": 1,`, `"schema_version": 1, "port": 443,`, 1)
-	put(t, f, []byte(old))
-
+	old, err := os.ReadFile("testdata/state-v1.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	put(t, f, old)
 	st, err := s.Load()
 	if err != nil {
 		t.Fatal(err)
+	}
+	if st.SchemaVersion != 2 || st.Selftest.ID != "" {
+		t.Fatalf("после миграции: версия %d, selftest %q", st.SchemaVersion, st.Selftest.ID)
 	}
 	if err := s.Save(st); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := f.FS().ReadFile(StatePath)
-	if string(got) != want {
+	if string(got) != string(golden(t)) {
 		t.Fatalf("после миграции:\n%s", got)
+	}
+}
+
+// Служебный клиент с идентификатором сохраняется и читается без потерь.
+func TestSelftestIDRoundTrip(t *testing.T) {
+	s, f := fakeStore(t)
+	const id = "00000000-0000-4000-8000-0000000000aa"
+	put(t, f, []byte(strings.Replace(string(golden(t)), `"id": ""`, `"id": "`+id+`"`, 1)))
+	st, err := s.Load()
+	if err != nil || st.Selftest.ID != id {
+		t.Fatalf("загрузка: %q, %v", st.Selftest.ID, err)
+	}
+	if err := s.Save(st); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := f.FS().ReadFile(StatePath)
+	if !strings.Contains(string(got), id) {
+		t.Fatalf("id потерян при записи:\n%s", got)
 	}
 }
 

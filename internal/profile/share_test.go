@@ -12,7 +12,7 @@ import (
 // shareState — состояние с профилем phone и тремя адресами; значения фиктивные.
 func shareState() store.State {
 	return store.State{
-		SchemaVersion: 1,
+		SchemaVersion: store.SchemaVersion,
 		Server: store.Server{
 			Addresses: store.Addresses{IPv4: "192.0.2.10", IPv6: "2001:db8::10", Domain: "vpn.example.com"},
 			Port:      8443,

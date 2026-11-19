@@ -10,6 +10,7 @@ type State struct {
 	Server        Server    `json:"server"`
 	Inbounds      []Inbound `json:"inbounds"`
 	Profiles      []Profile `json:"profiles"`
+	Selftest      Selftest  `json:"selftest"`
 	DNS           DNS       `json:"dns"`
 	Core          Core      `json:"core"`
 	Applied       Applied   `json:"applied"`
@@ -47,6 +48,12 @@ type Profile struct {
 	ID      string    `json:"id"`
 	Created time.Time `json:"created"`
 	Enabled bool      `json:"enabled"`
+}
+
+// Selftest — служебный клиент самопроверки (ADR-0032): не профиль, в списки и экспорт не
+// попадает. Пустой id — клиента ещё нет; его создаёт транзакция app.
+type Selftest struct {
+	ID string `json:"id"`
 }
 
 type DNS struct {

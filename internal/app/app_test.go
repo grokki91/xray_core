@@ -207,7 +207,7 @@ func ctx(t *testing.T) context.Context {
 
 func stateOf(profiles ...string) store.State {
 	st := store.State{
-		SchemaVersion: 1,
+		SchemaVersion: store.SchemaVersion,
 		Server:        store.Server{Port: port, Addresses: store.Addresses{IPv4: "203.0.113.10"}},
 		Inbounds: []store.Inbound{{
 			Preset: "reality-xhttp",
@@ -278,6 +278,34 @@ func TestApplyCleanInstall(t *testing.T) {
 	// Снимок перед транзакцией лежит и читается.
 	if _, err := os.Stat(s.f.Path(backup.Dir + "/20261116T120000Z-install.tar.gz")); err != nil {
 		t.Fatalf("снимка нет: %v", err)
+	}
+}
+
+// Служебный клиент самопроверки (ADR-0032): транзакция с пустым selftest.id создаёт его, он
+// попадает в конфигурацию, но не в профили; следующая транзакция его не меняет.
+func TestApplyCreatesSelftestClientOnce(t *testing.T) {
+	s := newSys(t)
+	if err := s.app.Apply(ctx(t), Change{Reason: "install", State: stateOf("phone"), Unit: unit1}); err != nil {
+		t.Fatal(err)
+	}
+	st, err := s.app.s.Store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := st.Selftest.ID
+	if id == "" || len(st.Profiles) != 1 {
+		t.Fatalf("selftest.id %q, профилей %d", id, len(st.Profiles))
+	}
+	if cfg := string(s.snap(t).config); !strings.Contains(cfg, id) {
+		t.Fatalf("служебного клиента нет в конфигурации:\n%s", cfg)
+	}
+	edit := func(st store.State) (store.State, error) { st.Profiles[0].Name = "tablet"; return st, nil }
+	if err := s.app.Apply(ctx(t), Change{Reason: "rename", Edit: edit}); err != nil {
+		t.Fatal(err)
+	}
+	again, err := s.app.s.Store.Load()
+	if err != nil || again.Selftest.ID != id {
+		t.Fatalf("после второй транзакции selftest.id %q, был %q: %v", again.Selftest.ID, id, err)
 	}
 }
 

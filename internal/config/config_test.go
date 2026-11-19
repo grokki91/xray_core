@@ -31,7 +31,7 @@ func ctx(t *testing.T) context.Context {
 // state — состояние с фиктивными данными (docs/security/secrets.md §4).
 func state() store.State {
 	return store.State{
-		SchemaVersion: 1,
+		SchemaVersion: store.SchemaVersion,
 		Server:        store.Server{Port: 443},
 		Inbounds: []store.Inbound{{
 			Preset: "reality-xhttp",
@@ -259,5 +259,82 @@ func TestStageUnstageRemove(t *testing.T) {
 	}
 	if err := m.Remove(); err != nil {
 		t.Fatalf("Remove без файла: %v", err)
+	}
+}
+
+const idSelftest = "00000000-0000-4000-8000-0000000000aa"
+
+// Служебный клиент — в клиентах сервера, даже когда профилей нет; пустой id — клиента нет.
+func TestRenderIncludesSelftestClient(t *testing.T) {
+	st := state()
+	st.Selftest.ID = idSelftest
+	out := string(render(t, st).Data)
+	if !strings.Contains(out, idSelftest) || !strings.Contains(out, idPhone) {
+		t.Fatalf("служебный клиент и профиль должны быть в clients:\n%s", out)
+	}
+	st.Profiles = nil
+	if !strings.Contains(string(render(t, st).Data), idSelftest) {
+		t.Fatal("без профилей служебного клиента нет")
+	}
+}
+
+func clientState() store.State {
+	st := state()
+	st.Server.Addresses = store.Addresses{IPv4: "203.0.113.10", IPv6: "2001:db8::10"}
+	st.Selftest.ID = idSelftest
+	return st
+}
+
+func TestRenderClientMatchesGolden(t *testing.T) {
+	r, err := New(nil).RenderClient(clientState(), idSelftest, "/run/xm/selftest.sock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.ReadFile("testdata/client.golden.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(r.Data, want) {
+		t.Fatalf("клиент расходится с эталоном:\n%s", r.Data)
+	}
+	again, _ := New(nil).RenderClient(clientState(), idSelftest, "/run/xm/selftest.sock")
+	if again.SHA256 != r.SHA256 {
+		t.Fatal("одно состояние дало разные файлы")
+	}
+}
+
+// Адрес сервера — первый из порядка «домен, IPv4, IPv6», как у ссылки по умолчанию.
+func TestRenderClientAddressOrder(t *testing.T) {
+	st := clientState()
+	st.Server.Addresses = store.Addresses{IPv6: "2001:db8::10"}
+	r, err := New(nil).RenderClient(st, idSelftest, "/run/xm/selftest.sock")
+	if err != nil || !strings.Contains(string(r.Data), `"address": "2001:db8::10"`) {
+		t.Fatalf("только IPv6: %v\n%s", err, r.Data)
+	}
+	st.Server.Addresses = store.Addresses{IPv4: "203.0.113.10", Domain: "vpn.example.com"}
+	r, err = New(nil).RenderClient(st, idSelftest, "/run/xm/selftest.sock")
+	if err != nil || !strings.Contains(string(r.Data), `"address": "vpn.example.com"`) {
+		t.Fatalf("домен первый: %v\n%s", err, r.Data)
+	}
+}
+
+func TestRenderClientRejects(t *testing.T) {
+	for name, c := range map[string]struct {
+		mut      func(*store.State)
+		id, sock string
+	}{
+		"id пуст":         {func(*store.State) {}, "", "/run/xm/s.sock"},
+		"id не UUID":      {func(*store.State) {}, "x", "/run/xm/s.sock"},
+		"сокет относит.":  {func(*store.State) {}, idSelftest, "s.sock"},
+		"сокет не очищ.":  {func(*store.State) {}, idSelftest, "/run/xm/../s.sock"},
+		"сокет с запятой": {func(*store.State) {}, idSelftest, "/run/xm/s.sock,0777"},
+		"нет адреса":      {func(s *store.State) { s.Server.Addresses = store.Addresses{} }, idSelftest, "/run/xm/s.sock"},
+		"нет входящего":   {func(s *store.State) { s.Inbounds = nil }, idSelftest, "/run/xm/s.sock"},
+	} {
+		st := clientState()
+		c.mut(&st)
+		if _, err := New(nil).RenderClient(st, c.id, c.sock); !errorsIs(err, ErrState) {
+			t.Errorf("%s: %v, нужна ErrState", name, err)
+		}
 	}
 }
