@@ -34,11 +34,12 @@ type Fake struct {
 
 // Call — записанный вызов: операция и путь, имя пользователя или программа с аргументами.
 type Call struct {
-	Op      string // read, write, mkdir, symlink, readlink, lock, exec, get, user
+	Op      string // read, write, mkdir, symlink, readlink, lock, exec, start, get, user
 	Path    string // путь файла, имя программы или адрес
 	Version string // версия xray
 	Args    []string
-	Auth    bool // get: у первого запроса был токен
+	Auth    bool   // get: у первого запроса был токен
+	Proxy   string // get: сокет прокси
 }
 
 // NewFake возвращает поддельную реализацию с файлами под root и часами, стоящими на now.
@@ -80,6 +81,13 @@ func (f *Fake) Serve(url string, body []byte) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.routes[url] = fakeRoute{body: slices.Clone(body)}
+}
+
+// ServeStatus задаёт ответ с кодом status и телом на адрес.
+func (f *Fake) ServeStatus(url string, status int, body []byte) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.routes[url] = fakeRoute{body: slices.Clone(body), status: status}
 }
 
 // Redirect задаёт перенаправление с адреса from на to.
@@ -164,17 +172,9 @@ func (f *Fake) Exec(ctx context.Context, c Command) (Result, error) {
 	h, underRoot := f.handlers[c.Program], f.underRoot[c.Program]
 	f.mu.Unlock()
 	if underRoot {
-		args := make([]string, len(c.Args))
-		for i, a := range c.Args {
-			if strings.HasPrefix(a, "/") {
-				// Путь — по правилу FS: абсолютный и очищенный, иначе «/../x» ушёл бы из root.
-				p, err := f.files.real(a)
-				if err != nil {
-					return Result{}, err
-				}
-				a = p
-			}
-			args[i] = a
+		args, err := f.rootArgs(c.Args)
+		if err != nil {
+			return Result{}, err
 		}
 		return runProcess(ctx, f.files.root+path, c.Program, args, c.Stdin)
 	}
@@ -182,6 +182,47 @@ func (f *Fake) Exec(ctx context.Context, c Command) (Result, error) {
 		return Result{}, fmt.Errorf("platform.Fake: нет ответа для %q", c.Program)
 	}
 	return h(c)
+}
+
+// rootArgs — аргументы запуска под root: аргумент с ведущим «/» получает префикс root. Путь — по
+// правилу FS: абсолютный и очищенный, иначе «/../x» ушёл бы из root.
+func (f *Fake) rootArgs(in []string) ([]string, error) {
+	args := make([]string, len(in))
+	for i, a := range in {
+		if strings.HasPrefix(a, "/") {
+			p, err := f.files.real(a)
+			if err != nil {
+				return nil, err
+			}
+			a = p
+		}
+		args[i] = a
+	}
+	return args, nil
+}
+
+// Start запускает в фоне настоящий файл программы под root, как RunUnderRoot; без RunUnderRoot —
+// ошибка: у фонового процесса нет обработчика.
+func (f *Fake) Start(ctx context.Context, c Command) (Process, error) {
+	path, err := checkCommand(ctx, f.programs, c)
+	if err != nil {
+		return nil, err
+	}
+	if err := f.files.checkBinary(c, path); err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	f.calls = append(f.calls, Call{Op: "start", Path: c.Program, Version: c.Version, Args: slices.Clone(c.Args)})
+	underRoot := f.underRoot[c.Program]
+	f.mu.Unlock()
+	if !underRoot {
+		return nil, fmt.Errorf("platform.Fake: Start %q без RunUnderRoot", c.Program)
+	}
+	args, err := f.rootArgs(c.Args)
+	if err != nil {
+		return nil, err
+	}
+	return startProcess(ctx, f.files.root+path, c.Program, args, c.Stdin)
 }
 
 // Calls возвращает записанные вызовы по порядку.

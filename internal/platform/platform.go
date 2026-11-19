@@ -15,6 +15,10 @@ type Platform interface {
 	// Exec запускает программу из закрытого списка без оболочки. Ненулевой код выхода — не
 	// ошибка: он в Result.ExitCode. Контекст обязан нести срок.
 	Exec(ctx context.Context, c Command) (Result, error)
+	// Start запускает программу из закрытого списка в фоне — правила Exec: без оболочки, свои
+	// группа процессов и окружение, срок в контексте обязателен; вывод отбрасывается, Stdin
+	// подаётся целиком и закрывается. Процесс завершается по сроку контекста или Process.Stop.
+	Start(ctx context.Context, c Command) (Process, error)
 	FS() FS
 	Net() Net
 	Users() Users
@@ -31,6 +35,15 @@ type Command struct {
 	Version string
 	Args    []string
 	Stdin   []byte
+}
+
+// Process — запущенный в фоне процесс.
+type Process interface {
+	// Done закрывается, когда процесс завершился — сам, по сроку контекста или по Stop.
+	Done() <-chan struct{}
+	// Stop убивает группу процессов и ждёт выхода; повторный вызов безопасен. Потомки, пережившие
+	// главный процесс, не убиваются: у программ закрытого списка их нет.
+	Stop()
 }
 
 // CoreDir — каталог версий Xray: <CoreDir>/<версия>/xray и ссылка <CoreDir>/current
@@ -92,7 +105,9 @@ type Net interface {
 	// ErrTooLarge; не больше 5 перенаправлений; прокси — из окружения (HTTPS_PROXY), как у
 	// http.DefaultTransport: список сверяется с узлом назначения, TLS — до него; контекст
 	// обязан нести срок. Непустой r.Token — заголовок Authorization: Bearer только у первого
-	// запроса.
+	// запроса. Непустой r.Proxy — путь сокета Unix с HTTP-прокси (CONNECT): запрос идёт через
+	// него, окружение не действует; путь не абсолютный или не очищенный — ErrPath. Ответ с кодом,
+	// не равным r.Status (по умолчанию 200), — ошибка.
 	Get(ctx context.Context, r Request) ([]byte, error)
 	// Listening сообщает, слушает ли хост TCP-порт на любом адресе (IPv4 или IPv6): по таблицам
 	// сокетов ядра, без соединения. Новых портов не открывает.
@@ -101,12 +116,14 @@ type Net interface {
 
 // Request — загрузка: адрес, закрытый список узлов потребителя и предел тела в байтах.
 // Token — токен Bearer: уходит только в первый запрос, в перенаправления — нет (ADR-0031);
-// формат проверяет потребитель.
+// формат проверяет потребитель. Proxy и Status — ADR-0032.
 type Request struct {
-	URL   string
-	Hosts []string
-	Max   int64
-	Token string
+	URL    string
+	Hosts  []string
+	Max    int64
+	Token  string
+	Proxy  string
+	Status int
 }
 
 // Clock — время.

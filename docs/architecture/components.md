@@ -31,9 +31,7 @@
 ```go
 type Platform interface {
     Exec(ctx context.Context, c Command) (Result, error) // Command{Program, Args, Stdin}; без оболочки
-    // фаза 3, шаг 7 ([ADR-0032](../adr/0032-selftest-client-and-l3-target.md)): процесс в фоне; срок в контексте обязателен,
-    // группа процессов и пределы — как у Exec; остановка по контексту или Process.Stop
-    // Start(ctx context.Context, c Command) (Process, error)
+    Start(ctx context.Context, c Command) (Process, error) // процесс в фоне ([ADR-0032](../adr/0032-selftest-client-and-l3-target.md)); Process{Done, Stop}
     FS() FS            // ReadFile, WriteFile (temp + fchown + fchmod + fsync + rename), Mkdir, ReadDir, Remove, Symlink, Readlink, Lock (flock)
     Systemd() Systemd  // только xray.service: Running, Reload, Enable/Disable, Start/Stop/Restart, Status
     Net() Net          // Get по HTTPS, Listening — порт слушается (фаза 2); интерфейсы, маршруты — фаза 4
@@ -74,9 +72,16 @@ type Platform interface {
   `ErrTooLarge`; в ошибке — только узел, без параметров адреса; прокси — из окружения
   (`HTTPS_PROXY`), список сверяется с узлом назначения; срок обязателен; непустой `Token` —
   заголовок `Authorization: Bearer` только у первого запроса, перенаправления — без него
-  ([ADR-0031](../adr/0031-github-api-token.md)); подделка отмечает его в `Call.Auth`. Поддельная сеть отвечает заданными телами и перенаправлениями
-  (`Serve`, `Redirect`) по тем же правилам. Фаза 3, шаг 7 ([ADR-0032](../adr/0032-selftest-client-and-l3-target.md)): поля `Proxy` (сокет
-  Unix; окружение тогда не действует) и ожидаемый код ответа.
+  ([ADR-0031](../adr/0031-github-api-token.md)); подделка отмечает его в `Call.Auth`. Поддельная сеть отвечает заданными телами, кодами и перенаправлениями
+  (`Serve`, `ServeStatus`, `Redirect`) по тем же правилам. Поля `Request` ([ADR-0032](../adr/0032-selftest-client-and-l3-target.md)):
+  `Proxy` — путь сокета Unix с HTTP-прокси (CONNECT; окружение тогда не действует; не абсолютный
+  или не очищенный путь — `ErrPath`; подделка записывает его в `Call.Proxy`); `Status` — ожидаемый
+  код ответа, по умолчанию 200, иной — ошибка.
+- `Start(ctx, Command)` — фоновый процесс по правилам `Exec` (закрытый список, без оболочки,
+  окружение, своя группа, срок обязателен); `Stdin` подаётся целиком и закрывается, вывод
+  отбрасывается. `Process.Done()` закрывается при завершении (сам, по сроку, по `Stop`);
+  `Process.Stop()` убивает группу и ждёт, повтор безопасен. Подделка запускает настоящий файл под
+  корнем и только после `RunUnderRoot`, иначе ошибка; вызов записывается как `start`.
 - `Net.Listening(ctx, port)` — слушает ли хост TCP-порт: строки `LISTEN` в `/proc/net/tcp` и `tcp6`
   (нет `tcp6` на хосте без IPv6 — не ошибка); соединений не открывает. `Clock.Sleep(ctx, d)` — ожидание
   до конца `ctx`; у подделки сдвигает часы ([ADR-0023](../adr/0023-transaction-control-and-rollback-scope.md)).

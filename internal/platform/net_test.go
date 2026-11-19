@@ -5,10 +5,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -216,5 +220,114 @@ func TestNetToken(t *testing.T) {
 	calls := fake.Calls()
 	if len(calls) != 2 || !calls[0].Auth || calls[1].Auth {
 		t.Errorf("подделка: %+v", calls)
+	}
+}
+
+// connectProxy — HTTP-прокси на сокете Unix: туннелирует CONNECT и считает их.
+func connectProxy(t *testing.T) (socket string, connects *atomic.Int32) {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "xm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	socket = dir + "/p.sock"
+	ln, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connects = new(atomic.Int32)
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodConnect {
+			http.Error(w, "только CONNECT", http.StatusMethodNotAllowed)
+			return
+		}
+		connects.Add(1)
+		dst, err := net.Dial("tcp", r.Host)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		src, _, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			dst.Close()
+			return
+		}
+		go func() { io.Copy(dst, src); dst.Close() }()
+		io.Copy(src, dst)
+		src.Close()
+	})}
+	go srv.Serve(ln)
+	t.Cleanup(func() { srv.Close() })
+	return socket, connects
+}
+
+// Proxy ведёт запрос через HTTP-прокси на сокете Unix (окружение не действует), а ожидаемый код
+// ответа — не только 200: цель самопроверки отвечает 204 без тела.
+func TestNetProxyAndStatus(t *testing.T) {
+	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:1") // окружение с Proxy не действует
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/204" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.Write([]byte("тело"))
+	}))
+	t.Cleanup(srv.Close)
+	host := strings.TrimPrefix(srv.URL, "https://")
+	real := newReal(nil, srv.Client().Transport).Net()
+	socket, connects := connectProxy(t)
+	ctx := deadline(t, 5*time.Second)
+	get := func(path string, status int, proxy string) ([]byte, error) {
+		return real.Get(ctx, Request{URL: srv.URL + path, Hosts: []string{host}, Max: 1 << 10, Proxy: proxy, Status: status})
+	}
+
+	if got, err := get("/204", 204, socket); err != nil || len(got) != 0 {
+		t.Errorf("204 при ожидании 204: %q, %v", got, err)
+	}
+	if connects.Load() != 1 {
+		t.Errorf("запрос не прошёл через прокси: CONNECT %d", connects.Load())
+	}
+	if got, err := get("/ok", 0, socket); err != nil || string(got) != "тело" {
+		t.Errorf("код по умолчанию 200: %q, %v", got, err)
+	}
+	if _, err := get("/204", 0, socket); err == nil {
+		t.Error("204 принят при ожидании 200")
+	}
+	if _, err := get("/ok", 204, socket); err == nil {
+		t.Error("200 принят при ожидании 204")
+	}
+	if _, err := get("/ok", 0, "p.sock"); !errors.Is(err, ErrPath) {
+		t.Errorf("относительный сокет: %v, нужно ErrPath", err)
+	}
+	if _, err := get("/ok", 0, "/run/xm/../x.sock"); !errors.Is(err, ErrPath) {
+		t.Errorf("неочищенный сокет: %v, нужно ErrPath", err)
+	}
+	if _, err := get("/ok", 0, filepath.Dir(socket)+"/нет.sock"); err == nil {
+		t.Error("сокета нет, а запрос прошёл")
+	}
+
+	// Подделка: те же предусловия, код ответа и запись Proxy в вызове.
+	fake := newFake(t.TempDir(), time.Time{}, nil)
+	fake.ServeStatus("https://own.test/204", 204, nil)
+	fake.Serve("https://own.test/ok", netBody)
+	fg := func(path string, status int, proxy string) ([]byte, error) {
+		return fake.Net().Get(ctx, Request{URL: "https://own.test" + path, Hosts: []string{"own.test"}, Max: 1 << 10, Proxy: proxy, Status: status})
+	}
+	if got, err := fg("/204", 204, "/run/xm/selftest.sock"); err != nil || len(got) != 0 {
+		t.Errorf("подделка 204: %q, %v", got, err)
+	}
+	if _, err := fg("/ok", 204, "/run/xm/selftest.sock"); err == nil {
+		t.Error("подделка: 200 принят при ожидании 204")
+	}
+	if _, err := fg("/204", 0, "/run/xm/selftest.sock"); err == nil {
+		t.Error("подделка: 204 принят при ожидании 200")
+	}
+	if _, err := fg("/ok", 0, "p.sock"); !errors.Is(err, ErrPath) {
+		t.Errorf("подделка, относительный сокет: %v, нужно ErrPath", err)
+	}
+	if calls := fake.Calls(); len(calls) == 0 || calls[0].Proxy != "/run/xm/selftest.sock" {
+		t.Errorf("Proxy не записан в вызове: %+v", calls)
 	}
 }
