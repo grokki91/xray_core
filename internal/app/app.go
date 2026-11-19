@@ -229,6 +229,17 @@ func (a *App) control(ctx context.Context, port int) error {
 	if err := svc.CheckRunning(rctx, port); err != nil {
 		return err
 	}
+	r, err := a.controlReport(ctx, port)
+	if err != nil {
+		return err
+	}
+	return controlErr(r)
+}
+
+// controlReport прогоняет набор control движка diag. Тот же прогон — вердикт `xm status`
+// (ADR-0024): одна реализация проверок. Свой срок ControlTimeout.
+func (a *App) controlReport(ctx context.Context, port int) (diag.Report, error) {
+	svc := a.s.Server.Service()
 	ctx, cancelSet := context.WithTimeout(ctx, a.s.ControlTimeout)
 	defer cancelSet()
 	e, err := diag.NewControl(diag.ControlDeps{
@@ -244,13 +255,13 @@ func (a *App) control(ctx context.Context, port int) error {
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("%w: %w", server.ErrControl, err)
+		return diag.Report{}, fmt.Errorf("%w: %w", server.ErrControl, err)
 	}
 	r, err := e.Run(ctx, diag.SetControl)
 	if err != nil {
-		return fmt.Errorf("%w: %w", server.ErrControl, err)
+		return diag.Report{}, fmt.Errorf("%w: %w", server.ErrControl, err)
 	}
-	return controlErr(r)
+	return r, nil
 }
 
 // controlErr — ошибка по отчёту набора control; ok — nil. Текст — названия и причины проверок,

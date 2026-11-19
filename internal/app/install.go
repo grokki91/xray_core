@@ -11,6 +11,7 @@ import (
 
 	"github.com/grokki91/xray_core/internal/contract"
 	"github.com/grokki91/xray_core/internal/core"
+	"github.com/grokki91/xray_core/internal/diag"
 	"github.com/grokki91/xray_core/internal/server"
 	"github.com/grokki91/xray_core/internal/store"
 	"github.com/grokki91/xray_core/internal/update"
@@ -75,10 +76,11 @@ type InstallOptions struct {
 
 // InstallResult — итог установки; секретов в нём нет. Ссылки первого профиля — ProfileShow.
 type InstallResult struct {
-	Xray    string `json:"xray"`
-	Address string `json:"address"`
-	Port    int    `json:"port"`
-	Profile string `json:"profile"` // имя первого профиля
+	Xray    string          `json:"xray"`
+	Address string          `json:"address"`
+	Port    int             `json:"port"`
+	Profile string          `json:"profile"` // имя первого профиля
+	Health  contract.Health `json:"health"`
 }
 
 // Releases — источник релизов Xray; настоящий — update.GitHub.
@@ -210,7 +212,11 @@ func (a *App) Install(ctx context.Context, o InstallOptions) (InstallResult, err
 	if err := a.Apply(ctx, Change{Reason: "install", State: st, Unit: &spec, Core: version, Create: true}); err != nil {
 		return InstallResult{}, err
 	}
-	return InstallResult{Xray: string(version), Address: o.Address, Port: o.Port, Profile: first.Name}, nil
+	h, err := a.health(ctx, o.Port)
+	if err != nil {
+		return InstallResult{}, err
+	}
+	return InstallResult{Xray: string(version), Address: o.Address, Port: o.Port, Profile: first.Name, Health: h}, nil
 }
 
 // installed читает состояние: есть ли установка.
@@ -289,6 +295,10 @@ func (a *App) Status(ctx context.Context) (contract.Status, error) {
 	if err != nil {
 		return out, err
 	}
+	h, err := a.health(ctx, st.Server.Port)
+	if err != nil {
+		return out, err
+	}
 	a4 := st.Server.Addresses
 	clients := []contract.ClientSupport{}
 	for _, c := range a.s.Profile.Clients(st) {
@@ -303,7 +313,37 @@ func (a *App) Status(ctx context.Context) (contract.Status, error) {
 		Drift:     drift,
 		Profiles:  len(st.Profiles),
 		Clients:   clients,
+		Health:    h,
 	}, nil
+}
+
+// unchecked — что вердикт ok не измеряет: набор control смотрит только сам сервер (ADR-0024).
+const unchecked = "доступность порта снаружи и самопроверка подключения не проверены"
+
+// health — вердикт по набору control: вердикт, первопричина и действие; при ok — что не проверено.
+func (a *App) health(ctx context.Context, port int) (contract.Health, error) {
+	r, err := a.controlReport(ctx, port)
+	if err != nil {
+		return contract.Health{}, err
+	}
+	h := contract.Health{Verdict: string(r.Health)}
+	if r.Health == diag.HealthOK {
+		h.Unchecked = unchecked
+		return h, nil
+	}
+	if f := r.Cause(); f != nil {
+		h.Cause, h.Action = f.Title, strings.Join(f.Actions, "; ")
+		return h, nil
+	}
+	// unknown: проверка набора не измерила — называем первую такую.
+	for _, o := range r.Observations {
+		if o.Status == diag.StatusSkip || o.Status == diag.StatusError {
+			h.Cause = fmt.Sprintf("проверка %s не измерила: %s", o.Check, o.Reason)
+			h.Action = "повторите xm status; если повторяется — xm restart"
+			break
+		}
+	}
+	return h, nil
 }
 
 // needRoot — состояние и systemd доступны только root.

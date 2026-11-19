@@ -17,6 +17,7 @@ import (
 // fakeApp запоминает, что у него просили, и отвечает заданным.
 type fakeApp struct {
 	opts   app.InstallOptions
+	health contract.Health
 	action app.Action
 	status contract.Status
 	err    error
@@ -30,7 +31,7 @@ type fakeApp struct {
 
 func (f *fakeApp) Install(_ context.Context, o app.InstallOptions) (app.InstallResult, error) {
 	f.opts = o
-	return app.InstallResult{Xray: "26.11.9", Address: o.Address, Port: o.Port, Profile: "profile-1"}, f.err
+	return app.InstallResult{Xray: "26.11.9", Address: o.Address, Port: o.Port, Profile: "profile-1", Health: f.health}, f.err
 }
 
 func (f *fakeApp) ProfileAdd(_ context.Context, name string, o app.ShareOptions) (app.ProfileView, error) {
@@ -129,6 +130,7 @@ var installed = contract.Status{
 	Addresses: contract.ServerAddress{IPv4: "203.0.113.10"},
 	Port:      443,
 	Profiles:  2,
+	Health:    contract.Health{Verdict: "ok", Unchecked: "доступность порта снаружи и самопроверка не проверены"},
 	Clients: []contract.ClientSupport{
 		{Name: "v2rayN", Works: true, Condition: "ядро Xray клиента не старше v25.7.26"},
 		{Name: "Hiddify 4.x", Reason: "вырезает X25519MLKEM768"},
@@ -304,5 +306,26 @@ func TestProfileFailures(t *testing.T) {
 	}
 	if code, _, _ := runWith(&fakeApp{err: fmt.Errorf("%w: имя", app.ErrInput)}, "show", "Bad"); code != exitUsage {
 		t.Fatalf("код %d", code)
+	}
+}
+
+// Status и install заканчиваются строкой вердикта: ok — с тем, что не проверено; иначе — причина
+// и действие (ADR-0024).
+func TestVerdictLineEndsStatusAndInstall(t *testing.T) {
+	down := contract.Health{Verdict: "down", Cause: "служба xray не активна", Action: "xm start"}
+	st := installed
+	st.Health = down
+	_, stdout, _ := runWith(&fakeApp{status: st}, "status")
+	last := strings.Split(strings.TrimSpace(stdout), "\n")
+	if got := last[len(last)-1]; got != "Состояние: не работает. Причина: служба xray не активна. Что делать: xm start." {
+		t.Fatalf("status: %q", got)
+	}
+	_, stdout, _ = runWith(&fakeApp{status: installed}, "status")
+	if !strings.Contains(stdout, "Состояние: работает. Не проверено: доступность порта снаружи") {
+		t.Fatalf("status ok:\n%s", stdout)
+	}
+	_, stdout, _ = runWith(&fakeApp{view: phone, health: down}, "install", "--sni", "example.com", "--address", "203.0.113.10")
+	if !strings.HasSuffix(strings.TrimSpace(stdout), "Что делать: xm start.") {
+		t.Fatalf("install заканчивается не вердиктом:\n%s", stdout)
 	}
 }
