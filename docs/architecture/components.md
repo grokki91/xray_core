@@ -443,12 +443,13 @@ type Vantage interface { // точка наблюдения: сейчас local;
   реализации от `server`, `core`, `config`, `profile` подставляет `app` (ADR-0024); проверки —
   файлы пакета `diag` ([ADR-0030](../adr/0030-diag-checks-in-package.md)).
 - Самопроверка `reach.selftest` ([ADR-0032](../adr/0032-selftest-client-and-l3-target.md)): входит в
-  `control`, требует `reach.listen`. Прямой `GET` тестового адреса `cp.cloudflare.com/generate_204`
+  `control`, только если заданы измерения (`ControlDeps.Selftest`, иначе набор из трёх проверок:
+  контроль после отката, `xm status`, [ADR-0033](../adr/0033-selftest-only-in-change-control.md)); требует `reach.listen`. Прямой `GET` тестового адреса `cp.cloudflare.com/generate_204`
   с сервера: не прошёл — `skip` (не измерено, вердикт `unknown`, не вывод о фильтрации); прошёл —
   удаляется прежний сокет, запускается клиент из состояния (`SelftestDeps.Start`), и `GET` через его
   сокет (`Net.Get` с `Proxy`, код 204) повторяется каждые 200 мс до 15 с; `ok` — ответ получен;
   `fail` — окно вышло (факт `reach.selftest.failed`, `down`); `error` — клиент не запустился или
-  завершился, сокет не убрать, срок контроля вышел. Клиент останавливается, сокет убирается.
+  завершился, сокет не убрать, срок контроля вышел. Транзакцию откатывают `fail` и `error`, а `skip` — нет. Клиент останавливается, сокет убирается.
   Измерения — `SelftestDeps{Host, Socket, Start}`: `Host` (`FS`, `Net`, `Clock`) и `Process` объявлены
   в `diag`, чтобы `app` не импортировал `platform`; подставляет `cmd/xm`.
 - Время наблюдения и точка наблюдения (`vantage`) войдут в отчёт вместе со схемой `diag-report`;
@@ -603,9 +604,10 @@ type App interface {
   `control` движка `diag` — `xray.service.active`, `reach.listen` (требует службу), `xray.config.valid`
   (`xray run -test` действующей версией на действующей конфигурации) и `reach.selftest` (клиент из
   состояния — `config.RenderClient`, `core.StartClient`; `app` читает состояние с диска: к контролю
-  оно записано, после отката восстановлено; `Services.Host` — платформа для измерений). Любой исход набора, кроме `ok`, —
-  `server.ErrControl` с названием первопричины и действием, без значений измерений. Тот же контроль
-  идёт после отката: не прошёл — `ErrRollbackFailed`. Движок собирается в `app` из менеджеров, порт —
+  оно записано, после отката восстановлено; `Services.Host` — платформа для измерений). Исход `fail` или `error` любой проверки набора —
+  `server.ErrControl` с названием первопричины и действием, без значений измерений. Контроль идёт и после отката,
+  но набором без самопроверки: не прошёл — `ErrRollbackFailed`. Самопроверка — только в контроле
+  изменения ([ADR-0033](../adr/0033-selftest-only-in-change-control.md)); `xm status` и вердикт в `xm install` её не запускают. Движок собирается в `app` из менеджеров, порт —
   из состояния ([ADR-0030](../adr/0030-diag-checks-in-package.md)).
   Ошибки: `ErrRolledBack` (код 1) и `ErrRollbackFailed` (код 5). `Recover` откатывает незавершённую
   транзакцию при следующем запуске.

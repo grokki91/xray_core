@@ -350,7 +350,6 @@ func TestApplySelftestFailureRollsBack(t *testing.T) {
 	for name, tune := range map[string]func(*sys){
 		"запрос через сервер не прошёл": func(s *sys) { s.f.ServeVia(selftestURL, 502, nil) },
 		"клиент не запустился":          func(s *sys) { s.startErr = errors.New("нет бинарника") },
-		"адрес недоступен с сервера":    func(s *sys) { s.f.ServeStatus(selftestURL, 500, nil) },
 	} {
 		t.Run(name, func(t *testing.T) {
 			s := newSys(t)
@@ -364,6 +363,51 @@ func TestApplySelftestFailureRollsBack(t *testing.T) {
 				t.Fatalf("после отката система не совпала с исходной:\n%+v\n%+v", before, after)
 			}
 		})
+	}
+}
+
+// ADR-0033: адрес недоступен с самого сервера — самопроверка skip, и это не провал контроля.
+func TestApplySelftestSkipDoesNotRollBack(t *testing.T) {
+	s := newSys(t)
+	s.f.ServeStatus(selftestURL, 500, nil)
+	if err := s.app.Apply(ctx(t), Change{Reason: "install", State: stateOf("phone"), Unit: unit1}); err != nil {
+		t.Fatalf("skip самопроверки откатил транзакцию: %v", err)
+	}
+	if len(s.started) != 0 {
+		t.Errorf("клиент запущен при недоступном адресе: %d", len(s.started))
+	}
+}
+
+// ADR-0033: самопроверка, падающая независимо от изменения, не делает откат неудачным, а
+// контроль после отката и xm status её не запускают.
+func TestSelftestOnlyInChangeControl(t *testing.T) {
+	s := newSys(t)
+	if err := s.app.Apply(ctx(t), Change{Reason: "install", State: stateOf("phone"), Unit: unit1}); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.started) != 1 {
+		t.Fatalf("после установки клиент запущен %d раз", len(s.started))
+	}
+	if _, err := s.app.Status(ctx(t)); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.started) != 1 {
+		t.Errorf("xm status запустил клиент самопроверки")
+	}
+	s.f.ServeVia(selftestURL, 502, nil) // тоннель не работает независимо от изменения
+	edit := func(st store.State) (store.State, error) { st.Profiles[0].Name = "tablet"; return st, nil }
+	err := s.app.Apply(ctx(t), Change{Reason: "rename", Edit: edit})
+	if !errors.Is(err, ErrRolledBack) || errors.Is(err, ErrRollbackFailed) {
+		t.Fatalf("err = %v, нужен ErrRolledBack: контроль отката без самопроверки", err)
+	}
+	if len(s.started) != 2 {
+		t.Errorf("клиент запущен %d раз: нужен один запуск в контроле изменения, ни одного в откате", len(s.started)-1)
+	}
+	if _, err := s.app.Status(ctx(t)); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.started) != 2 {
+		t.Errorf("xm status запустил клиент самопроверки")
 	}
 }
 

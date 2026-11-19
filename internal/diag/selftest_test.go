@@ -87,7 +87,7 @@ func newStand(t *testing.T) *stand {
 func (s *stand) run(t *testing.T) Report {
 	t.Helper()
 	c := healthy()
-	c.selftest = s.deps
+	c.selftest = &s.deps
 	return c.run(t)
 }
 
@@ -215,7 +215,7 @@ func TestSelftestRequiresListen(t *testing.T) {
 	s := newStand(t)
 	c := healthy()
 	c.net.on = false
-	c.selftest = s.deps
+	c.selftest = &s.deps
 	r := c.run(t)
 	if status(r, CheckSelftest) != StatusSkip || s.starts.Load() != 0 {
 		t.Fatalf("%+v, запусков %d", r.Observations, s.starts.Load())

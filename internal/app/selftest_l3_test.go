@@ -143,7 +143,7 @@ func TestL3SelftestEndToEnd(t *testing.T) {
 					Service: activeService{}, Net: platform.New().Net(),
 					Port:     func(context.Context) (int, error) { return freePort, nil },
 					Validate: func(context.Context) (bool, error) { return true, nil },
-					Selftest: diag.SelftestDeps{Host: l3Host{platform.New()}, Socket: sock, Start: func(ctx context.Context) (diag.Process, error) {
+					Selftest: &diag.SelftestDeps{Host: l3Host{platform.New()}, Socket: sock, Start: func(ctx context.Context) (diag.Process, error) {
 						r, err := cfgm.RenderClient(st, id, sock)
 						if err != nil {
 							return nil, err

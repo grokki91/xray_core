@@ -225,21 +225,22 @@ func (a *App) change(ctx context.Context, ch Change, st store.State, r config.Re
 	if err := svc.Restart(ctx); err != nil {
 		return err
 	}
-	return a.control(ctx, st.Server.Port)
+	// Самопроверка — только здесь, в контроле изменения (ADR-0033).
+	return a.control(ctx, st.Server.Port, true)
 }
 
 // control — контроль после перезапуска: служба активна и порт слушается (ожидание запуска), затем
 // набор control движка diag. Исход набора, отличный от ok, — непройденный контроль и откат
 // (ADR-0024). У каждого шага свой срок ControlTimeout: ожидание запуска не отнимает время у
 // `xray run -test`.
-func (a *App) control(ctx context.Context, port int) error {
+func (a *App) control(ctx context.Context, port int, selftest bool) error {
 	svc := a.s.Server.Service()
 	rctx, cancel := context.WithTimeout(ctx, a.s.ControlTimeout)
 	defer cancel()
 	if err := svc.CheckRunning(rctx, port); err != nil {
 		return err
 	}
-	r, err := a.controlReport(ctx, port)
+	r, err := a.controlReport(ctx, port, selftest)
 	if err != nil {
 		return err
 	}
@@ -248,10 +249,14 @@ func (a *App) control(ctx context.Context, port int) error {
 
 // controlReport прогоняет набор control движка diag. Тот же прогон — вердикт `xm status`
 // (ADR-0024): одна реализация проверок. Свой срок ControlTimeout.
-func (a *App) controlReport(ctx context.Context, port int) (diag.Report, error) {
+func (a *App) controlReport(ctx context.Context, port int, selftest bool) (diag.Report, error) {
 	svc := a.s.Server.Service()
 	ctx, cancelSet := context.WithTimeout(ctx, a.s.ControlTimeout)
 	defer cancelSet()
+	var st *diag.SelftestDeps
+	if selftest {
+		st = &diag.SelftestDeps{Host: a.s.Host, Socket: diag.SelftestSocket, Start: a.startSelftestClient}
+	}
 	e, err := diag.NewControl(diag.ControlDeps{
 		Service: svc,
 		Net:     svc,
@@ -263,7 +268,7 @@ func (a *App) controlReport(ctx context.Context, port int) (diag.Report, error) 
 			}
 			return err == nil, err
 		},
-		Selftest: diag.SelftestDeps{Host: a.s.Host, Socket: diag.SelftestSocket, Start: a.startSelftestClient},
+		Selftest: st,
 	})
 	if err != nil {
 		return diag.Report{}, fmt.Errorf("%w: %w", server.ErrControl, err)
@@ -297,17 +302,19 @@ func (a *App) startSelftestClient(ctx context.Context) (diag.Process, error) {
 	return p, nil
 }
 
-// controlErr — ошибка по отчёту набора control; ok — nil. Текст — названия и причины проверок,
+// controlErr — ошибка по отчёту набора control; ok — nil. skip контроль не проваливает: без
+// проваленной зависимости он значит «не измерено» (самопроверка при недоступном адресе,
+// ADR-0033), а с проваленной зависимость сама даёт fail или error. Текст — названия и причины проверок,
 // без значений измерений.
 func controlErr(r diag.Report) error {
-	if r.Summary.Fail+r.Summary.Skip+r.Summary.Error == 0 {
+	if r.Summary.Fail+r.Summary.Error == 0 {
 		return nil
 	}
 	if f := r.Cause(); f != nil {
 		return fmt.Errorf("%w: %s (%s)", server.ErrControl, f.Title, strings.Join(f.Actions, "; "))
 	}
 	for _, o := range r.Observations {
-		if o.Status != diag.StatusOK {
+		if o.Status == diag.StatusFail || o.Status == diag.StatusError {
 			return fmt.Errorf("%w: проверка %s: %s %s", server.ErrControl, o.Check, o.Status, o.Reason)
 		}
 	}
@@ -446,7 +453,7 @@ func (a *App) rollback(ctx context.Context, tx store.Tx) error {
 		if err := svc.Restart(ctx); err != nil {
 			return err
 		}
-		if err := a.control(ctx, tx.PortBefore); err != nil {
+		if err := a.control(ctx, tx.PortBefore, false); err != nil {
 			return fmt.Errorf("после отката: %w", err)
 		}
 	}

@@ -2,6 +2,7 @@
 
 - Статус: Принято (владелец, 2026-11-17)
 - Уточняет: [ADR-0011](0011-diagnostics-evidence-model.md); изменяет [ADR-0023](0023-transaction-control-and-rollback-scope.md) в части контроля
+- Уточнён: [ADR-0033](0033-selftest-only-in-change-control.md) — самопроверка только в контроле изменения, `skip` не провал
 - Дата: 2026-11-16
 
 ## Контекст

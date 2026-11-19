@@ -2,6 +2,7 @@
 
 - Статус: Принято
 - Уточняет: [ADR-0020](0020-l3-stand.md), [ADR-0024](0024-health-verdict-and-shared-checks.md), [ADR-0028](0028-qr-library-and-selftest-address.md)
+- Уточнён: [ADR-0033](0033-selftest-only-in-change-control.md) — самопроверка только в контроле изменения, `skip` не провал
 - Дата: 2026-11-19
 
 ## Контекст

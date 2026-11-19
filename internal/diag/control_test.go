@@ -34,7 +34,7 @@ type controlCase struct {
 	net      *fakeNet
 	port     func(context.Context) (int, error)
 	validate func(context.Context) (bool, error)
-	selftest SelftestDeps
+	selftest *SelftestDeps
 }
 
 // okHost — платформа, на которой самопроверка проходит: прямой запрос и запрос через сервер
@@ -59,7 +59,7 @@ func healthy() controlCase {
 		net:      &fakeNet{on: true},
 		port:     func(context.Context) (int, error) { return 8443, nil },
 		validate: func(context.Context) (bool, error) { return true, nil },
-		selftest: SelftestDeps{Host: okHost{}, Socket: SelftestSocket, Start: func(context.Context) (Process, error) { return newProc(false), nil }},
+		selftest: &SelftestDeps{Host: okHost{}, Socket: SelftestSocket, Start: func(context.Context) (Process, error) { return newProc(false), nil }},
 	}
 }
 
@@ -176,12 +176,22 @@ func TestControlMeasurementErrors(t *testing.T) {
 	}
 }
 
+// Без измерений самопроверки (откат, status, ADR-0033) в наборе три проверки.
+func TestControlWithoutSelftest(t *testing.T) {
+	c := healthy()
+	c.selftest = nil
+	r := c.run(t)
+	if r.Health != HealthOK || r.Summary != (Summary{OK: 3}) || status(r, CheckSelftest) != "нет наблюдения" {
+		t.Fatalf("%q %+v", r.Health, r.Summary)
+	}
+}
+
 func TestNewControlRejectsMissingDeps(t *testing.T) {
 	if _, err := NewControl(ControlDeps{}); !errors.Is(err, ErrRegistry) {
 		t.Fatalf("err = %v", err)
 	}
 	c := healthy()
-	if _, err := NewControl(ControlDeps{Service: c.svc, Net: c.net, Port: c.port, Validate: c.validate}); !errors.Is(err, ErrRegistry) {
-		t.Fatalf("без измерений самопроверки: %v", err)
+	if _, err := NewControl(ControlDeps{Service: c.svc, Net: c.net, Port: c.port, Validate: c.validate, Selftest: &SelftestDeps{}}); !errors.Is(err, ErrRegistry) {
+		t.Fatalf("неполные измерения самопроверки: %v", err)
 	}
 }
