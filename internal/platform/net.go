@@ -3,14 +3,17 @@ package platform
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -43,7 +46,33 @@ func checkGet(ctx context.Context, r Request) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if r.Proxy != "" && (!filepath.IsAbs(r.Proxy) || filepath.Clean(r.Proxy) != r.Proxy) {
+		return fmt.Errorf("%w: сокет прокси %q", ErrPath, r.Proxy)
+	}
 	return checkURL(r.URL, r.Hosts)
+}
+
+// wantStatus — ожидаемый код ответа: по умолчанию 200.
+func wantStatus(r Request) int {
+	if r.Status == 0 {
+		return http.StatusOK
+	}
+	return r.Status
+}
+
+// viaSocket — транспорт, который ведёт запросы через HTTP-прокси на сокете Unix: адрес прокси
+// в URL условный, соединение всегда идёт на сокет; окружение (HTTPS_PROXY) не действует.
+func viaSocket(base http.RoundTripper, socket string) (http.RoundTripper, error) {
+	t, ok := base.(*http.Transport)
+	if !ok {
+		return nil, errors.New("загрузка через прокси: транспорт не http.Transport")
+	}
+	t = t.Clone()
+	t.Proxy = http.ProxyURL(&url.URL{Scheme: "http", Host: "xm-socket"})
+	t.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
+	}
+	return t, nil
 }
 
 // readLimited читает тело не больше max байт; больше — ошибка, а не обрезка.
@@ -64,8 +93,17 @@ func (n realNet) Get(ctx context.Context, r Request) ([]byte, error) {
 	if err := checkGet(ctx, r); err != nil {
 		return nil, err
 	}
+	transport := n.transport
+	if r.Proxy != "" {
+		t, err := viaSocket(transport, r.Proxy)
+		if err != nil {
+			return nil, err
+		}
+		defer t.(*http.Transport).CloseIdleConnections()
+		transport = t
+	}
 	client := &http.Client{
-		Transport: n.transport,
+		Transport: transport,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) > maxRedirects { // via — уже выполненные запросы: N-е перенаправление при len(via) == N
 				return fmt.Errorf("больше %d перенаправлений", maxRedirects)
@@ -93,7 +131,7 @@ func (n realNet) Get(ctx context.Context, r Request) ([]byte, error) {
 		return nil, fmt.Errorf("загрузка %s: %w", req.URL.Host, err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != wantStatus(r) {
 		return nil, fmt.Errorf("загрузка %s: ответ %d", resp.Request.URL.Host, resp.StatusCode)
 	}
 	data, err := readLimited(resp.Body, r.Max)
@@ -107,6 +145,7 @@ func (n realNet) Get(ctx context.Context, r Request) ([]byte, error) {
 type fakeRoute struct {
 	body     []byte
 	location string
+	status   int // 0 — 200
 }
 
 type fakeNet struct{ f *Fake }
@@ -116,7 +155,7 @@ func (n fakeNet) Get(ctx context.Context, r Request) ([]byte, error) {
 		return nil, err
 	}
 	n.f.mu.Lock()
-	n.f.calls = append(n.f.calls, Call{Op: "get", Path: r.URL, Auth: r.Token != ""})
+	n.f.calls = append(n.f.calls, Call{Op: "get", Path: r.URL, Auth: r.Token != "", Proxy: r.Proxy})
 	n.f.mu.Unlock()
 	cur := r.URL
 	for hop := 0; ; hop++ {
@@ -127,6 +166,9 @@ func (n fakeNet) Get(ctx context.Context, r Request) ([]byte, error) {
 			return nil, fmt.Errorf("загрузка %s: ответ 404", cur)
 		}
 		if route.location == "" {
+			if got := cmp.Or(route.status, http.StatusOK); got != wantStatus(r) {
+				return nil, fmt.Errorf("загрузка %s: ответ %d", cur, got)
+			}
 			data, err := readLimited(bytes.NewReader(route.body), r.Max)
 			if err != nil {
 				return nil, fmt.Errorf("загрузка %s: %w", cur, err)

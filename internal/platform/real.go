@@ -84,6 +84,56 @@ func (r *Real) Exec(ctx context.Context, c Command) (Result, error) {
 	return runProcess(ctx, path, c.Program, c.Args, c.Stdin)
 }
 
+func (r *Real) Start(ctx context.Context, c Command) (Process, error) {
+	path, err := checkCommand(ctx, r.programs, c)
+	if err != nil {
+		return nil, err
+	}
+	if err := r.files.checkBinary(c, path); err != nil {
+		return nil, err
+	}
+	return startProcess(ctx, path, c.Program, c.Args, c.Stdin)
+}
+
+// proc — фоновый процесс.
+type proc struct {
+	cmd  *exec.Cmd
+	done chan struct{}
+}
+
+func (p *proc) Done() <-chan struct{} { return p.done }
+
+func (p *proc) Stop() {
+	select {
+	case <-p.done: // уже завершён: pid мог уйти другому процессу
+		return
+	default:
+	}
+	syscall.Kill(-p.cmd.Process.Pid, syscall.SIGKILL)
+	<-p.done
+}
+
+// startProcess запускает файл path в фоне теми же правилами, что runProcess; вывод
+// отбрасывается: процесс самопроверки не должен копить его и писать куда-либо.
+func startProcess(ctx context.Context, path, name string, args []string, stdin []byte) (Process, error) {
+	cmd := exec.CommandContext(ctx, path, args...)
+	cmd.Env = childEnv
+	cmd.Dir = "/"
+	cmd.Stdin = bytes.NewReader(stdin)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd.WaitDelay = waitDelay
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("%s: %w", name, err)
+	}
+	p := &proc{cmd: cmd, done: make(chan struct{})}
+	go func() {
+		cmd.Wait()
+		close(p.done)
+	}()
+	return p, nil
+}
+
 // runProcess запускает файл path без оболочки: окружение childEnv, каталог «/», своя группа
 // процессов, предел вывода. Общий путь Real.Exec и Fake.RunUnderRoot.
 func runProcess(ctx context.Context, path, name string, args []string, stdin []byte) (Result, error) {
