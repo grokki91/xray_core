@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io/fs"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -106,8 +107,28 @@ func TestImplementationsAgree(t *testing.T) {
 			if _, err := fsys.ReadFile(dir + "/fifo"); err == nil {
 				t.Error("FIFO прочитан как файл")
 			}
+			if err := fsys.Remove(dir + "/fifo"); err == nil {
+				t.Error("Remove удалил FIFO")
+			}
 			if err := os.Remove(onDisk(i, dir+"/fifo")); err != nil {
 				t.Fatal(err)
+			}
+			// Сокет Unix — след убитого клиента самопроверки: Remove его удаляет (ADR-0032).
+			sock := dir + "/s.sock"
+			ln, err := net.Listen("unix", onDisk(i, sock))
+			if err != nil {
+				t.Fatal(err)
+			}
+			ln.(*net.UnixListener).SetUnlinkOnClose(false)
+			ln.Close()
+			if err := fsys.Remove(sock); err != nil {
+				t.Errorf("Remove сокета: %v", err)
+			}
+			if _, err := os.Lstat(onDisk(i, sock)); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("сокет не удалён: %v", err)
+			}
+			if err := fsys.Remove(sock); !errors.Is(err, ErrNotFound) {
+				t.Errorf("Remove отсутствующего: %v, нужен ErrNotFound", err)
 			}
 
 			for _, bad := range []string{"etc/state.json", i.base + "/etc/../etc/state.json", i.base + "/etc/"} {

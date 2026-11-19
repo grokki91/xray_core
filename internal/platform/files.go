@@ -252,8 +252,9 @@ func (x files) Remove(path string) error {
 	if err != nil {
 		return fmt.Errorf("удаление %s: %w", path, err)
 	}
-	if !fi.Mode().IsRegular() {
-		return fmt.Errorf("удаление %s: не обычный файл", path)
+	// Сокет Unix — след клиента самопроверки, убитого до того, как он его убрал (ADR-0032).
+	if !fi.Mode().IsRegular() && fi.Mode().Type() != fs.ModeSocket {
+		return fmt.Errorf("удаление %s: не обычный файл и не сокет", path)
 	}
 	if err := os.Remove(p); err != nil {
 		return fmt.Errorf("удаление %s: %w", path, err)

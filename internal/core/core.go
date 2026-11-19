@@ -156,6 +156,27 @@ func (m *Manager) Validate(ctx context.Context, v Version, configPath string) er
 	}
 }
 
+// StartClient запускает в фоне клиент самопроверки (ADR-0032): `xray run -c stdin:` действующей
+// версией. Конфигурация клиента — секрет, поэтому только через stdin. Процесс живёт до конца
+// срока ctx или Process.Stop; сокет клиента вызывающий удаляет сам. Версии нет — ошибка.
+func (m *Manager) StartClient(ctx context.Context, cfg []byte) (platform.Process, error) {
+	if len(cfg) == 0 {
+		return nil, errors.New("конфигурация клиента пуста")
+	}
+	cur, err := m.Current(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if cur == "" {
+		return nil, errors.New("ядро не установлено")
+	}
+	p, err := m.p.Start(ctx, platform.Command{Program: binary, Version: string(cur), Args: []string{"run", "-c", "stdin:"}, Stdin: cfg})
+	if err != nil {
+		return nil, fmt.Errorf("xray %s run: %w", cur, err)
+	}
+	return p, nil
+}
+
 // ValidateCurrent проверяет конфигурацию действующей версией: контроль после изменения
 // проверяет то, что запущено, а не то, что собирались запустить. Версии нет — ошибка.
 func (m *Manager) ValidateCurrent(ctx context.Context, configPath string) error {

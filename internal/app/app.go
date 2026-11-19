@@ -53,6 +53,9 @@ type Services struct {
 	Redactor Redactor
 	XM       string           // версия xm — в манифест снимка
 	Now      func() time.Time // часы платформы
+	// Host — платформа для измерений набора control, которым нужны процесс и сеть
+	// (самопроверка, ADR-0032): app сам platform не импортирует.
+	Host diag.Host
 	// ControlTimeout — срок контроля после перезапуска; ноль — 30 секунд.
 	ControlTimeout time.Duration
 }
@@ -260,6 +263,7 @@ func (a *App) controlReport(ctx context.Context, port int) (diag.Report, error) 
 			}
 			return err == nil, err
 		},
+		Selftest: diag.SelftestDeps{Host: a.s.Host, Socket: diag.SelftestSocket, Start: a.startSelftestClient},
 	})
 	if err != nil {
 		return diag.Report{}, fmt.Errorf("%w: %w", server.ErrControl, err)
@@ -269,6 +273,28 @@ func (a *App) controlReport(ctx context.Context, port int) (diag.Report, error) 
 		return diag.Report{}, fmt.Errorf("%w: %w", server.ErrControl, err)
 	}
 	return r, nil
+}
+
+// startSelftestClient запускает клиента самопроверки из действующего состояния: конфигурация —
+// config.RenderClient, процесс — core.StartClient (ADR-0032). Состояние читается с диска: к
+// контролю оно уже записано, а после отката — восстановлено.
+func (a *App) startSelftestClient(ctx context.Context) (diag.Process, error) {
+	st, err := a.s.Store.Load()
+	if err != nil {
+		return nil, err
+	}
+	if st.Selftest.ID == "" {
+		return nil, errors.New("в состоянии нет служебного клиента самопроверки")
+	}
+	r, err := a.s.Config.RenderClient(st, st.Selftest.ID, diag.SelftestSocket)
+	if err != nil {
+		return nil, err
+	}
+	p, err := a.s.Core.StartClient(ctx, r.Data)
+	if err != nil {
+		return nil, err
+	}
+	return p, nil
 }
 
 // controlErr — ошибка по отчёту набора control; ok — nil. Текст — названия и причины проверок,

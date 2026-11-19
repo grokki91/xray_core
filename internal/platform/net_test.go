@@ -327,6 +327,14 @@ func TestNetProxyAndStatus(t *testing.T) {
 	if _, err := fg("/ok", 0, "p.sock"); !errors.Is(err, ErrPath) {
 		t.Errorf("подделка, относительный сокет: %v, нужно ErrPath", err)
 	}
+	// ServeVia — ответ только на запрос через прокси; без него прокси-запрос видит обычный ответ.
+	fake.ServeVia("https://own.test/ok", 502, nil)
+	if _, err := fg("/ok", 0, "/run/xm/selftest.sock"); err == nil {
+		t.Error("подделка: ответ через прокси 502 принят")
+	}
+	if got, err := fg("/ok", 0, ""); err != nil || string(got) != string(netBody) {
+		t.Errorf("подделка: прямой запрос: %q, %v", got, err)
+	}
 	if calls := fake.Calls(); len(calls) == 0 || calls[0].Proxy != "/run/xm/selftest.sock" {
 		t.Errorf("Proxy не записан в вызове: %+v", calls)
 	}

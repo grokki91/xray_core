@@ -23,6 +23,8 @@ type ControlDeps struct {
 	// Validate — `xray run -test` действующей версией на действующей конфигурации: false без
 	// ошибки — конфигурация не принята; ошибка — проверить не удалось.
 	Validate func(ctx context.Context) (valid bool, err error)
+	// Selftest — измерения самопроверки (selftest.go).
+	Selftest SelftestDeps
 }
 
 // Идентификаторы проверок набора control.
@@ -33,13 +35,13 @@ const (
 )
 
 // NewControl собирает движок с набором control: служба активна, порт слушается, конфигурация
-// принята Xray. Порядок — порядок зависимостей: порт без службы не измеряется. Остальной каталог —
-// фаза 5; самопроверка reach.selftest — шаг 7 фазы 3.
+// принята Xray, самопроверка (reach.selftest) проходит. Порядок — порядок зависимостей: порт без
+// службы не измеряется, самопроверка без порта — тоже. Остальной каталог — фаза 5.
 func NewControl(d ControlDeps) (*Engine, error) {
-	if d.Service == nil || d.Net == nil || d.Port == nil || d.Validate == nil {
+	if d.Service == nil || d.Net == nil || d.Port == nil || d.Validate == nil || d.Selftest.Host == nil || d.Selftest.Start == nil || d.Selftest.Socket == "" {
 		return nil, fmt.Errorf("%w: не все измерения набора control заданы", ErrRegistry)
 	}
-	checks := []Check{serviceActive{d}, listen{d}, configValid{d}}
+	checks := []Check{serviceActive{d}, listen{d}, configValid{d}, selftest{d.Selftest}}
 	ids := make([]string, len(checks))
 	for i, c := range checks {
 		ids[i] = c.ID()

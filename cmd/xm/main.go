@@ -54,6 +54,7 @@ func run(ctx context.Context) int {
 		Profile:  profile.New(),
 		Security: security.New(p),
 		Redactor: registry{reg},
+		Host:     p,
 		Releases: update.NewGitHub(p, token),
 		XM:       version,
 		Now:      p.Clock().Now,
