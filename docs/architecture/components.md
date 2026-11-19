@@ -584,6 +584,8 @@ type App interface {
 - Транзакция `Apply(ctx, Change)`: блокировка → базовая защита → откат незавершённой → отрисовка → снимок → журнал →
   `xray run -test` → ядро, юнит, конфигурация, состояние → перезапуск → контроль → фиксация или
   откат ([ADR-0005](../adr/0005-transactions-and-rollback.md), [ADR-0023](../adr/0023-transaction-control-and-rollback-scope.md)).
+  До отрисовки пустой `selftest.id` заполняется через `security.NewClientID` и регистрируется в
+  редакторе ([ADR-0032](../adr/0032-selftest-client-and-l3-target.md)).
   Базовая защита (`security.EnsureBaseline`) — первый шаг после блокировки. Службу, которую
   владелец остановил, транзакция не запускает ([ADR-0025](../adr/0025-stopped-service-and-install-scenario.md)).
   Контроль (`app.control`, один срок `ControlTimeout`): `CheckRunning` — ожидание запуска, затем набор
