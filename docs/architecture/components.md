@@ -31,6 +31,8 @@
 ```go
 type Platform interface {
     Exec(ctx context.Context, c Command) (Result, error) // Command{Program, Args, Stdin}; без оболочки
+    // фаза 3, шаг 7 ([ADR-0032](../adr/0032-selftest-client-and-l3-target.md)): процесс в фоне, остановка по контексту или Stop
+    // Start(ctx context.Context, c Command) (Process, error)
     FS() FS            // ReadFile, WriteFile (temp + fchown + fchmod + fsync + rename), Mkdir, ReadDir, Remove, Symlink, Readlink, Lock (flock)
     Systemd() Systemd  // только xray.service: Running, Reload, Enable/Disable, Start/Stop/Restart, Status
     Net() Net          // Get по HTTPS, Listening — порт слушается (фаза 2); интерфейсы, маршруты — фаза 4
@@ -187,6 +189,8 @@ type Manager interface {
 - Закрытый список подкоманд `core` — `version` и `run`; `x25519` и `uuid` не запускаются: секреты
   создаёт только `security`. Вывод `run -test` в ошибку не попадает — решение по коду выхода
   (23 — `ErrConfig`).
+- Клиент самопроверки — `xray run` действующей версией с конфигурацией через stdin, процессом
+  `platform.Start` ([ADR-0032](../adr/0032-selftest-client-and-l3-target.md)); фаза 3, шаг 7.
 - Каталоги `/usr/local/lib/xm/`, `core/`, `core/<версия>/` создаёт `Stage`: ядро ставится до
   базовой защиты ([overview.md](overview.md) §6). Фаза 2.
 
@@ -204,6 +208,9 @@ type Manager interface {
 }
 
 type Rendered struct { Data []byte; SHA256 string }  // SHA256 → applied.config_sha256
+// фаза 3, шаг 7 ([ADR-0032](../adr/0032-selftest-client-and-l3-target.md)): конфигурация клиента самопроверки и L3 из
+// состояния — тот же источник, что у ссылки; входящий — HTTP на сокете Unix
+// RenderClient(st store.State, id string, socket string) (Rendered, error)
 
 type Preset interface {  // каталог пресетов: config/preset
     ID() string                                   // например "reality-xhttp"
