@@ -65,6 +65,7 @@ type FS interface {
 	// Mkdir создаёт каталог с правами и владельцем; существующий каталог не меняет.
 	Mkdir(path string, perm fs.FileMode, owner Owner) error
 	// Remove удаляет обычный файл или сокет Unix; ссылка на пути или на месте файла, каталог — ошибка.
+	// Принадлежность пути манифесту (docs/architecture/data-model.md §1) проверяет вызывающий.
 	Remove(path string) error
 	// ReadDir возвращает имена записей каталога по возрастанию; нет каталога — ErrNotFound.
 	ReadDir(path string) ([]string, error)

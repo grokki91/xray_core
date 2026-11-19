@@ -100,7 +100,13 @@ func TestSelftestOK(t *testing.T) {
 	}
 	ln.(*net.UnixListener).SetUnlinkOnClose(false)
 	ln.Close()
+	if err := s.h.FS().WriteFile(SelftestSocket+".lock", nil, 0o600, platform.Root()); err != nil {
+		t.Fatal(err)
+	}
 	r := s.run(t)
+	if _, err := os.Lstat(s.h.Path(SelftestSocket + ".lock")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf(".lock прежнего клиента остался: %v", err)
+	}
 	if r.Health != HealthOK || status(r, CheckSelftest) != StatusOK {
 		t.Fatalf("самопроверка: %q %+v", r.Health, r.Observations)
 	}

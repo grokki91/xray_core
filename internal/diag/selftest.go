@@ -74,9 +74,12 @@ func (c selftest) Run(ctx context.Context) []Observation {
 		return []Observation{{Target: target, Status: StatusSkip,
 			Reason: "тестовый адрес " + selftestHost + " недоступен с самого сервера: самопроверка не измерена"}}
 	}
+	// Сокет и его .lock: Xray создаёт оба, убитый клиент оставляет оба.
 	removeSocket := func() error {
-		if err := h.FS().Remove(c.d.Socket); err != nil && !errors.Is(err, platform.ErrNotFound) {
-			return err
+		for _, p := range []string{c.d.Socket, c.d.Socket + ".lock"} {
+			if err := h.FS().Remove(p); err != nil && !errors.Is(err, platform.ErrNotFound) {
+				return err
+			}
 		}
 		return nil
 	}

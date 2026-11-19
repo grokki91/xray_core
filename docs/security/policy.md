@@ -52,6 +52,11 @@
 
 - Xray работает от системного пользователя `xray` без оболочки и домашнего каталога; из
   возможностей — только `CAP_NET_BIND_SERVICE`.
+- Клиент самопроверки — отдельный процесс Xray (`platform.Start`, [ADR-0032](../adr/0032-selftest-client-and-l3-target.md)):
+  от root, как `xray run -test`, без юнита и его изоляции; живёт только на время проверки (срок в
+  контексте, не больше 25 с), в своей группе процессов (по сроку и `Stop` — `SIGKILL`), вывод
+  отбрасывается, окружение — только `PATH` и `LC_ALL`, конфигурация — через stdin, входящий — сокет
+  `/run/xm/selftest.sock` (0600) без порта. Отдельная изоляция — по ADR, если появится причина.
 - Юнит изолирован директивами systemd: `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`,
   `PrivateTmp`, `PrivateDevices`, `ProtectKernelTunables`, `ProtectKernelModules`,
   `ProtectControlGroups`, `RestrictAddressFamilies` (IPv4, IPv6, UNIX), `RestrictNamespaces`,
