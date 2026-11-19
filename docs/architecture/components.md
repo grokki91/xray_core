@@ -193,7 +193,10 @@ type Manager interface {
   создаёт только `security`. Вывод `run -test` в ошибку не попадает — решение по коду выхода
   (23 — `ErrConfig`).
 - Клиент самопроверки — метод `core` (сигнатура — с потребителем `reach.selftest`): `xray run`
-  действующей версией от root, конфигурация через stdin, процесс `platform.Start` ([ADR-0032](../adr/0032-selftest-client-and-l3-target.md)); фаза 3, шаг 7.
+  действующей версией от root, конфигурация — `-c stdin:`, процесс `platform.Start`; входящий
+  `listen` — `<сокет>,0600`, рядом Xray создаёт `<сокет>.lock`; прежний сокет удаляется до запуска:
+  Xray его не удаляет и не стартует; успех — ответ цели, а не `200` прокси на `CONNECT`
+  ([compatibility.md](../compatibility.md) §2) ([ADR-0032](../adr/0032-selftest-client-and-l3-target.md)); фаза 3, шаг 7.
 - Каталоги `/usr/local/lib/xm/`, `core/`, `core/<версия>/` создаёт `Stage`: ядро ставится до
   базовой защиты ([overview.md](overview.md) §6). Фаза 2.
 

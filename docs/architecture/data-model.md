@@ -24,7 +24,7 @@
 | `/var/lib/xm/diag/` | root:root | 0700, файлы 0600 | нет (отредактировано) | история диагностики |
 | `/var/lib/xm/monitor/` | root:root | 0700, файлы 0600 | нет | хронология замеров |
 | `/var/lib/xm/cache/` | root:root | 0700, файлы 0600 | нет | загруженные архивы релизов: `<тег>-<файл>`, например `v26.11.9-Xray-linux-64.zip`; создаёт `update` до базовой защиты |
-| `/run/xm/` | root:root | 0700 | да | блокировка, сессия `xm ui`, сокет клиента самопроверки на время проверки ([ADR-0032](../adr/0032-selftest-client-and-l3-target.md)) |
+| `/run/xm/` | root:root | 0700 | да | блокировка, сессия `xm ui`, сокет клиента самопроверки `selftest.sock` (0600) и его `selftest.sock.lock` на время проверки ([ADR-0032](../adr/0032-selftest-client-and-l3-target.md)) |
 
 Журналы — journald (`xray.service` и идентификатор `xm`), собственных файлов журналов нет.
 
