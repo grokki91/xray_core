@@ -420,6 +420,9 @@ func TestStatus(t *testing.T) {
 		!st.Service.Loaded || st.Service.Active != "active" || st.Service.Sub != "running" || !st.Service.Enabled {
 		t.Fatalf("установлено: %+v", st)
 	}
+	if st.Health.Verdict != "ok" || st.Health.Unchecked == "" {
+		t.Fatalf("вердикт здоровой установки: %+v", st.Health)
+	}
 	// Конфигурацию правили руками — status это показывает.
 	if err := s.f.FS().WriteFile("/usr/local/etc/xray/config.json", []byte("{}\n"), 0o640, platform.Owner{}); err != nil {
 		t.Fatal(err)
@@ -565,5 +568,32 @@ func TestInstallCreatesFirstProfile(t *testing.T) {
 		if strings.Contains(j.Message, pid) {
 			t.Fatalf("ключ профиля в журнале xm: %q", j.Message)
 		}
+	}
+}
+
+// Остановленная служба — вердикт down с причиной и действием; xm status не меняет систему.
+func TestStatusHealthDownWhenStopped(t *testing.T) {
+	s := fresh(t)
+	if _, err := s.app.Install(ctx(t), okOpts); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.app.Service(ctx(t), Stop); err != nil {
+		t.Fatal(err)
+	}
+	st, err := s.app.Status(ctx(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Health.Verdict != "down" || st.Health.Cause == "" || st.Health.Action == "" || st.Health.Unchecked != "" {
+		t.Fatalf("вердикт остановленной службы: %+v", st.Health)
+	}
+}
+
+// Установка возвращает вердикт: после контроля транзакции он ok.
+func TestInstallReturnsHealth(t *testing.T) {
+	s := fresh(t)
+	res, err := s.app.Install(ctx(t), okOpts)
+	if err != nil || res.Health.Verdict != "ok" {
+		t.Fatalf("%+v %v", res, err)
 	}
 }

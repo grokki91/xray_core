@@ -22,6 +22,7 @@ func TestGolden(t *testing.T) {
 			Addresses: ServerAddress{IPv4: "203.0.113.10"},
 			Port:      443,
 			Profiles:  2,
+			Health:    Health{Verdict: "ok", Unchecked: "доступность порта снаружи и самопроверка не проверены"},
 			Clients: []ClientSupport{
 				{Name: "v2rayN", Works: true, Condition: "ядро Xray клиента не старше v25.7.26"},
 				{Name: "Hiddify 4.x", Reason: "вырезает X25519MLKEM768"},

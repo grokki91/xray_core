@@ -1,7 +1,7 @@
 package contract
 
 // Status — данные схемы status: состояние установки. Не установлено — Installed=false, прочие
-// поля пусты. Доступное обновление и вердикт здоровья добавятся полями (minor+1) в своих фазах.
+// поля пусты. Доступное обновление добавится полем (minor+1) в своей фазе.
 type Status struct {
 	Installed bool          `json:"installed"`
 	Service   ServiceState  `json:"service"`
@@ -15,6 +15,17 @@ type Status struct {
 	// Clients — таблица совместимости клиентов с пресетом сервера (minor 1); пусто — таблица о
 	// таком сервере не говорит.
 	Clients []ClientSupport `json:"clients"`
+	// Health — вердикт здоровья по набору control (minor 2, ADR-0024).
+	Health Health `json:"health"`
+}
+
+// Health — вердикт: ok, degraded, down или unknown. Cause и Action — первопричина и действие
+// (только при не-ok); Unchecked — что вердикт ok не проверял. Не установлено — Verdict пуст.
+type Health struct {
+	Verdict   string `json:"verdict"`
+	Cause     string `json:"cause"`
+	Action    string `json:"action"`
+	Unchecked string `json:"unchecked"`
 }
 
 // ClientSupport — строка таблицы совместимости: подключится ли клиент к серверу и при каком
@@ -49,4 +60,4 @@ type ServerAddress struct {
 }
 
 // Schema возвращает схему status.
-func (Status) Schema() Schema { return Schema{Name: "status", Major: 1, Minor: 1} }
+func (Status) Schema() Schema { return Schema{Name: "status", Major: 1, Minor: 2} }

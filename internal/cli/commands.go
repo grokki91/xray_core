@@ -31,6 +31,7 @@ func runInstall(e Env, fs *flag.FlagSet, _ []string, _ bool) int {
 		return fail(e, false, err)
 	}
 	printProfile(e, "Первый профиль", v)
+	printHealth(e, res.Health)
 	return exitOK
 }
 
@@ -162,7 +163,22 @@ func runStatus(e Env, _ *flag.FlagSet, _ []string, asJSON bool) int {
 	} else {
 		fmt.Fprintln(e.Stdout, "Конфигурация Xray совпадает с состоянием.")
 	}
+	printHealth(e, st.Health)
 	return exitOK
+}
+
+// printHealth — последняя строка install и status: вердикт, первопричина, действие; при ok —
+// что не проверено (ADR-0024).
+func printHealth(e Env, h contract.Health) {
+	switch h.Verdict {
+	case "ok":
+		fmt.Fprintf(e.Stdout, "Состояние: работает. Не проверено: %s.\n", quote(h.Unchecked))
+	case "":
+		return
+	default:
+		names := map[string]string{"down": "не работает", "degraded": "работает не полностью", "unknown": "не определено"}
+		fmt.Fprintf(e.Stdout, "Состояние: %s. Причина: %s. Что делать: %s.\n", names[h.Verdict], quote(h.Cause), quote(h.Action))
+	}
 }
 
 // fail сообщает об ошибке сценария: что случилось, что сделала система, что делать владельцу;
