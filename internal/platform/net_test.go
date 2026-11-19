@@ -301,6 +301,9 @@ func TestNetProxyAndStatus(t *testing.T) {
 	if _, err := get("/ok", 0, "p.sock"); !errors.Is(err, ErrPath) {
 		t.Errorf("относительный сокет: %v, нужно ErrPath", err)
 	}
+	if _, err := get("/ok", 0, "/run/xm/../x.sock"); !errors.Is(err, ErrPath) {
+		t.Errorf("неочищенный сокет: %v, нужно ErrPath", err)
+	}
 	if _, err := get("/ok", 0, filepath.Dir(socket)+"/нет.sock"); err == nil {
 		t.Error("сокета нет, а запрос прошёл")
 	}

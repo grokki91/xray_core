@@ -51,7 +51,7 @@ func waitDone(t *testing.T, p Process, d time.Duration) {
 	}
 }
 
-// Start запускает процесс в фоне: срок обязателен, Stop завершает группу и повторяем, срок
+// Start запускает процесс в фоне: срок обязателен, Stop завершает процесс и повторяем, срок
 // контекста и конец ввода завершают процесс сами.
 func TestStart(t *testing.T) {
 	for _, i := range startImpls(t) {
@@ -100,5 +100,8 @@ func TestFakeStartNeedsRunUnderRoot(t *testing.T) {
 	f := newFake(t.TempDir(), time.Time{}, testPrograms(t))
 	if _, err := f.Start(deadline(t, time.Second), Command{Program: "sleep", Args: []string{"1"}}); err == nil {
 		t.Error("процесс без RunUnderRoot запущен")
+	}
+	if calls := f.Calls(); len(calls) != 1 || calls[0].Op != "start" || calls[0].Path != "sleep" {
+		t.Errorf("вызов не записан как start: %+v", calls)
 	}
 }
