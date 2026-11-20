@@ -79,7 +79,12 @@ type sys struct {
 	badVersion         string // версия, которую xray называет неверно
 	restartListens     []bool // слушает ли порт после очередного перезапуска; пусто — слушает
 	restarts, nRestart int
+	startErr           error              // отказ запуска клиента самопроверки
+	started            []platform.Command // запуски клиента самопроверки
 }
+
+// selftestURL — тестовый адрес самопроверки (docs/dev/dependencies.md §5).
+const selftestURL = "https://cp.cloudflare.com/generate_204"
 
 // newSys — машина с готовой установкой: базовая защита выполнена, выложены две версии Xray,
 // current указывает на первую.
@@ -143,6 +148,16 @@ func build(t *testing.T, installed bool) *sys {
 		}
 		return platform.Result{ExitCode: s.testExit}, nil
 	})
+	// Клиент самопроверки — процесс без файла; тестовый адрес отвечает 204 и напрямую, и через
+	// сервер. Провал самопроверки задаёт тест: f.ServeVia(selftestURL, 502, nil).
+	f.HandleStart("xray", func(c platform.Command) error {
+		s.started = append(s.started, c)
+		if s.startErr != nil {
+			return s.startErr
+		}
+		return nil
+	})
+	f.ServeStatus(selftestURL, 204, nil)
 	f.Handle("systemctl", func(c platform.Command) (platform.Result, error) {
 		verb := c.Args[2]
 		if verb == "is-system-running" {
@@ -187,7 +202,7 @@ func build(t *testing.T, installed bool) *sys {
 		Store: store.New(p.FS()), Backup: backup.New(p), Config: config.New(p), Core: core.New(p),
 		Server: server.New(p, cfgPath), Logging: logging.New(p, reg, slog.LevelInfo), Profile: profile.New(),
 		Security: security.New(p), Releases: s.rel, Redactor: regAdapter{reg},
-		XM: "0.1.0", Now: f.Clock().Now, ControlTimeout: 150 * time.Millisecond,
+		XM: "0.1.0", Now: f.Clock().Now, ControlTimeout: 150 * time.Millisecond, Host: p,
 	})
 	return s
 }
@@ -306,6 +321,93 @@ func TestApplyCreatesSelftestClientOnce(t *testing.T) {
 	again, err := s.app.s.Store.Load()
 	if err != nil || again.Selftest.ID != id {
 		t.Fatalf("после второй транзакции selftest.id %q, был %q: %v", again.Selftest.ID, id, err)
+	}
+}
+
+// Самопроверка — часть контроля (ADR-0024, ADR-0032): клиент строится из сохранённого
+// состояния, конфигурация идёт только через stdin, а провал откатывает транзакцию.
+func TestApplyRunsSelftestFromStoredState(t *testing.T) {
+	s := newSys(t)
+	if err := s.app.Apply(ctx(t), Change{Reason: "install", State: stateOf("phone"), Unit: unit1}); err != nil {
+		t.Fatal(err)
+	}
+	st, err := s.app.s.Store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.started) != 1 {
+		t.Fatalf("клиент самопроверки запущен %d раз", len(s.started))
+	}
+	c := s.started[0]
+	cfg := string(c.Stdin)
+	if strings.Join(c.Args, " ") != "run -c stdin:" || !strings.Contains(cfg, st.Selftest.ID) ||
+		!strings.Contains(cfg, "/run/xm/selftest.sock,0600") || strings.Contains(strings.Join(c.Args, ""), st.Selftest.ID) {
+		t.Fatalf("команда %q, конфигурация клиента:\n%s", c.Args, cfg)
+	}
+}
+
+func TestApplySelftestFailureRollsBack(t *testing.T) {
+	for name, tune := range map[string]func(*sys){
+		"запрос через сервер не прошёл": func(s *sys) { s.f.ServeVia(selftestURL, 502, nil) },
+		"клиент не запустился":          func(s *sys) { s.startErr = errors.New("нет бинарника") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := newSys(t)
+			before := s.snap(t)
+			tune(s)
+			err := s.app.Apply(ctx(t), Change{Reason: "install", State: stateOf("phone"), Unit: unit1})
+			if !errors.Is(err, ErrRolledBack) || !errors.Is(err, server.ErrControl) {
+				t.Fatalf("err = %v, нужны ErrRolledBack и ErrControl", err)
+			}
+			if after := s.snap(t); !after.equal(before) {
+				t.Fatalf("после отката система не совпала с исходной:\n%+v\n%+v", before, after)
+			}
+		})
+	}
+}
+
+// ADR-0033: адрес недоступен с самого сервера — самопроверка skip, и это не провал контроля.
+func TestApplySelftestSkipDoesNotRollBack(t *testing.T) {
+	s := newSys(t)
+	s.f.ServeStatus(selftestURL, 500, nil)
+	if err := s.app.Apply(ctx(t), Change{Reason: "install", State: stateOf("phone"), Unit: unit1}); err != nil {
+		t.Fatalf("skip самопроверки откатил транзакцию: %v", err)
+	}
+	if len(s.started) != 0 {
+		t.Errorf("клиент запущен при недоступном адресе: %d", len(s.started))
+	}
+}
+
+// ADR-0033: самопроверка, падающая независимо от изменения, не делает откат неудачным, а
+// контроль после отката и xm status её не запускают.
+func TestSelftestOnlyInChangeControl(t *testing.T) {
+	s := newSys(t)
+	if err := s.app.Apply(ctx(t), Change{Reason: "install", State: stateOf("phone"), Unit: unit1}); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.started) != 1 {
+		t.Fatalf("после установки клиент запущен %d раз", len(s.started))
+	}
+	if _, err := s.app.Status(ctx(t)); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.started) != 1 {
+		t.Errorf("xm status запустил клиент самопроверки")
+	}
+	s.f.ServeVia(selftestURL, 502, nil) // тоннель не работает независимо от изменения
+	edit := func(st store.State) (store.State, error) { st.Profiles[0].Name = "tablet"; return st, nil }
+	err := s.app.Apply(ctx(t), Change{Reason: "rename", Edit: edit})
+	if !errors.Is(err, ErrRolledBack) || errors.Is(err, ErrRollbackFailed) {
+		t.Fatalf("err = %v, нужен ErrRolledBack: контроль отката без самопроверки", err)
+	}
+	if len(s.started) != 2 {
+		t.Errorf("клиент запущен %d раз: нужен один запуск в контроле изменения, ни одного в откате", len(s.started)-1)
+	}
+	if _, err := s.app.Status(ctx(t)); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.started) != 2 {
+		t.Errorf("xm status запустил клиент самопроверки")
 	}
 }
 

@@ -317,12 +317,12 @@ func (a *App) Status(ctx context.Context) (contract.Status, error) {
 	}, nil
 }
 
-// unchecked — что вердикт ok не измеряет: набор control смотрит только сам сервер (ADR-0024).
-const unchecked = "доступность порта снаружи и самопроверка подключения не проверены"
+// unchecked — что вердикт ok не измеряет: набор control смотрит с самого сервера и без самопроверки (ADR-0024, ADR-0033).
+const unchecked = "подключение клиента не проверялось: самопроверка выполняется только при изменении, доступность порта снаружи и из сети клиента не проверена"
 
 // health — вердикт по набору control: вердикт, первопричина и действие; при ok — что не проверено.
 func (a *App) health(ctx context.Context, port int) (contract.Health, error) {
-	r, err := a.controlReport(ctx, port)
+	r, err := a.controlReport(ctx, port, false)
 	if err != nil {
 		return contract.Health{}, err
 	}

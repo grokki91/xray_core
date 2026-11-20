@@ -148,6 +148,9 @@ type fakeRoute struct {
 	status   int // 0 — 200
 }
 
+// viaKey — ключ ответа подделки на запрос через прокси: он не пересекается с адресами https.
+func viaKey(url string) string { return "via " + url }
+
 type fakeNet struct{ f *Fake }
 
 func (n fakeNet) Get(ctx context.Context, r Request) ([]byte, error) {
@@ -161,6 +164,9 @@ func (n fakeNet) Get(ctx context.Context, r Request) ([]byte, error) {
 	for hop := 0; ; hop++ {
 		n.f.mu.Lock()
 		route, ok := n.f.routes[cur]
+		if via, found := n.f.routes[viaKey(cur)]; found && r.Proxy != "" {
+			route, ok = via, true
+		}
 		n.f.mu.Unlock()
 		if !ok {
 			return nil, fmt.Errorf("загрузка %s: ответ 404", cur)

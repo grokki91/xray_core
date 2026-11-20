@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/grokki91/xray_core/internal/platform"
 )
@@ -33,7 +34,24 @@ type controlCase struct {
 	net      *fakeNet
 	port     func(context.Context) (int, error)
 	validate func(context.Context) (bool, error)
+	selftest *SelftestDeps
 }
+
+// okHost — платформа, на которой самопроверка проходит: прямой запрос и запрос через сервер
+// отвечают, сокета нет. Подробные случаи самопроверки — selftest_test.go.
+type okHost struct{}
+
+type okFS struct{ platform.FS }
+type okNet struct{ platform.Net }
+type okClock struct{ platform.Clock }
+
+func (okFS) Remove(string) error                                    { return nil }
+func (okNet) Get(context.Context, platform.Request) ([]byte, error) { return nil, nil }
+func (okClock) Now() time.Time                                      { return time.Time{} }
+func (okClock) Sleep(context.Context, time.Duration) error          { return nil }
+func (okHost) FS() platform.FS                                      { return okFS{} }
+func (okHost) Net() platform.Net                                    { return okNet{} }
+func (okHost) Clock() platform.Clock                                { return okClock{} }
 
 func healthy() controlCase {
 	return controlCase{
@@ -41,12 +59,13 @@ func healthy() controlCase {
 		net:      &fakeNet{on: true},
 		port:     func(context.Context) (int, error) { return 8443, nil },
 		validate: func(context.Context) (bool, error) { return true, nil },
+		selftest: &SelftestDeps{Host: okHost{}, Socket: SelftestSocket, Start: func(context.Context) (Process, error) { return newProc(false), nil }},
 	}
 }
 
 func (c controlCase) run(t *testing.T) Report {
 	t.Helper()
-	e, err := NewControl(ControlDeps{Service: c.svc, Net: c.net, Port: c.port, Validate: c.validate})
+	e, err := NewControl(ControlDeps{Service: c.svc, Net: c.net, Port: c.port, Validate: c.validate, Selftest: c.selftest})
 	if err != nil {
 		t.Fatalf("NewControl: %v", err)
 	}
@@ -69,7 +88,7 @@ func status(r Report, check string) Status {
 func TestControlHealthy(t *testing.T) {
 	c := healthy()
 	r := c.run(t)
-	if r.Health != HealthOK || r.Summary != (Summary{OK: 3}) {
+	if r.Health != HealthOK || r.Summary != (Summary{OK: 4}) {
 		t.Fatalf("здоровая служба: %q %+v", r.Health, r.Summary)
 	}
 	if c.net.got != 8443 {
@@ -157,8 +176,22 @@ func TestControlMeasurementErrors(t *testing.T) {
 	}
 }
 
+// Без измерений самопроверки (откат, status, ADR-0033) в наборе три проверки.
+func TestControlWithoutSelftest(t *testing.T) {
+	c := healthy()
+	c.selftest = nil
+	r := c.run(t)
+	if r.Health != HealthOK || r.Summary != (Summary{OK: 3}) || status(r, CheckSelftest) != "нет наблюдения" {
+		t.Fatalf("%q %+v", r.Health, r.Summary)
+	}
+}
+
 func TestNewControlRejectsMissingDeps(t *testing.T) {
 	if _, err := NewControl(ControlDeps{}); !errors.Is(err, ErrRegistry) {
 		t.Fatalf("err = %v", err)
+	}
+	c := healthy()
+	if _, err := NewControl(ControlDeps{Service: c.svc, Net: c.net, Port: c.port, Validate: c.validate, Selftest: &SelftestDeps{}}); !errors.Is(err, ErrRegistry) {
+		t.Fatalf("неполные измерения самопроверки: %v", err)
 	}
 }

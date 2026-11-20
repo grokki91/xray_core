@@ -105,3 +105,29 @@ func TestFakeStartNeedsRunUnderRoot(t *testing.T) {
 		t.Errorf("вызов не записан как start: %+v", calls)
 	}
 }
+
+// HandleStart — процесс подделки без настоящего файла (L2): обработчик видит команду, Stop и
+// срок контекста завершают процесс, как у настоящего.
+func TestFakeHandleStart(t *testing.T) {
+	f := newFake(t.TempDir(), time.Time{}, testPrograms(t))
+	var got Command
+	f.HandleStart("cat", func(c Command) error { got = c; return nil })
+	p, err := f.Start(deadline(t, 30*time.Second), Command{Program: "cat", Args: []string{"a"}, Stdin: []byte("cfg")})
+	if err != nil || got.Program != "cat" || string(got.Stdin) != "cfg" || closed(p) {
+		t.Fatalf("запуск: %v, %+v", err, got)
+	}
+	p.Stop()
+	p.Stop()
+	if !closed(p) {
+		t.Error("Stop не завершил процесс подделки")
+	}
+	p, _ = f.Start(deadline(t, 100*time.Millisecond), Command{Program: "cat"})
+	waitDone(t, p, 3*time.Second)
+	f.HandleStart("cat", func(Command) error { return errors.New("не запустился") })
+	if _, err := f.Start(deadline(t, time.Second), Command{Program: "cat"}); err == nil {
+		t.Error("ошибка обработчика не дошла до Start")
+	}
+	if calls := f.Calls(); calls[0].Op != "start" {
+		t.Errorf("вызов не записан: %+v", calls)
+	}
+}

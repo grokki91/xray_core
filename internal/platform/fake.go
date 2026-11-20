@@ -26,6 +26,7 @@ type Fake struct {
 	handlers  map[string]func(Command) (Result, error)
 	underRoot map[string]bool
 	routes    map[string]fakeRoute
+	starters  map[string]func(Command) error
 	users     map[string]Owner
 	effective Owner
 	journal   *fakeJournal
@@ -46,7 +47,7 @@ type Call struct {
 func NewFake(root string, now time.Time) *Fake { return newFake(root, now, programs()) }
 
 func newFake(root string, now time.Time, progs map[string]string) *Fake {
-	f := &Fake{programs: progs, now: now, owners: map[string]Owner{}, handlers: map[string]func(Command) (Result, error){}, underRoot: map[string]bool{}, routes: map[string]fakeRoute{}, users: map[string]Owner{}, listening: map[int]bool{}}
+	f := &Fake{programs: progs, now: now, owners: map[string]Owner{}, handlers: map[string]func(Command) (Result, error){}, underRoot: map[string]bool{}, routes: map[string]fakeRoute{}, starters: map[string]func(Command) error{}, users: map[string]Owner{}, listening: map[int]bool{}}
 	f.journal = &fakeJournal{f: f}
 	f.files = files{root: root, chown: f.recordOwner, ownerOf: f.ownerOf, trace: f.trace}
 	return f
@@ -88,6 +89,14 @@ func (f *Fake) ServeStatus(url string, status int, body []byte) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.routes[url] = fakeRoute{body: slices.Clone(body), status: status}
+}
+
+// ServeVia задаёт ответ на адрес только для запроса через Proxy; прямой запрос видит Serve.
+// Без ServeVia запрос через прокси видит тот же ответ, что и прямой.
+func (f *Fake) ServeVia(url string, status int, body []byte) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.routes[viaKey(url)] = fakeRoute{body: slices.Clone(body), status: status}
 }
 
 // Redirect задаёт перенаправление с адреса from на to.
@@ -157,6 +166,7 @@ func (f *Fake) RunUnderRoot(program string) {
 	defer f.mu.Unlock()
 	f.underRoot[program] = true
 	delete(f.handlers, program)
+	delete(f.starters, program)
 }
 
 func (f *Fake) Exec(ctx context.Context, c Command) (Result, error) {
@@ -201,6 +211,27 @@ func (f *Fake) rootArgs(in []string) ([]string, error) {
 	return args, nil
 }
 
+// HandleStart велит Start подделки не запускать файл, а вызвать h: процесс живёт до Stop или
+// конца срока контекста. Ошибка h — ошибка Start. Заменяет RunUnderRoot для программы.
+func (f *Fake) HandleStart(program string, h func(Command) error) {
+	if _, ok := f.programs[program]; !ok && program != xrayProgram {
+		panic(fmt.Sprintf("platform.Fake: программы %q нет в закрытом списке", program)) // ошибка теста
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.starters[program] = h
+	delete(f.underRoot, program)
+}
+
+// fakeProc — процесс без файла: завершается по Stop или по сроку контекста.
+type fakeProc struct {
+	done chan struct{}
+	once sync.Once
+}
+
+func (p *fakeProc) Done() <-chan struct{} { return p.done }
+func (p *fakeProc) Stop()                 { p.once.Do(func() { close(p.done) }) }
+
 // Start запускает в фоне настоящий файл программы под root, как RunUnderRoot; без RunUnderRoot —
 // ошибка: у фонового процесса нет обработчика.
 func (f *Fake) Start(ctx context.Context, c Command) (Process, error) {
@@ -213,10 +244,24 @@ func (f *Fake) Start(ctx context.Context, c Command) (Process, error) {
 	}
 	f.mu.Lock()
 	f.calls = append(f.calls, Call{Op: "start", Path: c.Program, Version: c.Version, Args: slices.Clone(c.Args)})
-	underRoot := f.underRoot[c.Program]
+	underRoot, handler := f.underRoot[c.Program], f.starters[c.Program]
 	f.mu.Unlock()
+	if handler != nil {
+		if err := handler(c); err != nil {
+			return nil, err
+		}
+		p := &fakeProc{done: make(chan struct{})}
+		go func() {
+			select {
+			case <-ctx.Done():
+				p.Stop()
+			case <-p.done:
+			}
+		}()
+		return p, nil
+	}
 	if !underRoot {
-		return nil, fmt.Errorf("platform.Fake: Start %q без RunUnderRoot", c.Program)
+		return nil, fmt.Errorf("platform.Fake: Start %q без RunUnderRoot и HandleStart", c.Program)
 	}
 	args, err := f.rootArgs(c.Args)
 	if err != nil {

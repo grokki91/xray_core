@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io/fs"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -106,9 +107,52 @@ func TestImplementationsAgree(t *testing.T) {
 			if _, err := fsys.ReadFile(dir + "/fifo"); err == nil {
 				t.Error("FIFO прочитан как файл")
 			}
+			if err := fsys.Remove(dir + "/fifo"); err == nil {
+				t.Error("Remove удалил FIFO")
+			}
 			if err := os.Remove(onDisk(i, dir+"/fifo")); err != nil {
 				t.Fatal(err)
 			}
+			// Сокет Unix — след убитого клиента самопроверки: Remove его удаляет (ADR-0032).
+			sock := dir + "/s.sock"
+			ln, err := net.Listen("unix", onDisk(i, sock))
+			if err != nil {
+				t.Fatal(err)
+			}
+			ln.(*net.UnixListener).SetUnlinkOnClose(false)
+			ln.Close()
+			if err := fsys.Remove(sock); err != nil {
+				t.Errorf("Remove сокета: %v", err)
+			}
+			if _, err := os.Lstat(onDisk(i, sock)); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("сокет не удалён: %v", err)
+			}
+			if err := fsys.Remove(sock); !errors.Is(err, ErrNotFound) {
+				t.Errorf("Remove отсутствующего: %v, нужен ErrNotFound", err)
+			}
+			// Расширение на сокеты не снимает защиту от ссылок: ссылка на сокет и путь через ссылку.
+			real := dir + "/real.sock"
+			ln2, err := net.Listen("unix", onDisk(i, real))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(onDisk(i, real), onDisk(i, dir+"/sock-link")); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(filepath.Dir(onDisk(i, real)), onDisk(i, dir+"/dir-link")); err != nil {
+				t.Fatal(err)
+			}
+			for _, p := range []string{dir + "/sock-link", dir + "/dir-link/real.sock"} {
+				if err := fsys.Remove(p); !errors.Is(err, ErrSymlink) {
+					t.Errorf("Remove(%s): %v, нужен ErrSymlink", p, err)
+				}
+			}
+			if _, err := os.Lstat(onDisk(i, real)); err != nil {
+				t.Errorf("сокет за ссылкой удалён: %v", err)
+			}
+			ln2.Close() // убирает real.sock
+			os.Remove(onDisk(i, dir+"/sock-link"))
+			os.Remove(onDisk(i, dir+"/dir-link"))
 
 			for _, bad := range []string{"etc/state.json", i.base + "/etc/../etc/state.json", i.base + "/etc/"} {
 				if _, err := fsys.ReadFile(bad); !errors.Is(err, ErrPath) {

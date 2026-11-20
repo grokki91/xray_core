@@ -369,3 +369,37 @@ func TestValidateCurrent(t *testing.T) {
 		t.Fatalf("проверка не действующей версией: %q", got.Version)
 	}
 }
+
+// StartClient запускает действующую версию в фоне: `run -c stdin:`, конфигурация — только
+// через stdin (в ней секрет), не аргументом (ADR-0032).
+func TestStartClient(t *testing.T) {
+	f, m, _ := env(t)
+	var got platform.Command
+	f.HandleStart("xray", func(c platform.Command) error { got = c; return nil })
+	cfg := []byte(`{"secret":"x"}`)
+	if _, err := m.StartClient(ctx(t), cfg); err == nil {
+		t.Fatal("без активной версии клиент запущен")
+	}
+	if err := m.Stage(ctx(t), v2, release(t, elfBin(t))); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Activate(ctx(t), v2); err != nil {
+		t.Fatal(err)
+	}
+	p, err := m.StartClient(ctx(t), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Stop()
+	if got.Version != string(v2) || strings.Join(got.Args, " ") != "run -c stdin:" || !bytes.Equal(got.Stdin, cfg) {
+		t.Fatalf("команда %+v", got)
+	}
+	for _, a := range got.Args {
+		if strings.Contains(a, "secret") {
+			t.Fatalf("конфигурация в аргументах: %q", a)
+		}
+	}
+	if _, err := m.StartClient(ctx(t), nil); err == nil {
+		t.Error("пустая конфигурация принята")
+	}
+}
