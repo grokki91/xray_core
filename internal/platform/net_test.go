@@ -248,13 +248,19 @@ func connectProxy(t *testing.T) (socket string, connects *atomic.Int32) {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
-		w.WriteHeader(http.StatusOK)
-		src, _, err := w.(http.Hijacker).Hijack()
+		// Ответ пишется в соединение после Hijack, а байты клиента берутся и из буфера сервера:
+		// начало ClientHello может уже лежать в нём, и без буфера цель получит обрезанный поток.
+		src, buf, err := w.(http.Hijacker).Hijack()
 		if err != nil {
 			dst.Close()
 			return
 		}
-		go func() { io.Copy(dst, src); dst.Close() }()
+		if _, err := io.WriteString(src, "HTTP/1.1 200 OK\r\n\r\n"); err != nil {
+			src.Close()
+			dst.Close()
+			return
+		}
+		go func() { io.Copy(dst, buf); dst.Close() }()
 		io.Copy(src, dst)
 		src.Close()
 	})}
