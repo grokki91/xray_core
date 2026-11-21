@@ -49,3 +49,4 @@
 | [0031](0031-github-api-token.md) | Токен API GitHub из окружения | Принято |
 | [0032](0032-selftest-client-and-l3-target.md) | Самопроверка — служебный клиент, процесс клиента Xray и цель L3 | Принято |
 | [0033](0033-selftest-only-in-change-control.md) | Самопроверка — только в контроле изменения, `skip` не провал | Принято |
+| [0034](0034-own-final-rules-over-upstream-default.md) | Свой запрет частных адресов при встроенном запрете upstream | Принято |

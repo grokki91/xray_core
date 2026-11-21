@@ -1,8 +1,8 @@
 // Пакет config — конфигурация Xray, производная от состояния (docs/architecture/components.md,
 // config; ADR-0004). Одно состояние → побайтно один файл. Разделы: log (готовый раздел
 // приносит вызывающий — от logging), dns (из состояния), inbounds (пресет и клиенты), outbounds,
-// routing с запретом частных, петлевых и link-local адресов назначения (docs/security/policy.md
-// §4). Проверку `xray run -test` выполняет вызывающий через core.Validate: менеджеры друг друга
+// исходящий freedom с запретом частных, петлевых и link-local адресов назначения в finalRules
+// (docs/security/policy.md §4, ADR-0027). Проверку `xray run -test` выполняет вызывающий через core.Validate: менеджеры друг друга
 // не импортируют.
 package config
 
@@ -83,14 +83,10 @@ func (m *Manager) Render(st store.State, logSection json.RawMessage) (Rendered, 
 		Log:      logSection,
 		DNS:      dnsSection(st.DNS),
 		Inbounds: []json.RawMessage{inbound},
-		Outbounds: []outbound{
-			{Tag: tagDirect, Protocol: "freedom"},
-			{Tag: tagBlock, Protocol: "blackhole"},
-		},
-		Routing: routing{
-			DomainStrategy: "IPOnDemand",
-			Rules:          []rule{{Type: "field", IP: deniedCIDRs, OutboundTag: tagBlock}},
-		},
+		Outbounds: []outbound{{
+			Tag: tagDirect, Protocol: "freedom",
+			Settings: freedomSettings{FinalRules: []finalRule{{Action: "block", IP: deniedCIDRs}}},
+		}},
 	}
 	return finish(doc)
 }
@@ -194,13 +190,13 @@ func (m *Manager) Drift(st store.State) (bool, error) {
 	return got != st.Applied.ConfigSHA256, nil
 }
 
-const (
-	tagDirect = "direct"
-	tagBlock  = "block"
-)
+const tagDirect = "direct"
 
 // deniedCIDRs — адреса назначения, которые клиент VPN не должен достать через тоннель:
-// частные, петлевые, link-local и «этот хост» (0.0.0.0 на Linux ведёт на сам сервер).
+// частные, петлевые, link-local и «этот хост» (0.0.0.0 на Linux ведёт на сам сервер). Запрет —
+// finalRules исходящего freedom (ADR-0027): правило проверяет адрес, на который действительно
+// идёт соединение, после разрешения имени. Встроенный запрет частных адресов в freedom
+// (docs/compatibility.md §2) не заменяет его: поведение upstream по умолчанию может измениться.
 var deniedCIDRs = []string{
 	"0.0.0.0/8", "10.0.0.0/8", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16",
 	"::/128", "::1/128", "fc00::/7", "fe80::/10",
@@ -212,7 +208,6 @@ type document struct {
 	DNS       *dns              `json:"dns,omitempty"`
 	Inbounds  []json.RawMessage `json:"inbounds"`
 	Outbounds []outbound        `json:"outbounds"`
-	Routing   routing           `json:"routing"`
 }
 
 type dns struct {
@@ -229,19 +224,18 @@ func dnsSection(d store.DNS) *dns {
 }
 
 type outbound struct {
-	Tag      string `json:"tag"`
-	Protocol string `json:"protocol"`
+	Tag      string          `json:"tag"`
+	Protocol string          `json:"protocol"`
+	Settings freedomSettings `json:"settings"`
 }
 
-type routing struct {
-	DomainStrategy string `json:"domainStrategy"`
-	Rules          []rule `json:"rules"`
+type freedomSettings struct {
+	FinalRules []finalRule `json:"finalRules"`
 }
 
-type rule struct {
-	Type        string   `json:"type"`
-	IP          []string `json:"ip"`
-	OutboundTag string   `json:"outboundTag"`
+type finalRule struct {
+	Action string   `json:"action"`
+	IP     []string `json:"ip"`
 }
 
 // CandidatePath — временный файл новой конфигурации для `xray run -test`: до атомарной записи в
