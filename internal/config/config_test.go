@@ -100,27 +100,34 @@ func TestRenderNoProfilesIsValidDocument(t *testing.T) {
 }
 
 func TestRenderBlocksPrivateDestinations(t *testing.T) {
+	// ADR-0027: запрет — finalRules единственного исходящего freedom; маршрутизации и blackhole нет.
 	var doc struct {
-		Outbounds []struct{ Tag, Protocol string }
-		Routing   struct {
-			DomainStrategy string
-			Rules          []struct {
-				IP          []string
-				OutboundTag string
+		Outbounds []struct {
+			Tag, Protocol string
+			Settings      struct {
+				FinalRules []struct {
+					Action string
+					IP     []string
+				}
 			}
 		}
+		Routing json.RawMessage
 	}
 	if err := json.Unmarshal(render(t, state()).Data, &doc); err != nil {
 		t.Fatal(err)
 	}
-	if doc.Outbounds[0].Protocol != "freedom" || doc.Outbounds[1].Protocol != "blackhole" {
+	if len(doc.Outbounds) != 1 || doc.Outbounds[0].Protocol != "freedom" {
 		t.Fatalf("outbounds: %+v", doc.Outbounds)
 	}
-	if doc.Routing.DomainStrategy != "IPOnDemand" || len(doc.Routing.Rules) != 1 || doc.Routing.Rules[0].OutboundTag != doc.Outbounds[1].Tag {
-		t.Fatalf("routing: %+v", doc.Routing)
+	if doc.Routing != nil {
+		t.Fatalf("раздел routing остался: %s", doc.Routing)
+	}
+	rules := doc.Outbounds[0].Settings.FinalRules
+	if len(rules) != 1 || rules[0].Action != "block" {
+		t.Fatalf("finalRules: %+v", rules)
 	}
 	have := map[string]bool{}
-	for _, c := range doc.Routing.Rules[0].IP {
+	for _, c := range rules[0].IP {
 		have[c] = true
 	}
 	for _, c := range []string{"0.0.0.0/8", "10.0.0.0/8", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16", "::/128", "::1/128", "fc00::/7", "fe80::/10"} {

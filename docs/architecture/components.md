@@ -253,8 +253,8 @@ type Preset interface {  // каталог пресетов: config/preset
   нет входящего или адреса — `ErrState`. Разборщика ссылок нет: L3 сверяет параметры ссылки с
   параметрами клиента. Ошибки отрисовки несут
   имена полей, не значения. Адреса назначения `0.0.0.0/8`, частные, петлевые и link-local
-  уходят в `blackhole` правилом с `domainStrategy: IPOnDemand`; задача A1 заменяет его на
-  `freedom.finalRules` (ADR-0027).
+  блокирует `settings.finalRules` единственного исходящего `freedom` (`action: block`); раздела
+  `routing` нет (ADR-0027, ADR-0034).
 - Проверка — `core.Validate` перед записью. Набор полей сверяется с upstream по скилу
   `xray-upstream`. Фаза 2.
 
