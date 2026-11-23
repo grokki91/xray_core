@@ -120,6 +120,7 @@ bash scripts/check.sh   # синтаксис, инструкции, ссылки
 | ревью перед PR | субагенты `security-reviewer`, `architecture-reviewer` — `docs/dev/code-review.md` §1 |
 | независимая часть задачи, выданная оркестратором | субагент `implementer` |
 | факт об upstream, которого нет в `docs/compatibility.md` | субагент `upstream-researcher` |
+| выпуск, тег, `release.yml`, `install.sh` | скил `release` |
 | PR создан; владелец прислал строку результата проверки | субагент `integration-check` — `docs/dev/integration-check.md` |
 
 Скилы — `.claude/skills/<имя>/SKILL.md`, правила — `.claude/rules/`, субагенты —

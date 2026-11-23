@@ -279,7 +279,7 @@
    UFW — по ADR этой фазы.
 6. **`xm uninstall [--purge]`** по [data-model.md](architecture/data-model.md) §6 и ADR этой
    фазы, с подтверждением вводом слова.
-7. **Выпуск и загрузчик.** Конвейер: сборка linux/amd64, `SHA256SUMS`, версия из тега; `install.sh`
+7. ✅ ~~**Выпуск и загрузчик.**~~ Конвейер: сборка linux/amd64, `SHA256SUMS`, версия из тега; `install.sh`
    по [ADR-0013](adr/0013-distribution-and-bootstrap.md) — только скачать, сверить, запустить
    `xm install`; подтверждение происхождения сборки отдельным заданием выпуска
    ([ADR-0016](adr/0016-ci-and-tooling.md), [policy.md](security/policy.md) §6). Скил `release`.
@@ -297,7 +297,7 @@
     манифесту, посторонние файлы целы;
   - испорченный бинарник `xm` отвергается загрузчиком до установки;
   - у выпуска есть подтверждение происхождения сборки (`gh attestation verify` проходит);
-  - L4 зелёный на обеих ОС; опубликован предварительный выпуск 0.0.x.
+  - L4 зелёный на обеих ОС; опубликован выпуск 0.0.x (обычный, не prerelease: его находит `releases/latest`).
 - **Вне фазы**: `xm update`, диагностика, другие ОС и архитектуры, `xm harden`.
 - **Читать**: разделы `network`, `dns`, `server` в [components.md](architecture/components.md);
   [overview.md](architecture/overview.md) §6; [policy.md](security/policy.md) §6–§8;

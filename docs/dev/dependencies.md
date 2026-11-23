@@ -36,18 +36,19 @@
 | staticcheck | статический анализ Go в CI | ошибки сверх `go vet` | модуль `honnef.co/go/tools` v0.8.2 (выпуск 2026.2.2), `sum.golang.org`; собирается тулчейном из `go.mod` | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
 | shellcheck | анализ Bash в CI | все `*.sh` репозитория: `scripts/`, `tests/`, хуки, `install.sh` | 0.11.0; бинарник из релизов `koalaman/shellcheck`, SHA-256 в workflow: upstream сумм не публикует — посчитана 2026-11-15 по двум загрузкам с релиза из одной сети (совпали), независимой сверки нет; при обновлении старая сумма сверяется с новой загрузкой старой версии | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md) |
 | Пакетный менеджер ОС | `apt-get`, `dpkg-query` на VPS; `winget` на Windows 11 | недостающие инструменты скрипта проверки на реальной интеграции у владельца; поставленное скриптом удаляется в его конце | источники пакетов ОС владельца; версии не фиксируются | 2026-11-16, запрос владельца; [ADR-0021](../adr/0021-owner-integration-check.md) |
-| Подтверждение происхождения сборки | шаг конвейера выпуска | свидетельство сборки `xm` из коммита | — | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md); подключается в фазе 4 |
+| Подтверждение происхождения сборки | шаг конвейера выпуска | свидетельство сборки `xm` из коммита | действие `actions/attest-build-provenance`, задание `provenance` в `release.yml` | 2026-11-14, [ADR-0016](../adr/0016-ci-and-tooling.md); подключается в фазе 4 |
+| `actions/attest-build-provenance` | действие CI | подтверждение происхождения `xm-linux-amd64` и `install.sh` в задании `provenance` `release.yml` | v4.2.2, коммит `4d101475d8b20a2381f78447822ac1eab6504dd8` (`git ls-remote --tags`, 2026-11-23) | 2026-11-14, строка «Подтверждение происхождения сборки» ([ADR-0016](../adr/0016-ci-and-tooling.md)) |
 
 Строка здесь — согласие; подключённым инструмент становится с появлением в workflow
 ([check.yml](../../.github/workflows/check.yml): GitHub Actions, `actions/checkout`, gitleaks,
-govulncheck, staticcheck, shellcheck подключены 2026-11-15). Правила
+govulncheck, staticcheck, shellcheck подключены 2026-11-15; [release.yml](../../.github/workflows/release.yml): `actions/checkout`, `actions/attest-build-provenance` — 2026-11-23). Правила
 конвейера — [policy.md](../security/policy.md) §6. Внешние адреса сборки и CI (не `xm`):
 
 | Адрес | Кто обращается | Зачем |
 |---|---|---|
 | `proxy.golang.org`, `sum.golang.org` | `go` локально и в CI; `go run …@версия` в CI; `go` в шагах скрипта проверки у владельца | тулчейн версии из `go.mod`; модули govulncheck и staticcheck; проверка сумм |
 | `vuln.go.dev` | govulncheck | база уязвимостей Go |
-| `github.com` (релизы `gitleaks/gitleaks`, `koalaman/shellcheck`, `XTLS/Xray-core`; `actions/checkout`) | шаги CI, раннер; тесты L3 локально и в CI; скрипт проверки на реальной интеграции у владельца (репозиторий проекта) | бинарники сканеров; архивы Xray для стенда L3 ([ADR-0020](../adr/0020-l3-stand.md)); код действия; проверяемый коммит ([ADR-0021](../adr/0021-owner-integration-check.md)) |
+| `github.com` (релизы `gitleaks/gitleaks`, `koalaman/shellcheck`, `XTLS/Xray-core`; `actions/checkout`, `actions/attest-build-provenance`) | шаги CI, раннер; тесты L3 локально и в CI; скрипт проверки на реальной интеграции у владельца (репозиторий проекта) | бинарники сканеров; архивы Xray для стенда L3 ([ADR-0020](../adr/0020-l3-stand.md)); код действия; проверяемый коммит ([ADR-0021](../adr/0021-owner-integration-check.md)) |
 | `release-assets.githubusercontent.com` | шаги CI; тесты L3; установщик Git через `winget` у владельца | файлы релизов сканеров и Xray: на него перенаправляет `github.com` ([ADR-0016](../adr/0016-ci-and-tooling.md)) |
 | источники пакетов ОС: зеркала apt из `sources.list` VPS; источник `winget` Microsoft и адрес установщика из манифеста пакета | скрипт проверки на реальной интеграции у владельца | недостающие инструменты ([ADR-0021](../adr/0021-owner-integration-check.md)) |
 
