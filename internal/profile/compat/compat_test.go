@@ -10,7 +10,7 @@ import (
 )
 
 // docRow — строка первой таблицы docs/compatibility.md §3.
-type docRow struct{ name, core, reality string }
+type docRow struct{ name, core, reality, status string }
 
 // readDocClients разбирает первую таблицу раздела «## 3. Клиенты».
 func readDocClients(t *testing.T) []docRow {
@@ -47,7 +47,7 @@ func readDocClients(t *testing.T) []docRow {
 		}
 		if !inTable {
 			inTable = true
-			if len(cells) < 3 || cells[0] != "Клиент" || cells[1] != "Ядро" || cells[2] != "Подключение по REALITY" {
+			if len(cells) < 5 || cells[0] != "Клиент" || cells[1] != "Ядро" || cells[2] != "Подключение по REALITY" || cells[4] != "Статус и источник" {
 				t.Fatalf("заголовок таблицы клиентов изменился: %q", line)
 			}
 			continue
@@ -55,7 +55,7 @@ func readDocClients(t *testing.T) []docRow {
 		if strings.HasPrefix(cells[0], "---") {
 			continue
 		}
-		rows = append(rows, docRow{name: cells[0], core: cells[1], reality: cells[2]})
+		rows = append(rows, docRow{name: cells[0], core: cells[1], reality: cells[2], status: strings.ReplaceAll(cells[4], "`", "")})
 	}
 	if err := sc.Err(); err != nil {
 		t.Fatal(err)
@@ -107,6 +107,9 @@ func TestTableMatchesCompatibilityDoc(t *testing.T) {
 		}
 		if r.Core != d.core {
 			t.Errorf("%s: ядро %q в данных, %q в документе", d.name, r.Core, d.core)
+		}
+		if r.Source != d.status {
+			t.Errorf("%s: источник %q в данных, %q в документе", d.name, r.Source, d.status)
 		}
 		if w := verdict(t, d.reality); r.Works != w {
 			t.Errorf("%s: работает=%v в данных, в документе %q", d.name, r.Works, d.reality)
