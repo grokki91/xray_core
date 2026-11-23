@@ -50,9 +50,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }} # только этому шагу: check.sh и сборка токена не видят
         run: |
-          pre=()
-          [[ $TAG == v0.0.* ]] && pre=(--prerelease)
-          gh release create "$TAG" "${pre[@]}" --verify-tag --title "$TAG" --generate-notes \
+          gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes \
             dist/xm-linux-amd64 dist/install.sh dist/SHA256SUMS
 
   # Отдельное задание: права id-token и attestations не получает шаг, исполняющий сборку и check.sh.

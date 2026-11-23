@@ -297,7 +297,7 @@
     манифесту, посторонние файлы целы;
   - испорченный бинарник `xm` отвергается загрузчиком до установки;
   - у выпуска есть подтверждение происхождения сборки (`gh attestation verify` проходит);
-  - L4 зелёный на обеих ОС; опубликован предварительный выпуск 0.0.x.
+  - L4 зелёный на обеих ОС; опубликован выпуск 0.0.x (обычный, не prerelease: его находит `releases/latest`).
 - **Вне фазы**: `xm update`, диагностика, другие ОС и архитектуры, `xm harden`.
 - **Читать**: разделы `network`, `dns`, `server` в [components.md](architecture/components.md);
   [overview.md](architecture/overview.md) §6; [policy.md](security/policy.md) §6–§8;
