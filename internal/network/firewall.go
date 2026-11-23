@@ -2,7 +2,6 @@ package network
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -22,7 +21,7 @@ const (
 	FirewallUnknown FirewallState = "unknown" // не определено
 )
 
-// Firewall — состояние и откуда оно взято: ufw, nftables или пусто (не прочитано).
+// Firewall — состояние и откуда оно взято: ufw, iptables или пусто (не прочитано).
 type Firewall struct {
 	State  FirewallState
 	Source string
@@ -31,9 +30,9 @@ type Firewall struct {
 
 const fwTimeout = 10 * time.Second
 
-// firewall: UFW активен — его вердикт по правилам и политике входящих; иначе — политики цепочек
-// netfilter на хуке input (nft видит и iptables-nft). Правила netfilter не разбираются: при
-// политике drop вердикт зависит от них — «не определено». Ничего не меняет (ADR-0036).
+// firewall: UFW активен — его вердикт по правилам и политике входящих; иначе — цепочка INPUT
+// iptables и ip6tables: политика ACCEPT и ни одного правила DROP/REJECT в обоих семействах —
+// «разрешён»; иначе запрет не доказан — «не определено». Ничего не меняет (ADR-0036).
 // Срок или отмена при чтении — «не определено», а не ошибка фактов: остальное уже собрано.
 func (m *Manager) firewall(ctx context.Context, port int) Firewall {
 	res, err := m.read(ctx, platform.UFW, "status", "verbose")
@@ -51,16 +50,35 @@ func (m *Manager) firewall(ctx context.Context, port int) Firewall {
 			return Firewall{State: st, Source: "ufw", Note: note}
 		}
 	}
-	join := func(n string) string { return strings.TrimPrefix(ufwNote+"; "+n, "; ") }
-	res, err = m.read(ctx, platform.NFT, "-j", "list", "chains")
-	if err != nil || res.ExitCode != 0 {
-		return Firewall{State: FirewallUnknown, Note: join("nft не прочитал цепочки")}
+	var notes []string
+	if ufwNote != "" {
+		notes = append(notes, ufwNote)
 	}
-	st, note := nftVerdict(res.Stdout)
-	if note == "" && ufwNote == "" {
-		return Firewall{State: st, Source: "nftables"}
+	allowed := true
+	for _, prog := range []string{platform.IPTables, platform.IP6Tables} {
+		res, err := m.read(ctx, prog, "-S", "INPUT")
+		var ok bool
+		var note string
+		switch {
+		case err != nil:
+			note = prog + " не прочитан: " + err.Error()
+		case res.ExitCode != 0:
+			note = fmt.Sprintf("%s не прочитан: код %d", prog, res.ExitCode)
+		default:
+			ok, note = inputVerdict(string(res.Stdout))
+			if note != "" {
+				note = prog + ": " + note
+			}
+		}
+		if !ok {
+			allowed = false
+			notes = append(notes, note)
+		}
 	}
-	return Firewall{State: st, Source: "nftables", Note: join(note)}
+	if allowed {
+		return Firewall{State: FirewallAllowed, Source: "iptables", Note: strings.Join(notes, "; ")}
+	}
+	return Firewall{State: FirewallUnknown, Source: "iptables", Note: strings.Join(notes, "; ")}
 }
 
 // read запускает утилиту чтения со своим сроком.
@@ -125,30 +143,27 @@ func ufwVerdict(out string, port int) (active bool, st FirewallState, note strin
 	return active, FirewallUnknown, "политика UFW не разобрана"
 }
 
-// nftVerdict — политики цепочек с хуком input: нет таких или все accept — разрешён.
-func nftVerdict(out []byte) (FirewallState, string) {
-	var doc struct {
-		Nftables []struct {
-			Chain *struct {
-				Hook   string `json:"hook"`
-				Policy string `json:"policy"`
-			} `json:"chain"`
-		} `json:"nftables"`
+// inputVerdict — вывод iptables -S INPUT: первая строка «-P INPUT ACCEPT|DROP», дальше только
+// «-A INPUT …». Разрешён — политика ACCEPT и нет цели DROP/REJECT; незнакомый формат — не разрешён.
+func inputVerdict(out string) (bool, string) {
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	switch lines[0] {
+	case "-P INPUT ACCEPT":
+	case "-P INPUT DROP":
+		return false, "политика INPUT — DROP; правила не разбираются"
+	default:
+		return false, "вывод не разобран"
 	}
-	if err := json.Unmarshal(out, &doc); err != nil {
-		return FirewallUnknown, "вывод nft не разобран"
-	}
-	for _, o := range doc.Nftables {
-		if o.Chain == nil || o.Chain.Hook != "input" {
-			continue
+	for _, l := range lines[1:] {
+		f := strings.Fields(l)
+		if len(f) < 2 || f[0] != "-A" || f[1] != "INPUT" {
+			return false, "вывод не разобран"
 		}
-		switch o.Chain.Policy {
-		case "accept":
-		case "drop":
-			return FirewallUnknown, "политика input — drop; правила netfilter не разбираются"
-		default:
-			return FirewallUnknown, fmt.Sprintf("политика input %q не разобрана", o.Chain.Policy)
+		for k := 2; k+1 < len(f); k++ {
+			if f[k] == "-j" && (f[k+1] == "DROP" || f[k+1] == "REJECT") {
+				return false, "в INPUT есть правило " + f[k+1]
+			}
 		}
 	}
-	return FirewallAllowed, ""
+	return true, ""
 }

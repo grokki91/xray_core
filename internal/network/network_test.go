@@ -3,6 +3,7 @@ package network
 import (
 	"context"
 	"net/netip"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -24,11 +25,12 @@ func out(s string) func(platform.Command) (platform.Result, error) {
 	return func(platform.Command) (platform.Result, error) { return platform.Result{Stdout: []byte(s)}, nil }
 }
 
-// fake — хост с выключенным UFW и пустым nftables, если тест не задал иное.
+// fake — хост с выключенным UFW и пустой INPUT с политикой ACCEPT, если тест не задал иное.
 func fake(t *testing.T) *platform.Fake {
 	f := platform.NewFake(t.TempDir(), time.Now())
 	f.Handle(platform.UFW, out("Status: inactive\n"))
-	f.Handle(platform.NFT, out(`{"nftables":[{"metainfo":{}}]}`))
+	f.Handle(platform.IPTables, out("-P INPUT ACCEPT\n"))
+	f.Handle(platform.IP6Tables, out("-P INPUT ACCEPT\n"))
 	return f
 }
 
@@ -147,24 +149,28 @@ func TestPortFree(t *testing.T) {
 func TestFirewallStates(t *testing.T) {
 	const ufwHead = "Status: active\nLogging: on (low)\nDefault: deny (incoming), allow (outgoing), disabled (routed)\n\nTo                         Action      From\n--                         ------      ----\n22/tcp                     ALLOW IN    Anywhere\n"
 	cases := []struct {
-		name, ufw, nft string
-		want           FirewallState
-		source         string
+		name, ufw, ipt4, ipt6 string
+		want                  FirewallState
+		source                string
 	}{
-		{"ufw разрешает", ufwHead + "443/tcp                    ALLOW IN    Anywhere\n443/tcp (v6)               ALLOW IN    Anywhere (v6)\n", "", FirewallAllowed, "ufw"},
-		{"ufw запрещает правилом", ufwHead + "443                        DENY IN     Anywhere\n", "", FirewallDenied, "ufw"},
-		{"ufw без правила, политика deny", ufwHead, "", FirewallDenied, "ufw"},
-		{"ufw с ограничением источника", ufwHead + "443/tcp                    ALLOW IN    192.0.2.0/24\n", "", FirewallUnknown, "ufw"},
-		{"nft accept", "Status: inactive\n", `{"nftables":[{"chain":{"family":"inet","table":"filter","name":"input","hook":"input","policy":"accept"}}]}`, FirewallAllowed, "nftables"},
-		{"nft drop", "Status: inactive\n", `{"nftables":[{"chain":{"family":"ip","table":"filter","name":"INPUT","hook":"input","policy":"drop"}},{"chain":{"hook":"output","policy":"accept"}}]}`, FirewallUnknown, "nftables"},
-		{"nft не разобран", "Status: inactive\n", `oops`, FirewallUnknown, "nftables"},
+		{"ufw разрешает", ufwHead + "443/tcp                    ALLOW IN    Anywhere\n443/tcp (v6)               ALLOW IN    Anywhere (v6)\n", "", "", FirewallAllowed, "ufw"},
+		{"ufw запрещает правилом", ufwHead + "443                        DENY IN     Anywhere\n", "", "", FirewallDenied, "ufw"},
+		{"ufw без правила, политика deny", ufwHead, "", "", FirewallDenied, "ufw"},
+		{"ufw с ограничением источника", ufwHead + "443/tcp                    ALLOW IN    192.0.2.0/24\n", "", "", FirewallUnknown, "ufw"},
+		{"iptables accept, правила без запрета", "Status: inactive\n", "-P INPUT ACCEPT\n-A INPUT -p tcp -m tcp --dport 22 -j ACCEPT\n", "-P INPUT ACCEPT\n", FirewallAllowed, "iptables"},
+		{"iptables политика DROP", "Status: inactive\n", "-P INPUT DROP\n-A INPUT -p tcp -m tcp --dport 443 -j ACCEPT\n", "-P INPUT ACCEPT\n", FirewallUnknown, "iptables"},
+		{"ip6tables правило REJECT", "Status: inactive\n", "-P INPUT ACCEPT\n", "-P INPUT ACCEPT\n-A INPUT -s 2001:db8::/32 -j REJECT --reject-with icmp6-port-unreachable\n", FirewallUnknown, "iptables"},
+		{"iptables правило DROP", "Status: inactive\n", "-P INPUT ACCEPT\n-A INPUT -p tcp -j DROP\n", "-P INPUT ACCEPT\n", FirewallUnknown, "iptables"},
+		{"iptables незнакомый формат", "Status: inactive\n", "Chain INPUT (policy ACCEPT)\n", "-P INPUT ACCEPT\n", FirewallUnknown, "iptables"},
+		{"iptables лишняя цепочка", "Status: inactive\n", "-P INPUT ACCEPT\n-N extra\n", "-P INPUT ACCEPT\n", FirewallUnknown, "iptables"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			f := fake(t)
 			f.Handle(platform.UFW, out(c.ufw))
-			if c.nft != "" {
-				f.Handle(platform.NFT, out(c.nft))
+			if c.ipt4 != "" {
+				f.Handle(platform.IPTables, out(c.ipt4))
+				f.Handle(platform.IP6Tables, out(c.ipt6))
 			}
 			got, err := New(f).Facts(ctx(t), Request{Port: 443, Address: "198.51.100.20"})
 			if err != nil {
@@ -186,7 +192,7 @@ func TestFirewallStates(t *testing.T) {
 }
 
 func TestFirewallNoTools(t *testing.T) {
-	f := platform.NewFake(t.TempDir(), time.Now()) // ни ufw, ни nft не отвечают
+	f := platform.NewFake(t.TempDir(), time.Now()) // ни ufw, ни iptables не отвечают
 	got, err := New(f).Facts(ctx(t), Request{Port: 443, Address: "198.51.100.20"})
 	if err != nil {
 		t.Fatal(err)
@@ -239,7 +245,47 @@ func TestFirewallUFWFailureNoted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Firewall.Source != "nftables" || !strings.Contains(got.Firewall.Note, "ufw не прочитан") {
+	if got.Firewall.Source != "iptables" || !strings.Contains(got.Firewall.Note, "ufw не прочитан") {
 		t.Fatalf("сбой ufw не назван: %+v", got.Firewall)
+	}
+}
+
+func TestFirewallIPTablesFailures(t *testing.T) {
+	cases := map[string]func(platform.Command) (platform.Result, error){
+		"срок":   func(platform.Command) (platform.Result, error) { return platform.Result{}, context.DeadlineExceeded },
+		"код":    func(platform.Command) (platform.Result, error) { return platform.Result{ExitCode: 3}, nil },
+		"ошибка": func(platform.Command) (platform.Result, error) { return platform.Result{}, os.ErrNotExist },
+	}
+	for name, h := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := fake(t)
+			f.Handle(platform.IP6Tables, h)
+			got, err := New(f).Facts(ctx(t), Request{Port: 443, Address: "198.51.100.20"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Firewall.State != FirewallUnknown || !strings.Contains(got.Firewall.Note, "ip6tables не прочитан") {
+				t.Fatalf("сбой ip6tables: %+v", got.Firewall)
+			}
+		})
+	}
+}
+
+func TestFirewallIPTablesReadOnly(t *testing.T) {
+	f := fake(t)
+	if _, err := New(f).Facts(ctx(t), Request{Port: 443, Address: "198.51.100.20"}); err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, c := range f.Calls() {
+		if c.Op == "exec" && (c.Path == platform.IPTables || c.Path == platform.IP6Tables) {
+			n++
+			if len(c.Args) != 2 || c.Args[0] != "-S" || c.Args[1] != "INPUT" {
+				t.Fatalf("%s вызван не для чтения: %v", c.Path, c.Args)
+			}
+		}
+	}
+	if n != 2 {
+		t.Fatalf("вызовов iptables/ip6tables: %d", n)
 	}
 }

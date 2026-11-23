@@ -16,16 +16,17 @@ import (
 
 // Программы чтения сетевых фактов (network): только чтение, вызов — массивом аргументов.
 const (
-	SS  = "ss"
-	UFW = "ufw"
-	NFT = "nft"
+	SS        = "ss"
+	UFW       = "ufw"
+	IPTables  = "iptables"
+	IP6Tables = "ip6tables"
 )
 
 // programs — закрытый список программ: имя → абсолютный путь. Пополняется вместе с первым
 // потребителем.
 func programs() map[string]string {
 	return map[string]string{useradd: "/usr/sbin/useradd", systemctl: "/usr/bin/systemctl",
-		SS: "/usr/bin/ss", UFW: "/usr/sbin/ufw", NFT: "/usr/sbin/nft"}
+		SS: "/usr/bin/ss", UFW: "/usr/sbin/ufw", IPTables: "/usr/sbin/iptables", IP6Tables: "/usr/sbin/ip6tables"}
 }
 
 // childEnv — окружение процесса: ничего от родителя, секретов через окружение не передаём.
