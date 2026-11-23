@@ -49,6 +49,9 @@ govulncheck, staticcheck, shellcheck подключены 2026-11-15). Прав�
 | `vuln.go.dev` | govulncheck | база уязвимостей Go |
 | `github.com` (релизы `gitleaks/gitleaks`, `koalaman/shellcheck`, `XTLS/Xray-core`; `actions/checkout`) | шаги CI, раннер; тесты L3 локально и в CI; скрипт проверки на реальной интеграции у владельца (репозиторий проекта) | бинарники сканеров; архивы Xray для стенда L3 ([ADR-0020](../adr/0020-l3-stand.md)); код действия; проверяемый коммит ([ADR-0021](../adr/0021-owner-integration-check.md)) |
 | `release-assets.githubusercontent.com` | шаги CI; тесты L3; установщик Git через `winget` у владельца | файлы релизов сканеров и Xray: на него перенаправляет `github.com` ([ADR-0016](../adr/0016-ci-and-tooling.md)) |
+| `1.1.1.1`, `2606:4700:4700::1111` | `network` | внешний адрес за NAT: `GET /cdn-cgi/trace`, поле `ip`; запрос по адресу — семейство однозначно, DNS не нужен; `--address` переопределяет | 2026-11-23, ответ владельца |
+| `1.1.1.1` | `dns` | DoH по умолчанию: `https://1.1.1.1/dns-query` в разделе `dns` конфигурации Xray | 2026-11-23, ответ владельца |
+| `dns.quad9.net` | `dns` | DoH по умолчанию: `https://dns.quad9.net/dns-query` — второй независимый оператор | 2026-11-23, ответ владельца |
 | источники пакетов ОС: зеркала apt из `sources.list` VPS; источник `winget` Microsoft и адрес установщика из манифеста пакета | скрипт проверки на реальной интеграции у владельца | недостающие инструменты ([ADR-0021](../adr/0021-owner-integration-check.md)) |
 
 ## 4. Локальные утилиты разработки
