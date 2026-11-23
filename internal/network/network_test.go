@@ -161,6 +161,9 @@ func TestFirewallStates(t *testing.T) {
 		{"iptables политика DROP", "Status: inactive\n", "-P INPUT DROP\n-A INPUT -p tcp -m tcp --dport 443 -j ACCEPT\n", "-P INPUT ACCEPT\n", FirewallUnknown, "iptables"},
 		{"ip6tables правило REJECT", "Status: inactive\n", "-P INPUT ACCEPT\n", "-P INPUT ACCEPT\n-A INPUT -s 2001:db8::/32 -j REJECT --reject-with icmp6-port-unreachable\n", FirewallUnknown, "iptables"},
 		{"iptables правило DROP", "Status: inactive\n", "-P INPUT ACCEPT\n-A INPUT -p tcp -j DROP\n", "-P INPUT ACCEPT\n", FirewallUnknown, "iptables"},
+		{"iptables переход в цепочку f2b", "Status: inactive\n", "-P INPUT ACCEPT\n-A INPUT -p tcp -m multiport --dports 22 -j f2b-sshd\n", "-P INPUT ACCEPT\n", FirewallUnknown, "iptables"},
+		{"iptables переход -g", "Status: inactive\n", "-P INPUT ACCEPT\n-A INPUT -g extra\n", "-P INPUT ACCEPT\n", FirewallUnknown, "iptables"},
+		{"iptables LOG и RETURN", "Status: inactive\n", "-P INPUT ACCEPT\n-A INPUT -j LOG --log-prefix x\n-A INPUT -j RETURN\n", "-P INPUT ACCEPT\n", FirewallAllowed, "iptables"},
 		{"iptables незнакомый формат", "Status: inactive\n", "Chain INPUT (policy ACCEPT)\n", "-P INPUT ACCEPT\n", FirewallUnknown, "iptables"},
 		{"iptables лишняя цепочка", "Status: inactive\n", "-P INPUT ACCEPT\n-N extra\n", "-P INPUT ACCEPT\n", FirewallUnknown, "iptables"},
 	}

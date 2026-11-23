@@ -144,7 +144,10 @@ func ufwVerdict(out string, port int) (active bool, st FirewallState, note strin
 }
 
 // inputVerdict — вывод iptables -S INPUT: первая строка «-P INPUT ACCEPT|DROP», дальше только
-// «-A INPUT …». Разрешён — политика ACCEPT и нет цели DROP/REJECT; незнакомый формат — не разрешён.
+// «-A INPUT …». Разрешён — политика ACCEPT и только цели ACCEPT/RETURN/LOG: переход в другую
+// цепочку (-j цепочка, -g) может отбросить пакет, ложное «разрешён» хуже «не определено».
+var safeTarget = map[string]bool{"ACCEPT": true, "RETURN": true, "LOG": true}
+
 func inputVerdict(out string) (bool, string) {
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
 	switch lines[0] {
@@ -160,8 +163,11 @@ func inputVerdict(out string) (bool, string) {
 			return false, "вывод не разобран"
 		}
 		for k := 2; k+1 < len(f); k++ {
-			if f[k] == "-j" && (f[k+1] == "DROP" || f[k+1] == "REJECT") {
-				return false, "в INPUT есть правило " + f[k+1]
+			if f[k] == "-g" {
+				return false, "в INPUT есть переход -g " + f[k+1]
+			}
+			if f[k] == "-j" && !safeTarget[f[k+1]] {
+				return false, "в INPUT есть правило с целью " + f[k+1]
 			}
 		}
 	}

@@ -380,8 +380,8 @@ type Manager interface {
 - Локальный фаервол (`Facts.Firewall`, задача A3): `allowed`, `denied` или `unknown`. UFW активен
   (`ufw status verbose`) — первое правило порта с источником `Anywhere`, без правила — политика
   входящих; правило с ограничением источника — `unknown`. UFW не активен или нет — `iptables -S INPUT` и `ip6tables -S INPUT` (Source
-  `iptables`): в обоих семействах политика `ACCEPT` и нет правил с `-j DROP`/`-j REJECT` —
-  `allowed`; политика `DROP` или такое правило — `unknown` (запрет не доказан, `denied` не
+  `iptables`): в обоих семействах политика `ACCEPT` и у правил только цели `ACCEPT`, `RETURN`, `LOG` —
+  `allowed`; политика `DROP`, иная цель (`DROP`, `REJECT`, переход `-j цепочка` или `-g`) — `unknown` (запрет не доказан, `denied` не
   выдаётся); незнакомый формат вывода, нет утилиты, сбой или срок — `unknown`, причина в `Note`.
   Срок ufw — `unknown`, иной сбой ufw — в `Note`. У trace, ufw, iptables, ip6tables, ss — свои сроки; имя владельца порта — только печатные символы без пробелов и кавычек.
   `allowed` — только локально: фаервол хостера с сервера не виден. Ничего не меняет
