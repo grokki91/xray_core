@@ -31,6 +31,7 @@ type Fake struct {
 	effective Owner
 	journal   *fakeJournal
 	listening map[int]bool
+	addrs     []IfAddr
 }
 
 // Call — записанный вызов: операция и путь, имя пользователя или программа с аргументами.
@@ -104,6 +105,13 @@ func (f *Fake) Redirect(from, to string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.routes[from] = fakeRoute{location: to}
+}
+
+// SetAddrs задаёт адреса интерфейсов «хоста».
+func (f *Fake) SetAddrs(a []IfAddr) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.addrs = slices.Clone(a)
 }
 
 // SetListening задаёт, слушает ли «хост» порт.

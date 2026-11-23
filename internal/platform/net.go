@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -264,4 +265,39 @@ func (n fakeNet) Listening(ctx context.Context, port int) (bool, error) {
 	defer n.f.mu.Unlock()
 	n.f.calls = append(n.f.calls, Call{Op: "listening", Path: strconv.Itoa(port)})
 	return n.f.listening[port], nil
+}
+
+func (realNet) Addrs(ctx context.Context) ([]IfAddr, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	ifs, err := net.Interfaces()
+	if err != nil {
+		return nil, fmt.Errorf("интерфейсы: %w", err)
+	}
+	var out []IfAddr
+	for _, i := range ifs {
+		as, err := i.Addrs()
+		if err != nil {
+			return nil, fmt.Errorf("адреса %s: %w", i.Name, err)
+		}
+		for _, a := range as {
+			pfx, err := netip.ParsePrefix(a.String())
+			if err != nil {
+				return nil, fmt.Errorf("адрес %s не разобран: %w", i.Name, err)
+			}
+			out = append(out, IfAddr{Iface: i.Name, Addr: pfx.Addr().Unmap()})
+		}
+	}
+	return out, nil
+}
+
+func (n fakeNet) Addrs(ctx context.Context) ([]IfAddr, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	n.f.mu.Lock()
+	defer n.f.mu.Unlock()
+	n.f.calls = append(n.f.calls, Call{Op: "addrs"})
+	return slices.Clone(n.f.addrs), nil
 }
