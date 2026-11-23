@@ -279,7 +279,7 @@
    UFW — по ADR этой фазы.
 6. **`xm uninstall [--purge]`** по [data-model.md](architecture/data-model.md) §6 и ADR этой
    фазы, с подтверждением вводом слова.
-7. **Выпуск и загрузчик.** Конвейер: сборка linux/amd64, `SHA256SUMS`, версия из тега; `install.sh`
+7. ✅ ~~**Выпуск и загрузчик.**~~ Конвейер: сборка linux/amd64, `SHA256SUMS`, версия из тега; `install.sh`
    по [ADR-0013](adr/0013-distribution-and-bootstrap.md) — только скачать, сверить, запустить
    `xm install`; подтверждение происхождения сборки отдельным заданием выпуска
    ([ADR-0016](adr/0016-ci-and-tooling.md), [policy.md](security/policy.md) §6). Скил `release`.

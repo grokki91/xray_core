@@ -1,0 +1,82 @@
+# Выпуск xm по тегу v* (ADR-0013, ADR-0016): сборка linux/amd64, SHA256SUMS, релиз GitHub;
+# подтверждение происхождения — отдельным заданием. Правила — docs/security/policy.md §6,
+# порядок выпуска — .claude/skills/release/SKILL.md.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write # создание релиза
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: тег — vX.Y.Z
+        run: |
+          [[ $TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "тег $TAG не вида vX.Y.Z" >&2; exit 1; }
+
+      - name: scripts/check.sh
+        run: bash scripts/check.sh
+
+      - name: go build
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+          GOARCH: amd64
+        run: |
+          mkdir dist
+          go build -trimpath -ldflags "-s -w -X main.version=$TAG" -o dist/xm-linux-amd64 ./cmd/xm
+          cp install.sh dist/install.sh
+          (cd dist && sha256sum xm-linux-amd64 install.sh >SHA256SUMS)
+
+      - name: релиз
+        env:
+          GH_TOKEN: ${{ github.token }} # только этому шагу: check.sh и сборка токена не видят
+        run: |
+          pre=()
+          [[ $TAG == v0.0.* ]] && pre=(--prerelease)
+          gh release create "$TAG" "${pre[@]}" --verify-tag --title "$TAG" --generate-notes \
+            dist/xm-linux-amd64 dist/install.sh dist/SHA256SUMS
+
+  # Отдельное задание: права id-token и attestations не получает шаг, исполняющий сборку и check.sh.
+  provenance:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    env:
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: файлы релиза
+        run: |
+          mkdir dist
+          gh release download "$TAG" --dir dist
+          (cd dist && sha256sum -c SHA256SUMS)
+
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/xm-linux-amd64
+            dist/install.sh
