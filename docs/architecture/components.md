@@ -396,20 +396,27 @@ type Manager interface {
 Раздел `dns` конфигурации Xray и проверка резолвинга на сервере. Системный резолвер не меняет.
 
 ```go
-type Manager interface {
-    Plan(n NetFacts) DNSSettings                 // DoH-серверы, стратегия IPv4/IPv6
+func Plan(n NetFacts) store.DNS                  // DoH-серверы, стратегия IPv4/IPv6 → state.dns
+
+type Manager interface {                         // после MVP
     Check(ctx context.Context) []Observation     // системный резолвер, DoH, расхождение ответов
 }
 ```
 
 - Запросы клиентов на `:53` внутри тоннеля отвечает встроенный DNS Xray через DoH. `Check` — после MVP.
 - `Plan` — функция пакета: `NetFacts{IPv4, IPv6}` (есть ли внешний адрес семейства; заполняет
-  вызывающий из `network.Facts`) → `DNSSettings` (= `store.DNS`, пишется в `state.dns`). Серверы —
+  вызывающий из `network.Facts`) → `store.DNS`, пишется в `state.dns`. Серверы —
   закрытый список `https://1.1.1.1/dns-query`, `https://dns.quad9.net/dns-query`
   ([dependencies.md](../dev/dependencies.md) §5); схема `https://` (через маршрутизацию и `freedom`),
   не `https+local://`. `queryStrategy`: оба семейства — `UseIP`, только IPv6 — `UseIPv6`, иначе
   `UseIPv4`. `disableCache`, `disableFallback`, bootstrap не задаются; `domainStrategy` freedom не
   меняется. Фаза 4.
+- Имя `dns.quad9.net` разрешает резолвер ОС (bootstrap в Xray нет, freedom `AsIs`). Вернёт он
+  частный или петлевой адрес — finalRules `freedom` заблокируют этот DoH, и при отказе обоих
+  серверов DNS клиентов перестанет отвечать: отказ, а не утечка.
+- Исходящий `dns-out` — явные правила: `hijack` для `qType` `1,28` (A, AAAA — встроенному DNS),
+  остальное — `return` с `rCode` 5 (REFUSED); на исходный адрес запроса ничего не уходит. L3
+  `TestL3ClientDNSHijacked`: A и TXT через тоннель к слушателю порта DNS до него не доходят.
 
 ### security
 

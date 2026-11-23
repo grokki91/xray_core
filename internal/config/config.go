@@ -86,14 +86,18 @@ func (m *Manager) Render(st store.State, logSection json.RawMessage) (Rendered, 
 		// freedom — первым: первый исходящий получает всё, что не поймали правила routing.
 		Outbounds: []outbound{{
 			Tag: tagDirect, Protocol: "freedom",
-			Settings: &freedomSettings{FinalRules: []finalRule{{Action: "block", IP: deniedCIDRs}}},
+			Settings: freedomSettings{FinalRules: []finalRule{{Action: "block", IP: deniedCIDRs}}},
 		}},
 	}
 	// Встроенный DNS сам :53 не перехватывает: запросы клиентов внутри тоннеля к нему ведёт
 	// исходящий dns и правило routing. DoH самого Xray (схема https://) идёт через freedom, и
 	// его finalRules действуют на DoH-трафик (ADR-0027).
 	if doc.DNS != nil {
-		doc.Outbounds = append(doc.Outbounds, outbound{Tag: tagDNS, Protocol: "dns"})
+		// Правила явные, не умолчание upstream: A и AAAA — встроенному DNS, остальное — REFUSED;
+		// на исходный адрес запроса ничего не уходит.
+		doc.Outbounds = append(doc.Outbounds, outbound{Tag: tagDNS, Protocol: "dns", Settings: dnsOutSettings{
+			Rules: []dnsRule{{Action: "hijack", QType: "1,28"}, {Action: "return", RCode: 5}},
+		}})
 		doc.Routing = &routing{Rules: []rule{{Port: "53", Network: "tcp,udp", OutboundTag: tagDNS}}}
 	}
 	return finish(doc)
@@ -245,9 +249,19 @@ func dnsSection(d store.DNS) *dns {
 }
 
 type outbound struct {
-	Tag      string           `json:"tag"`
-	Protocol string           `json:"protocol"`
-	Settings *freedomSettings `json:"settings,omitempty"`
+	Tag      string `json:"tag"`
+	Protocol string `json:"protocol"`
+	Settings any    `json:"settings"` // freedomSettings или dnsOutSettings
+}
+
+type dnsOutSettings struct {
+	Rules []dnsRule `json:"rules"`
+}
+
+type dnsRule struct {
+	Action string `json:"action"`
+	QType  string `json:"qType,omitempty"`
+	RCode  int    `json:"rCode,omitempty"`
 }
 
 type freedomSettings struct {

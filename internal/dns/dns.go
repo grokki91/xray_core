@@ -22,12 +22,9 @@ type NetFacts struct {
 	IPv4, IPv6 bool
 }
 
-// DNSSettings — то, что пишется в state.dns.
-type DNSSettings = store.DNS
-
-// Plan строит раздел dns: с обоими семействами — UseIP, только IPv6 — UseIPv6, без внешнего
+// Plan строит state.dns: с обоими семействами — UseIP, только IPv6 — UseIPv6, без внешнего
 // IPv6 — UseIPv4.
-func Plan(n NetFacts) DNSSettings {
+func Plan(n NetFacts) store.DNS {
 	strategy := UseIPv4
 	switch {
 	case n.IPv4 && n.IPv6:
@@ -35,5 +32,5 @@ func Plan(n NetFacts) DNSSettings {
 	case n.IPv6:
 		strategy = UseIPv6
 	}
-	return DNSSettings{DoH: append([]string(nil), servers...), Strategy: strategy}
+	return store.DNS{DoH: append([]string(nil), servers...), Strategy: strategy}
 }
