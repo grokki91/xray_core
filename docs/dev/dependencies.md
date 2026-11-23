@@ -73,3 +73,7 @@ govulncheck, staticcheck, shellcheck подключены 2026-11-15). Прав�
 | `github.com` | `update` | архив релиза и `.dgst` | [ADR-0009](../adr/0009-update-source-and-verification.md); [updates.md](../operations/updates.md) §1 |
 | `cp.cloudflare.com` | самопроверка (`reach.selftest`); цель сквозного теста L3 в CI | `GET /generate_204` через сервер; успех — 204 | 2026-11-17, ответ владельца; [ADR-0028](../adr/0028-qr-library-and-selftest-address.md); L3 — 2026-11-19, [ADR-0032](../adr/0032-selftest-client-and-l3-target.md) |
 | `release-assets.githubusercontent.com` | `update` | файлы релиза: на него перенаправляет `github.com` | [ADR-0009](../adr/0009-update-source-and-verification.md); [updates.md](../operations/updates.md) §1 |
+| `1.1.1.1`, `2606:4700:4700::1111` | `network` | внешний адрес за NAT: `GET /cdn-cgi/trace`, поле `ip`; запрос по адресу — семейство однозначно, DNS не нужен; `--address` переопределяет | 2026-11-23, ответ владельца |
+| `1.1.1.1` | `dns` | DoH по умолчанию: `https://1.1.1.1/dns-query` в разделе `dns` конфигурации Xray | 2026-11-23, ответ владельца |
+| `dns.quad9.net` | `dns` | DoH по умолчанию: `https://dns.quad9.net/dns-query` — второй независимый оператор | 2026-11-23, ответ владельца |
+| кандидаты цели REALITY (до 10 имён, порт 443) | `network` | проверка цели при установке без `--sni`: одно соединение TLS на кандидата; список — [compatibility.md](../compatibility.md) | 2026-11-23, [ADR-0035](../adr/0035-reality-target-candidates.md) |
