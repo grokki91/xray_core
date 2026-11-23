@@ -47,8 +47,8 @@ func table() []ClientSupport {
 			Client: "v2rayn", Name: "v2rayN (Windows, Linux, macOS)", Core: "Xray-core",
 			Preset: PresetRealityXHTTP, Works: true,
 			Condition: "ядро Xray клиента не старше v25.7.26, отпечаток chrome",
-			Checked:   "2026-10-28",
-			Source:    "предшественник, 2026-10-28; последний тег клиента 7.25.6 (2026-11-13)",
+			Checked:   "2026-11-23",
+			Source:    "на устройстве: 7.25.6 (Windows), по ссылке, сервер Xray v26.11.9, 2026-11-23; версия ядра клиента не записана; предшественник, 2026-10-28",
 		},
 		{
 			Client: "v2rayng", Name: "v2rayNG (Android)", Core: "Xray-core",
@@ -60,8 +60,8 @@ func table() []ClientSupport {
 		{
 			Client: "hiddify-5", Name: "Hiddify 5.x", Core: "форк sing-box",
 			Preset: PresetRealityXHTTP, Works: true,
-			Checked: "2026-11-06",
-			Source:  "предшественник, 2026-11-06; по исходникам v5.2.0 и v5.5.5; последний стабильный — v5.5.5, 5.9.x — предварительные (2026-11-17)",
+			Checked: "2026-11-23",
+			Source:  "на устройстве: 5.2.1 (Android), по QR, сервер Xray v26.11.9, 2026-11-23; предшественник, 2026-11-06; последний стабильный — v5.5.5, 5.9.x — предварительные (2026-11-17)",
 		},
 		{
 			Client: "hiddify-4", Name: "Hiddify 4.x", Core: "форк sing-box 1.13",
