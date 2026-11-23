@@ -34,7 +34,9 @@ cat >"$bin/install" <<'EOF'
 #!/usr/bin/env bash
 echo "install $*" >>"$FAKE_LOG"
 EOF
+# shellcheck disable=SC2016 # переменные раскрывает подставной скрипт, а не тест
 printf '#!/usr/bin/env bash\necho "${FAKE_UID:-0}"\n' >"$bin/id"
+# shellcheck disable=SC2016 # то же
 printf '#!/usr/bin/env bash\necho "${FAKE_ARCH:-x86_64}"\n' >"$bin/uname"
 chmod +x "$bin"/*
 
@@ -53,10 +55,9 @@ installed() { grep -q '^install -m 0755 .*/xm-linux-amd64 /usr/local/bin/xm$' "$
 # ─── Целый бинарник: сверен и установлен (затем запуск /usr/local/bin/xm, которого здесь нет)
 run
 if installed; then ok "целый бинарник устанавливается"; else no "целый бинарник не установлен: $(tr '\n' ' ' <"$work/log")"; fi
-grep -q '^curl https://github.com/grokki91/xray_core/releases/download/v9.8.7/xm-linux-amd64$' "$work/log" &&
-  ok "по умолчанию — тег последнего релиза из перенаправления" || no "адрес последнего релиза: $(tr '\n' ' ' <"$work/log")"
+if grep -q '^curl https://github.com/grokki91/xray_core/releases/download/v9.8.7/xm-linux-amd64$' "$work/log"; then ok "по умолчанию — тег последнего релиза из перенаправления"; else no "адрес последнего релиза: $(tr '\n' ' ' <"$work/log")"; fi
 run FAKE_LATEST='v1;rm'
-((code != 0)) && ! grep -q download "$work/log" && ok "негодный тег из перенаправления — отказ без загрузки" || no "негодный тег: код $code"
+if ((code != 0)) && ! grep -q download "$work/log"; then ok "негодный тег из перенаправления — отказ без загрузки"; else no "негодный тег: код $code"; fi
 
 # ─── Подменённый бинарник: отказ до установки
 printf 'подменённый бинарник\n' >"$rel/xm-linux-amd64"
@@ -71,21 +72,20 @@ printf 'фиктивный бинарник xm\n' >"$rel/xm-linux-amd64"
 # ─── Нет суммы для бинарника
 printf '%s  другой-файл\n' "${good%% *}" >"$rel/SHA256SUMS"
 run
-((code != 0)) && ! installed && ok "нет суммы — отказ" || no "нет суммы: код $code"
+if ((code != 0)) && ! installed; then ok "нет суммы — отказ"; else no "нет суммы: код $code"; fi
 printf '%s\n' "$good" >"$rel/SHA256SUMS"
 
 # ─── Фиксированная версия
 run XM_VERSION=v0.0.1
-grep -q '^curl https://github.com/grokki91/xray_core/releases/download/v0.0.1/SHA256SUMS$' "$work/log" && installed &&
-  ok "XM_VERSION — фиксированный релиз" || no "фиксированная версия: $(tr '\n' ' ' <"$work/log")"
+if grep -q '^curl https://github.com/grokki91/xray_core/releases/download/v0.0.1/SHA256SUMS$' "$work/log" && installed; then ok "XM_VERSION — фиксированный релиз"; else no "фиксированная версия: $(tr '\n' ' ' <"$work/log")"; fi
 run XM_VERSION='v1;x'
-((code == 2)) && ! grep -q curl "$work/log" && ok "неверная XM_VERSION — отказ без загрузки" || no "неверная XM_VERSION: код $code"
+if ((code == 2)) && ! grep -q curl "$work/log"; then ok "неверная XM_VERSION — отказ без загрузки"; else no "неверная XM_VERSION: код $code"; fi
 
 # ─── Предусловия: отказ до загрузки
 run FAKE_UID=1000
-((code == 3)) && ! grep -q curl "$work/log" && ok "не root — отказ" || no "не root: код $code"
+if ((code == 3)) && ! grep -q curl "$work/log"; then ok "не root — отказ"; else no "не root: код $code"; fi
 run FAKE_ARCH=aarch64
-((code == 3)) && ! grep -q curl "$work/log" && ok "не x86_64 — отказ" || no "не x86_64: код $code"
+if ((code == 3)) && ! grep -q curl "$work/log"; then ok "не x86_64 — отказ"; else no "не x86_64: код $code"; fi
 mv "$bin/curl" "$work/curl.off"
 nocurl=$work/nocurl
 mkdir -p "$nocurl"
@@ -93,6 +93,6 @@ for t in bash env sha256sum awk mktemp rm; do ln -s "$(command -v "$t")" "$nocur
 : >"$work/log"
 env PATH="$bin:$nocurl" FAKE_LOG="$work/log" bash ./install.sh >"$work/out" 2>&1
 code=$?
-((code == 3)) && grep -q 'нет curl' "$work/out" && ok "нет curl — отказ с названием пакета" || no "нет curl: код $code"
+if ((code == 3)) && grep -q 'нет curl' "$work/out"; then ok "нет curl — отказ с названием пакета"; else no "нет curl: код $code"; fi
 
 ((fails == 0)) || exit 1
