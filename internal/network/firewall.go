@@ -3,6 +3,7 @@ package network
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -33,24 +34,40 @@ const fwTimeout = 10 * time.Second
 // firewall: UFW активен — его вердикт по правилам и политике входящих; иначе — политики цепочек
 // netfilter на хуке input (nft видит и iptables-nft). Правила netfilter не разбираются: при
 // политике drop вердикт зависит от них — «не определено». Ничего не меняет (ADR-0036).
-func (m *Manager) firewall(ctx context.Context, port int) (Firewall, error) {
-	c, cancel := context.WithTimeout(ctx, fwTimeout)
-	defer cancel()
-	if res, err := m.p.Exec(c, platform.Command{Program: "ufw", Args: []string{"status", "verbose"}}); err == nil && res.ExitCode == 0 {
-		active, st, note := ufwVerdict(string(res.Stdout), port)
-		if active {
-			return Firewall{State: st, Source: "ufw", Note: note}, nil
+// Срок или отмена при чтении — «не определено», а не ошибка фактов: остальное уже собрано.
+func (m *Manager) firewall(ctx context.Context, port int) Firewall {
+	res, err := m.read(ctx, platform.UFW, "status", "verbose")
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return Firewall{State: FirewallUnknown, Source: "ufw", Note: "ufw не ответил в срок"}
+	}
+	ufwNote := ""
+	switch {
+	case err != nil:
+		ufwNote = "ufw не прочитан: " + err.Error()
+	case res.ExitCode != 0:
+		ufwNote = fmt.Sprintf("ufw не прочитан: код %d", res.ExitCode)
+	default:
+		if active, st, note := ufwVerdict(string(res.Stdout), port); active {
+			return Firewall{State: st, Source: "ufw", Note: note}
 		}
 	}
-	if err := c.Err(); err != nil {
-		return Firewall{}, err
-	}
-	res, err := m.p.Exec(c, platform.Command{Program: "nft", Args: []string{"-j", "list", "chains"}})
+	join := func(n string) string { return strings.TrimPrefix(ufwNote+"; "+n, "; ") }
+	res, err = m.read(ctx, platform.NFT, "-j", "list", "chains")
 	if err != nil || res.ExitCode != 0 {
-		return Firewall{State: FirewallUnknown, Note: "nft не прочитал цепочки"}, nil
+		return Firewall{State: FirewallUnknown, Note: join("nft не прочитал цепочки")}
 	}
 	st, note := nftVerdict(res.Stdout)
-	return Firewall{State: st, Source: "nftables", Note: note}, nil
+	if note == "" && ufwNote == "" {
+		return Firewall{State: st, Source: "nftables"}
+	}
+	return Firewall{State: st, Source: "nftables", Note: join(note)}
+}
+
+// read запускает утилиту чтения со своим сроком.
+func (m *Manager) read(ctx context.Context, program string, args ...string) (platform.Result, error) {
+	c, cancel := context.WithTimeout(ctx, fwTimeout)
+	defer cancel()
+	return m.p.Exec(c, platform.Command{Program: program, Args: args})
 }
 
 // ufwVerdict разбирает ufw status verbose. Первое подходящее правило для порта/tcp или порта

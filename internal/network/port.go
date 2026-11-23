@@ -16,8 +16,9 @@ type Holder struct {
 	PID  int
 }
 
-// ssUser — процесс в выводе ss -p: users:(("имя",pid=N,fd=M)).
-var ssUser = regexp.MustCompile(`users:\(\("([^"]{1,64})",pid=([0-9]{1,10}),`)
+// ssUser — процесс в выводе ss -p: users:(("имя",pid=N,fd=M)). Имя — только печатные символы
+// без пробелов и кавычек: оно уходит человеку, а имя процесса задаёт кто угодно.
+var ssUser = regexp.MustCompile(`users:\(\("([!#-~]{1,64})",pid=([0-9]{1,10}),`)
 
 // ssTimeout — срок ss: таблица сокетов читается мгновенно.
 const ssTimeout = 5 * time.Second
@@ -37,7 +38,7 @@ func (m *Manager) PortFree(ctx context.Context, port int) (bool, Holder, error) 
 	}
 	c, cancel := context.WithTimeout(ctx, ssTimeout)
 	defer cancel()
-	res, err := m.p.Exec(c, platform.Command{Program: "ss",
+	res, err := m.p.Exec(c, platform.Command{Program: platform.SS,
 		Args: []string{"-H", "-t", "-l", "-n", "-p", "sport", "=", ":" + strconv.Itoa(port)}})
 	if err != nil || res.ExitCode != 0 {
 		return false, Holder{}, nil

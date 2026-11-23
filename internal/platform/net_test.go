@@ -371,3 +371,13 @@ func TestFakeAddrs(t *testing.T) {
 		t.Fatalf("Addrs = %v, %v", got, err)
 	}
 }
+
+func TestAddrsCanceledContext(t *testing.T) {
+	for name, n := range map[string]Net{"real": New().Net(), "fake": NewFake(t.TempDir(), time.Now()).Net()} {
+		c, cancel := context.WithCancel(context.Background())
+		cancel()
+		if _, err := n.Addrs(c); !errors.Is(err, context.Canceled) {
+			t.Errorf("%s: Addrs на отменённом контексте: %v", name, err)
+		}
+	}
+}

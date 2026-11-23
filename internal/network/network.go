@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/netip"
 	"strings"
+	"time"
 
 	"github.com/grokki91/xray_core/internal/platform"
 )
@@ -21,6 +22,8 @@ const (
 	hostV6  = "[2606:4700:4700::1111]"
 	// maxTrace — предел ответа trace: десяток коротких строк.
 	maxTrace = 4 << 10
+	// traceTimeout — свой срок запроса trace: вызывающий может не задать срока.
+	traceTimeout = 10 * time.Second
 )
 
 // cgnat — разделяемое пространство провайдера (RFC 6598): не частное по net/netip, но и не публичное.
@@ -92,11 +95,7 @@ func (m *Manager) Facts(ctx context.Context, r Request) (Facts, error) {
 	}
 	f.V4 = m.external(ctx, f.Addrs, override, true)
 	f.V6 = m.external(ctx, f.Addrs, override, false)
-	fw, err := m.firewall(ctx, r.Port)
-	if err != nil {
-		return Facts{}, err
-	}
-	f.Firewall = fw
+	f.Firewall = m.firewall(ctx, r.Port)
 	return f, nil
 }
 
@@ -116,7 +115,9 @@ func (m *Manager) external(ctx context.Context, addrs []Addr, override netip.Add
 	if v4 {
 		url, host = traceV4, hostV4
 	}
-	body, err := m.p.Net().Get(ctx, platform.Request{URL: url, Hosts: []string{host}, Max: maxTrace})
+	c, cancel := context.WithTimeout(ctx, traceTimeout)
+	defer cancel()
+	body, err := m.p.Net().Get(c, platform.Request{URL: url, Hosts: []string{host}, Max: maxTrace})
 	if err != nil {
 		return External{Note: fmt.Sprintf("узел %s не ответил: %v", host, err)}
 	}

@@ -3,6 +3,7 @@ package network
 import (
 	"context"
 	"net/netip"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,8 +27,8 @@ func out(s string) func(platform.Command) (platform.Result, error) {
 // fake — хост с выключенным UFW и пустым nftables, если тест не задал иное.
 func fake(t *testing.T) *platform.Fake {
 	f := platform.NewFake(t.TempDir(), time.Now())
-	f.Handle("ufw", out("Status: inactive\n"))
-	f.Handle("nft", out(`{"nftables":[{"metainfo":{}}]}`))
+	f.Handle(platform.UFW, out("Status: inactive\n"))
+	f.Handle(platform.NFT, out(`{"nftables":[{"metainfo":{}}]}`))
 	return f
 }
 
@@ -128,12 +129,12 @@ func TestPortFree(t *testing.T) {
 		t.Fatalf("свободный порт: %v %+v %v", free, h, err)
 	}
 	f.SetListening(443, true)
-	f.Handle("ss", out(`LISTEN 0 4096 *:443 *:* users:(("nginx",pid=1234,fd=6))`+"\n"))
+	f.Handle(platform.SS, out(`LISTEN 0 4096 *:443 *:* users:(("nginx",pid=1234,fd=6))`+"\n"))
 	free, h, err = m.PortFree(ctx(t), 443)
 	if err != nil || free || h != (Holder{Name: "nginx", PID: 1234}) {
 		t.Fatalf("занятый порт: %v %+v %v", free, h, err)
 	}
-	f.Handle("ss", out("LISTEN 0 4096 *:443 *:*\n"))
+	f.Handle(platform.SS, out("LISTEN 0 4096 *:443 *:*\n"))
 	free, h, err = m.PortFree(ctx(t), 443)
 	if err != nil || free || h != (Holder{}) {
 		t.Fatalf("занят, владелец не виден: %v %+v %v", free, h, err)
@@ -161,9 +162,9 @@ func TestFirewallStates(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			f := fake(t)
-			f.Handle("ufw", out(c.ufw))
+			f.Handle(platform.UFW, out(c.ufw))
 			if c.nft != "" {
-				f.Handle("nft", out(c.nft))
+				f.Handle(platform.NFT, out(c.nft))
 			}
 			got, err := New(f).Facts(ctx(t), Request{Port: 443, Address: "198.51.100.20"})
 			if err != nil {
@@ -192,5 +193,53 @@ func TestFirewallNoTools(t *testing.T) {
 	}
 	if got.Firewall.State != FirewallUnknown {
 		t.Fatalf("без утилит: %+v", got.Firewall)
+	}
+}
+
+func TestTraceHasOwnDeadline(t *testing.T) {
+	f := fake(t)
+	f.Serve(traceV4, []byte("ip=198.51.100.9\n"))
+	got, err := New(f).Facts(context.Background(), Request{Port: 443})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.V4.Addr.String() != "198.51.100.9" {
+		t.Fatalf("trace без срока вызывающего не выполнен: %+v", got.V4)
+	}
+}
+
+func TestFirewallUFWTimeoutIsUnknown(t *testing.T) {
+	f := fake(t)
+	f.Handle(platform.UFW, func(platform.Command) (platform.Result, error) { return platform.Result{}, context.DeadlineExceeded })
+	got, err := New(f).Facts(ctx(t), Request{Port: 443, Address: "198.51.100.20"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Firewall.State != FirewallUnknown || got.Firewall.Source != "ufw" {
+		t.Fatalf("срок ufw: %+v", got.Firewall)
+	}
+}
+
+func TestPortHolderNameSanitized(t *testing.T) {
+	f := fake(t)
+	f.SetListening(443, true)
+	for _, name := range []string{"evil\nline", "a b", "x'y\x1b[31m"} {
+		f.Handle(platform.SS, out(`LISTEN 0 4096 *:443 *:* users:(("`+name+`",pid=1,fd=6))`))
+		_, h, err := New(f).PortFree(ctx(t), 443)
+		if err != nil || h != (Holder{}) {
+			t.Errorf("имя %q: %+v %v", name, h, err)
+		}
+	}
+}
+
+func TestFirewallUFWFailureNoted(t *testing.T) {
+	f := fake(t)
+	f.Handle(platform.UFW, func(platform.Command) (platform.Result, error) { return platform.Result{ExitCode: 1}, nil })
+	got, err := New(f).Facts(ctx(t), Request{Port: 443, Address: "198.51.100.20"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Firewall.Source != "nftables" || !strings.Contains(got.Firewall.Note, "ufw не прочитан") {
+		t.Fatalf("сбой ufw не назван: %+v", got.Firewall)
 	}
 }
