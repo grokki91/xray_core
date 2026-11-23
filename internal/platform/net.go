@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -88,7 +89,11 @@ func readLimited(body io.Reader, max int64) ([]byte, error) {
 	return data, nil
 }
 
-type realNet struct{ transport http.RoundTripper }
+// realNet — настоящая сеть; roots — пул доверия TLSProbe, nil — системный (тест подставляет свой).
+type realNet struct {
+	transport http.RoundTripper
+	roots     *x509.CertPool
+}
 
 func (n realNet) Get(ctx context.Context, r Request) ([]byte, error) {
 	if err := checkGet(ctx, r); err != nil {

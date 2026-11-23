@@ -1,0 +1,85 @@
+package platform
+
+import (
+	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"errors"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/netip"
+	"strconv"
+	"testing"
+	"time"
+)
+
+// tlsServer — локальный TLS-сервер с самоподписанным сертификатом на 127.0.0.1, ALPN h2.
+func tlsServer(t *testing.T) (port int, roots *x509.CertPool) {
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	srv.EnableHTTP2 = true
+	srv.StartTLS()
+	t.Cleanup(srv.Close)
+	_, p, err := net.SplitHostPort(srv.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, _ = strconv.Atoi(p)
+	roots = x509.NewCertPool()
+	roots.AddCert(srv.Certificate())
+	return port, roots
+}
+
+// Обе реализации отдают одинаковые сведения о рукопожатии и одинаково отвергают ввод.
+func TestTLSProbeAgree(t *testing.T) {
+	port, roots := tlsServer(t)
+	real := newReal(nil, http.DefaultTransport)
+	real.net.roots = roots
+	fake := newFake(t.TempDir(), time.Time{}, nil)
+	want := TLSInfo{Version: tls.VersionTLS13, ALPN: "h2", Curve: tls.X25519MLKEM768, Addr: netip.MustParseAddr("127.0.0.1")}
+	fake.SetTLS("127.0.0.1", want, nil)
+	for name, n := range map[string]Net{"real": real.Net(), "fake": fake.Net()} {
+		t.Run(name, func(t *testing.T) {
+			ctx := deadline(t, 5*time.Second)
+			got, err := n.TLSProbe(ctx, TLSRequest{Host: "127.0.0.1", Port: port})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Version != want.Version || got.ALPN != want.ALPN || got.Curve != want.Curve || got.Addr != want.Addr || got.CertErr != nil {
+				t.Fatalf("TLSProbe = %+v", got)
+			}
+			if _, err := n.TLSProbe(context.Background(), TLSRequest{Host: "127.0.0.1", Port: port}); !errors.Is(err, ErrDeadline) {
+				t.Errorf("без срока: %v, нужен ErrDeadline", err)
+			}
+			for _, r := range []TLSRequest{{Host: "a b", Port: 443}, {Host: "", Port: 443}, {Host: "x.test:1", Port: 443}, {Host: "x.test", Port: 0}} {
+				if _, err := n.TLSProbe(ctx, r); !errors.Is(err, ErrURL) {
+					t.Errorf("%+v: %v, нужен ErrURL", r, err)
+				}
+			}
+		})
+	}
+}
+
+// Сертификат не из пула доверия — сведения о рукопожатии есть, ошибка проверки в CertErr.
+func TestTLSProbeRealUntrusted(t *testing.T) {
+	port, _ := tlsServer(t)
+	real := newReal(nil, http.DefaultTransport)
+	real.net.roots = x509.NewCertPool()
+	got, err := real.Net().TLSProbe(deadline(t, 5*time.Second), TLSRequest{Host: "127.0.0.1", Port: port})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.CertErr == nil || got.Version != tls.VersionTLS13 || got.Handshake <= 0 {
+		t.Fatalf("TLSProbe = %+v", got)
+	}
+}
+
+func TestFakeTLSUnknownHost(t *testing.T) {
+	f := newFake(t.TempDir(), time.Time{}, nil)
+	if _, err := f.Net().TLSProbe(deadline(t, time.Second), TLSRequest{Host: "x.test", Port: 443}); err == nil {
+		t.Fatal("неизвестный узел подделки: соединение без ошибки")
+	}
+	if c := f.Calls(); len(c) != 1 || c[0].Op != "tls" || c[0].Path != "x.test" {
+		t.Fatalf("Calls = %+v", c)
+	}
+}
