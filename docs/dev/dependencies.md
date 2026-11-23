@@ -49,9 +49,6 @@ govulncheck, staticcheck, shellcheck подключены 2026-11-15). Прав�
 | `vuln.go.dev` | govulncheck | база уязвимостей Go |
 | `github.com` (релизы `gitleaks/gitleaks`, `koalaman/shellcheck`, `XTLS/Xray-core`; `actions/checkout`) | шаги CI, раннер; тесты L3 локально и в CI; скрипт проверки на реальной интеграции у владельца (репозиторий проекта) | бинарники сканеров; архивы Xray для стенда L3 ([ADR-0020](../adr/0020-l3-stand.md)); код действия; проверяемый коммит ([ADR-0021](../adr/0021-owner-integration-check.md)) |
 | `release-assets.githubusercontent.com` | шаги CI; тесты L3; установщик Git через `winget` у владельца | файлы релизов сканеров и Xray: на него перенаправляет `github.com` ([ADR-0016](../adr/0016-ci-and-tooling.md)) |
-| `1.1.1.1`, `2606:4700:4700::1111` | `network` | внешний адрес за NAT: `GET /cdn-cgi/trace`, поле `ip`; запрос по адресу — семейство однозначно, DNS не нужен; `--address` переопределяет | 2026-11-23, ответ владельца |
-| `1.1.1.1` | `dns` | DoH по умолчанию: `https://1.1.1.1/dns-query` в разделе `dns` конфигурации Xray | 2026-11-23, ответ владельца |
-| `dns.quad9.net` | `dns` | DoH по умолчанию: `https://dns.quad9.net/dns-query` — второй независимый оператор | 2026-11-23, ответ владельца |
 | источники пакетов ОС: зеркала apt из `sources.list` VPS; источник `winget` Microsoft и адрес установщика из манифеста пакета | скрипт проверки на реальной интеграции у владельца | недостающие инструменты ([ADR-0021](../adr/0021-owner-integration-check.md)) |
 
 ## 4. Локальные утилиты разработки
@@ -76,3 +73,7 @@ govulncheck, staticcheck, shellcheck подключены 2026-11-15). Прав�
 | `github.com` | `update` | архив релиза и `.dgst` | [ADR-0009](../adr/0009-update-source-and-verification.md); [updates.md](../operations/updates.md) §1 |
 | `cp.cloudflare.com` | самопроверка (`reach.selftest`); цель сквозного теста L3 в CI | `GET /generate_204` через сервер; успех — 204 | 2026-11-17, ответ владельца; [ADR-0028](../adr/0028-qr-library-and-selftest-address.md); L3 — 2026-11-19, [ADR-0032](../adr/0032-selftest-client-and-l3-target.md) |
 | `release-assets.githubusercontent.com` | `update` | файлы релиза: на него перенаправляет `github.com` | [ADR-0009](../adr/0009-update-source-and-verification.md); [updates.md](../operations/updates.md) §1 |
+| `1.1.1.1`, `2606:4700:4700::1111` | `network` | внешний адрес за NAT: `GET /cdn-cgi/trace`, поле `ip`; запрос по адресу — семейство однозначно, DNS не нужен; `--address` переопределяет | 2026-11-23, ответ владельца |
+| `1.1.1.1` | `dns` | DoH по умолчанию: `https://1.1.1.1/dns-query` в разделе `dns` конфигурации Xray | 2026-11-23, ответ владельца |
+| `dns.quad9.net` | `dns` | DoH по умолчанию: `https://dns.quad9.net/dns-query` — второй независимый оператор | 2026-11-23, ответ владельца |
+| кандидаты цели REALITY (до 10 имён, порт 443) | `network` | проверка цели при установке без `--sni`: одно соединение TLS на кандидата; список — [compatibility.md](../compatibility.md) | 2026-11-23, [ADR-0035](../adr/0035-reality-target-candidates.md) |
