@@ -77,7 +77,8 @@ func (r TargetReport) Failure() string {
 // dnsName — имя цели: не меньше двух меток, последняя — не число (IP-литерал не цель).
 var dnsName = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]([a-z0-9-]*[a-z0-9])?$`)
 
-// ProbeTarget проверяет цель REALITY одним соединением к host:443. Ошибка — только негодное
+// ProbeTarget проверяет цель REALITY одним соединением к host:443 на первый публичный адрес
+// имени; публичного нет — соединения нет, критерий address не прошёл. Ошибка — только негодное
 // имя; провал соединения — отчёт, где каждый критерий не прошёл с этой причиной.
 func (m *Manager) ProbeTarget(ctx context.Context, host string) (TargetReport, error) {
 	host = strings.ToLower(host)
@@ -86,12 +87,16 @@ func (m *Manager) ProbeTarget(ctx context.Context, host string) (TargetReport, e
 	}
 	c, cancel := context.WithTimeout(ctx, targetTimeout)
 	defer cancel()
-	info, err := m.p.Net().TLSProbe(c, platform.TLSRequest{Host: host, Port: targetPort})
+	info, err := m.p.Net().TLSProbe(c, platform.TLSRequest{Host: host, Port: targetPort, Allow: public})
 	r := TargetReport{Host: host, Addr: info.Addr, Handshake: info.Handshake}
 	if err != nil {
 		why := "не проверено: " + err.Error()
 		for _, n := range []string{CheckTLS13, CheckH2, CheckMLKEM, CheckCert, CheckAddress} {
-			r.Checks = append(r.Checks, Check{Name: n, Reason: why})
+			c := Check{Name: n, Reason: why}
+			if n == CheckAddress && errors.Is(err, platform.ErrNotAllowed) {
+				c.Reason = "адрес не публичный (частный, петлевой, link-local или CGNAT); соединения не было: " + err.Error()
+			}
+			r.Checks = append(r.Checks, c)
 		}
 		return r, nil
 	}
@@ -109,7 +114,8 @@ func (m *Manager) ProbeTarget(ctx context.Context, host string) (TargetReport, e
 		certWhy = "сертификат не действителен для имени: " + info.CertErr.Error()
 	}
 	check(CheckCert, info.CertErr == nil, certWhy)
-	check(CheckAddress, public(info.Addr), fmt.Sprintf("адрес %v не публичный (частный, петлевой, link-local или CGNAT)", info.Addr))
+	// Платформа подключается только к адресу по public: проверка здесь — страховка контракта.
+	check(CheckAddress, public(info.Addr), fmt.Sprintf("адрес %v не публичный", info.Addr))
 	return r, nil
 }
 

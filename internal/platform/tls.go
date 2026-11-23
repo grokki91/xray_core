@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -13,13 +14,20 @@ import (
 )
 
 // TLSRequest — одно TLS-соединение к Host:Port. Host — имя узла (буквы, цифры, «-», «.»).
+// Allow — правило потребителя, к какому адресу имени можно подключаться (обязательно): отбор
+// идёт до соединения, чтобы не стучаться на частные и петлевые адреса.
 type TLSRequest struct {
-	Host string
-	Port int
+	Host  string
+	Port  int
+	Allow func(netip.Addr) bool
 }
 
+// ErrNotAllowed — у имени нет адреса, допустимого по TLSRequest.Allow; соединения не было.
+var ErrNotAllowed = errors.New("нет допустимого адреса")
+
 // TLSInfo — что показало рукопожатие. CertErr — ошибка проверки цепочки на имя Host; nil —
-// сертификат действителен. Addr — адрес фактического соединения. Handshake — TCP и TLS вместе.
+// сертификат действителен. Addr — адрес фактического соединения. Handshake — от начала TCP-
+// соединения до конца TLS-рукопожатия, без разрешения имени.
 type TLSInfo struct {
 	Version   uint16
 	ALPN      string
@@ -37,7 +45,7 @@ func checkTLS(ctx context.Context, r TLSRequest) error {
 	if _, ok := ctx.Deadline(); !ok {
 		return ErrDeadline
 	}
-	if len(r.Host) > 253 || !hostName.MatchString(r.Host) || r.Port < 1 || r.Port > 65535 {
+	if len(r.Host) > 253 || !hostName.MatchString(r.Host) || r.Port < 1 || r.Port > 65535 || r.Allow == nil {
 		return fmt.Errorf("%w: узел %q порт %d", ErrURL, r.Host, r.Port)
 	}
 	return ctx.Err()
@@ -47,21 +55,28 @@ func (n realNet) TLSProbe(ctx context.Context, r TLSRequest) (TLSInfo, error) {
 	if err := checkTLS(ctx, r); err != nil {
 		return TLSInfo{}, err
 	}
-	start := time.Now()
-	// Одно соединение на первый адрес: Dialer с именем перебирал бы адреса — проверка чужого
-	// узла не должна выглядеть сканированием (правило network.md).
 	addrs, err := net.DefaultResolver.LookupNetIP(ctx, "ip", r.Host)
-	if err != nil || len(addrs) == 0 {
+	if err != nil {
 		return TLSInfo{}, fmt.Errorf("адрес %s: %w", r.Host, err)
 	}
-	addr := addrs[0].Unmap()
+	if len(addrs) == 0 {
+		return TLSInfo{}, fmt.Errorf("адрес %s: нет адресов", r.Host)
+	}
+	// Одно соединение на первый допустимый адрес: Dialer с именем перебирал бы адреса — проверка
+	// чужого узла не должна выглядеть сканированием (правило network.md).
+	addr, err := pickAddr(r, addrs)
+	if err != nil {
+		return TLSInfo{}, err
+	}
+	start := time.Now()
 	raw, err := (&net.Dialer{}).DialContext(ctx, "tcp", net.JoinHostPort(addr.String(), strconv.Itoa(r.Port)))
 	if err != nil {
 		return TLSInfo{}, fmt.Errorf("соединение %s: %w", r.Host, err)
 	}
 	defer raw.Close()
-	if dl, ok := ctx.Deadline(); ok {
-		raw.SetDeadline(dl)
+	dl, _ := ctx.Deadline()
+	if err := raw.SetDeadline(dl); err != nil {
+		return TLSInfo{}, fmt.Errorf("срок соединения %s: %w", r.Host, err)
 	}
 	// Цепочка проверяется после рукопожатия: при негодном сертификате остальные критерии всё
 	// равно нужны в отчёте. Данные после рукопожатия не передаются.
@@ -90,13 +105,24 @@ func (n realNet) TLSProbe(ctx context.Context, r TLSRequest) (TLSInfo, error) {
 	return info, nil
 }
 
+// pickAddr — первый адрес, допустимый по r.Allow; нет такого — ErrNotAllowed.
+func pickAddr(r TLSRequest, addrs []netip.Addr) (netip.Addr, error) {
+	for _, a := range addrs {
+		if a = a.Unmap(); r.Allow(a) {
+			return a, nil
+		}
+	}
+	return netip.Addr{}, fmt.Errorf("%w: %s → %v", ErrNotAllowed, r.Host, addrs)
+}
+
 // fakeTLS — ответ подделки на TLSProbe.
 type fakeTLS struct {
 	info TLSInfo
 	err  error
 }
 
-// SetTLS задаёт итог TLSProbe к host; не заданный узел — ошибка соединения.
+// SetTLS задаёт итог TLSProbe к host: имя разрешается в info.Addr; адрес не по Allow — ErrNotAllowed
+// без соединения (вызов «dial» не записан); не заданный узел — ошибка соединения.
 func (f *Fake) SetTLS(host string, info TLSInfo, err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -114,5 +140,11 @@ func (n fakeNet) TLSProbe(ctx context.Context, r TLSRequest) (TLSInfo, error) {
 	if !ok {
 		return TLSInfo{}, fmt.Errorf("соединение %s: нет ответа", r.Host)
 	}
+	if got.info.Addr.IsValid() {
+		if _, err := pickAddr(r, []netip.Addr{got.info.Addr}); err != nil {
+			return TLSInfo{}, err
+		}
+	}
+	n.f.calls = append(n.f.calls, Call{Op: "dial", Path: r.Host})
 	return got.info, got.err
 }

@@ -88,7 +88,8 @@ type Platform interface {
   (нет `tcp6` на хосте без IPv6 — не ошибка); соединений не открывает. `Clock.Sleep(ctx, d)` — ожидание
   до конца `ctx`; у подделки сдвигает часы ([ADR-0023](../adr/0023-transaction-control-and-rollback-scope.md)).
 - `Net.Addrs(ctx)` — адреса интерфейсов (`IfAddr{Iface, Addr}`) без отбора; подделка — `SetAddrs`.
-- `Net.TLSProbe(ctx, TLSRequest{Host, Port})` — одно TLS-соединение на первый адрес имени: TLS 1.3,
+- `Net.TLSProbe(ctx, TLSRequest{Host, Port, Allow})` — одно TLS-соединение на первый адрес имени,
+  допустимый по `Allow` (нет такого — `ErrNotAllowed` без соединения; время — TCP и TLS без DNS): TLS 1.3,
   ALPN h2, только группа X25519MLKEM768, данные не передаются; `TLSInfo{Version, ALPN, Curve, Addr,
   CertErr, Handshake}`, цепочка — системным пулом на имя (итог в `CertErr`); недопустимые узел или
   порт — `ErrURL`, срок обязателен; подделка — `SetTLS`.
@@ -391,7 +392,8 @@ type Manager interface {
   `allowed` — только локально: фаервол хостера с сервера не виден. Ничего не меняет
   ([ADR-0036](../adr/0036-install-changes-only-own.md)).
 - Цель REALITY ([ADR-0035](../adr/0035-reality-target-candidates.md)): `ProbeTarget(ctx, host)` —
-  имя домена (не IP), одно соединение `Net.TLSProbe` к `host:443` на первый адрес имени, свой срок
+  имя домена (не IP), одно соединение `Net.TLSProbe` к `host:443` на первый публичный адрес имени (`Allow: public`;
+  публичного нет — соединения нет, `address` не прошёл), свой срок
   10 с; `TargetReport{Host, Addr, Handshake, Checks}` — критерии `tls13`, `h2`, `x25519mlkem768`
   (клиент предлагает только эту группу), `certificate` (цепочка системным пулом на имя),
   `address` (адрес соединения публичный — правило выше), у непрошедшего — причина; провал
