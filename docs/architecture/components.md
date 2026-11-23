@@ -34,7 +34,7 @@ type Platform interface {
     Start(ctx context.Context, c Command) (Process, error) // процесс в фоне ([ADR-0032](../adr/0032-selftest-client-and-l3-target.md)); Process{Done, Stop}
     FS() FS            // ReadFile, WriteFile (temp + fchown + fchmod + fsync + rename), Mkdir, ReadDir, Remove, Symlink, Readlink, Lock (flock)
     Systemd() Systemd  // только xray.service: Running, Reload, Enable/Disable, Start/Stop/Restart, Status
-    Net() Net          // Get по HTTPS, Listening — порт слушается (фаза 2); интерфейсы, маршруты — фаза 4
+    Net() Net          // Get по HTTPS, Listening — порт слушается (фаза 2); Addrs — адреса интерфейсов (фаза 4)
     Users() Users      // системный пользователь службы; Effective — владелец процесса xm
     Journal() Journal  // запись в journald, идентификатор xm (ADR-0022)
     Clock() Clock
@@ -87,6 +87,8 @@ type Platform interface {
 - `Net.Listening(ctx, port)` — слушает ли хост TCP-порт: строки `LISTEN` в `/proc/net/tcp` и `tcp6`
   (нет `tcp6` на хосте без IPv6 — не ошибка); соединений не открывает. `Clock.Sleep(ctx, d)` — ожидание
   до конца `ctx`; у подделки сдвигает часы ([ADR-0023](../adr/0023-transaction-control-and-rollback-scope.md)).
+- `Net.Addrs(ctx)` — адреса интерфейсов (`IfAddr{Iface, Addr}`) без отбора; подделка — `SetAddrs`.
+  Программы `ss`, `ufw`, `nft` — в закрытом списке (`network`, только чтение).
 - `Users.Ensure(ctx, имя)` — владелец пользователя; нет такого — создаёт системного без оболочки и
   домашнего каталога через `useradd` из закрытого списка. Допустимо одно имя, `ServiceUser`
   (`xray`): политика §3 не разрешает менять других пользователей; иное имя — `ErrName`. Поддельные пользователи получают идентификаторы с 990.
@@ -98,7 +100,7 @@ type Platform interface {
 - `Users.Effective()` — эффективные uid и gid процесса `xm`; у подделки root, пока тест не назначил
   другого (`SetEffective`).
 - Фаза 1 — `Exec`, `FS`, `Clock`; фаза 2 — `Net.Get`, `xray` по версии, `Remove`, `Symlink`, `Readlink`, `Users`, `Systemd`; A4 — `ReadDir`;
-  остальное `Net` — вместе с первым потребителем (фаза 4).
+  фаза 4 — `Net.Addrs`, `ss`, `ufw`, `nft`.
 
 ### store
 
@@ -359,15 +361,29 @@ type Manager interface {
 
 ```go
 type Manager interface {
-    Facts(ctx context.Context) (NetFacts, error) // адреса и маршруты IPv4/IPv6, внешний адрес, состояние фаервола
-    PortFree(ctx context.Context, port int) (bool, Holder, error)
+    Facts(ctx context.Context, r Request) (Facts, error) // Request{Address, Port}: адреса IPv4/IPv6, внешний адрес, фаервол для Port
+    PortFree(ctx context.Context, port int) (bool, Holder, error) // Holder{Name, PID}, пустой — не определено
     ProbeTarget(ctx context.Context, host string) (TargetReport, error) // TLS 1.3, h2, X25519MLKEM768, сертификат
     Outbound(ctx context.Context, family Family) (Reachability, error)
 }
 ```
 
-- Внешний адрес: сначала по интерфейсам; за NAT — запрос к адресу из закрытого документированного
-  списка; всегда переопределяется флагом `--address`.
+- Адреса интерфейсов — `Net.Addrs`; публичный — глобальный одноадресный, не частный (RFC 1918,
+  ULA), не CGNAT `100.64.0.0/10`; петлевые и link-local — не публичные.
+- Внешний адрес — по семействам раздельно (`Facts.V4`, `Facts.V6`, источник `interface`, `trace`
+  или `flag`): публичный адрес интерфейса; нет его — `GET /cdn-cgi/trace` к `1.1.1.1` или
+  `[2606:4700:4700::1111]` ([dependencies.md](../dev/dependencies.md) §5), поле `ip`, ответ того же
+  семейства и публичный; неудача — «не определён» с причиной (`Note`), не ошибка.
+  `Request.Address` (`--address`) — публичный адрес; задан — внешние узлы не опрашиваются, у
+  другого семейства адреса нет.
+- `PortFree` — занятость по `Net.Listening`; владелец — из `ss -Htlnp`, не ответил — пустой `Holder`.
+- Локальный фаервол (`Facts.Firewall`, задача A3): `allowed`, `denied` или `unknown`. UFW активен
+  (`ufw status verbose`) — первое правило порта с источником `Anywhere`, без правила — политика
+  входящих; правило с ограничением источника — `unknown`. UFW не активен или нет — политики
+  цепочек на хуке `input` из `nft -j list chains`: нет цепочек или все `accept` — `allowed`,
+  `drop` — `unknown` (правила netfilter не разбираются). Нет утилиты или сбой — `unknown`.
+  `allowed` — только локально: фаервол хостера с сервера не виден. Ничего не меняет
+  ([ADR-0036](../adr/0036-install-changes-only-own.md)).
 - Выбор REALITY-цели — список кандидатов с живой проверкой, `--sni` переопределяет
   ([ADR-0035](../adr/0035-reality-target-candidates.md)). Фаза 4.
 

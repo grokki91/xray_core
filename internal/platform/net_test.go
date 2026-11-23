@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -343,5 +344,30 @@ func TestNetProxyAndStatus(t *testing.T) {
 	}
 	if calls := fake.Calls(); len(calls) == 0 || calls[0].Proxy != "/run/xm/selftest.sock" {
 		t.Errorf("Proxy не записан в вызове: %+v", calls)
+	}
+}
+
+func TestAddrsRealHasLoopback(t *testing.T) {
+	c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	as, err := New().Net().Addrs(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range as {
+		if a.Addr.IsLoopback() {
+			return
+		}
+	}
+	t.Fatalf("нет петлевого адреса среди %v", as)
+}
+
+func TestFakeAddrs(t *testing.T) {
+	f := NewFake(t.TempDir(), time.Now())
+	want := []IfAddr{{Iface: "eth0", Addr: netip.MustParseAddr("192.0.2.10")}}
+	f.SetAddrs(want)
+	got, err := f.Net().Addrs(context.Background())
+	if err != nil || len(got) != 1 || got[0] != want[0] {
+		t.Fatalf("Addrs = %v, %v", got, err)
 	}
 }

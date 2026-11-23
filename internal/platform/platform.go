@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"io/fs"
+	"net/netip"
 	"time"
 )
 
@@ -98,8 +99,7 @@ type Owner struct {
 // Root — владелец root:root.
 func Root() Owner { return Owner{} }
 
-// Net — сеть. Пока только загрузка по HTTPS (update); интерфейсы, маршруты и сокеты — с первым
-// потребителем (фаза 4).
+// Net — сеть: загрузка по HTTPS, слушаемые порты, адреса интерфейсов.
 type Net interface {
 	// Get возвращает тело ответа 200 на GET. Адрес и каждое перенаправление — только https и
 	// узел (с портом, если он есть в адресе) из r.Hosts, иначе ErrURL; тело больше r.Max —
@@ -113,6 +113,15 @@ type Net interface {
 	// Listening сообщает, слушает ли хост TCP-порт на любом адресе (IPv4 или IPv6): по таблицам
 	// сокетов ядра, без соединения. Новых портов не открывает.
 	Listening(ctx context.Context, port int) (bool, error)
+	// Addrs — адреса интерфейсов хоста (IPv4 и IPv6) без отбора: что из них публичное, решает
+	// потребитель. Соединений не открывает.
+	Addrs(ctx context.Context) ([]IfAddr, error)
+}
+
+// IfAddr — адрес интерфейса.
+type IfAddr struct {
+	Iface string
+	Addr  netip.Addr
 }
 
 // Request — загрузка: адрес, закрытый список узлов потребителя и предел тела в байтах.
