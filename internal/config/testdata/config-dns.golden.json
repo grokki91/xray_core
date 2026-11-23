@@ -1,0 +1,85 @@
+{
+  "log": {
+    "access": "none",
+    "loglevel": "warning"
+  },
+  "dns": {
+    "servers": [
+      "https://1.1.1.1/dns-query",
+      "https://dns.quad9.net/dns-query"
+    ],
+    "queryStrategy": "UseIPv4"
+  },
+  "inbounds": [
+    {
+      "tag": "in-reality-xhttp",
+      "port": 443,
+      "protocol": "vless",
+      "settings": {
+        "clients": [
+          {
+            "id": "00000000-0000-4000-8000-000000000001",
+            "flow": ""
+          }
+        ],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "security": "reality",
+        "realitySettings": {
+          "target": "example.com:443",
+          "serverNames": [
+            "example.com"
+          ],
+          "privateKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "shortIds": [
+            "0123456789abcdef"
+          ]
+        },
+        "xhttpSettings": {
+          "path": "/example",
+          "mode": "auto"
+        }
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "direct",
+      "protocol": "freedom",
+      "settings": {
+        "finalRules": [
+          {
+            "action": "block",
+            "ip": [
+              "0.0.0.0/8",
+              "10.0.0.0/8",
+              "127.0.0.0/8",
+              "169.254.0.0/16",
+              "172.16.0.0/12",
+              "192.168.0.0/16",
+              "::/128",
+              "::1/128",
+              "fc00::/7",
+              "fe80::/10"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "tag": "dns-out",
+      "protocol": "dns"
+    }
+  ],
+  "routing": {
+    "rules": [
+      {
+        "port": "53",
+        "network": "tcp,udp",
+        "outboundTag": "dns-out"
+      }
+    ]
+  }
+}

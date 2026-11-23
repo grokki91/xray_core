@@ -54,6 +54,17 @@ func TestL3ReferenceConfigPassesXray(t *testing.T) {
 			if err := cm.Validate(ctx(t), core.Version(v), Path); err != nil {
 				t.Fatalf("Xray %s отверг эталон: %v", v, err)
 			}
+			// Эталон с разделом dns, исходящим dns и правилом routing порта 53.
+			dr, err := m.Render(dnsState(), json.RawMessage(logPart))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := m.Write(ctx(t), dr); err != nil {
+				t.Fatal(err)
+			}
+			if err := cm.Validate(ctx(t), core.Version(v), Path); err != nil {
+				t.Fatalf("Xray %s отверг эталон с dns: %v", v, err)
+			}
 			// Конфигурация клиента самопроверки (ADR-0032) — тот же набор версий и тот же стенд.
 			cr, err := m.RenderClient(clientState(), idSelftest, "/run/xm/selftest.sock")
 			if err != nil {

@@ -83,10 +83,18 @@ func (m *Manager) Render(st store.State, logSection json.RawMessage) (Rendered, 
 		Log:      logSection,
 		DNS:      dnsSection(st.DNS),
 		Inbounds: []json.RawMessage{inbound},
+		// freedom — первым: первый исходящий получает всё, что не поймали правила routing.
 		Outbounds: []outbound{{
 			Tag: tagDirect, Protocol: "freedom",
-			Settings: freedomSettings{FinalRules: []finalRule{{Action: "block", IP: deniedCIDRs}}},
+			Settings: &freedomSettings{FinalRules: []finalRule{{Action: "block", IP: deniedCIDRs}}},
 		}},
+	}
+	// Встроенный DNS сам :53 не перехватывает: запросы клиентов внутри тоннеля к нему ведёт
+	// исходящий dns и правило routing. DoH самого Xray (схема https://) идёт через freedom, и
+	// его finalRules действуют на DoH-трафик (ADR-0027).
+	if doc.DNS != nil {
+		doc.Outbounds = append(doc.Outbounds, outbound{Tag: tagDNS, Protocol: "dns"})
+		doc.Routing = &routing{Rules: []rule{{Port: "53", Network: "tcp,udp", OutboundTag: tagDNS}}}
 	}
 	return finish(doc)
 }
@@ -208,6 +216,19 @@ type document struct {
 	DNS       *dns              `json:"dns,omitempty"`
 	Inbounds  []json.RawMessage `json:"inbounds"`
 	Outbounds []outbound        `json:"outbounds"`
+	Routing   *routing          `json:"routing,omitempty"`
+}
+
+const tagDNS = "dns-out"
+
+type routing struct {
+	Rules []rule `json:"rules"`
+}
+
+type rule struct {
+	Port        string `json:"port"`
+	Network     string `json:"network"`
+	OutboundTag string `json:"outboundTag"`
 }
 
 type dns struct {
@@ -224,9 +245,9 @@ func dnsSection(d store.DNS) *dns {
 }
 
 type outbound struct {
-	Tag      string          `json:"tag"`
-	Protocol string          `json:"protocol"`
-	Settings freedomSettings `json:"settings"`
+	Tag      string           `json:"tag"`
+	Protocol string           `json:"protocol"`
+	Settings *freedomSettings `json:"settings,omitempty"`
 }
 
 type freedomSettings struct {
