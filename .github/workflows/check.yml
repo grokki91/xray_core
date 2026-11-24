@@ -78,7 +78,8 @@ jobs:
         run: go test -tags l3 -run L3 -count=1 ./...
 
   # Системный тест L4 (docs/testing.md §2): настоящий xm на чистой машине с systemd. Xray качается
-  # с github.com через сам xm и сверяется его проверками (ADR-0025); сценарии — tests/system/l4.sh.
+  # с github.com через сам xm и сверяется его проверками (ADR-0025); xm ставит install.sh с релизом
+  # из локального каталога; сценарии — tests/system/l4.sh.
   l4:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
