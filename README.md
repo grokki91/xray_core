@@ -1,7 +1,7 @@
 # xm — менеджер Xray-core
 
-> **Состояние: каркас.** Работают `xm version` и `xm help`; выпусков нет, команды ниже — цель.
-> План и критерии первой версии — [docs/roadmap.md](docs/roadmap.md).
+> **Состояние: до первого выпуска.** Работают установка, удаление, профили и управление службой;
+> остальное — план. Выпуск 0.0.x — после проверки на живом VPS ([docs/roadmap.md](docs/roadmap.md)).
 
 Простой и безопасный способ поднять и обслуживать официальный
 [Xray-core](https://github.com/XTLS/Xray-core) на своём VPS: одна команда — и на выходе ссылка
@@ -39,15 +39,16 @@ Ubuntu Server 22.04 или 24.04, x86_64, доступ root или `sudo`. Ра�
 
 ## Установка
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/grokki91/xray_core/main/install.sh | sudo bash
-```
-
-Сборка из исходников (Go — версия из `go.mod`; команда `go` скачает её сама):
+В одну строку — последний выпуск, сумма SHA-256 сверяется до запуска:
 
 ```bash
-CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=0.0.0-dev" -o xm ./cmd/xm
+curl -fsSL https://github.com/grokki91/xray_core/releases/latest/download/install.sh | sudo bash
 ```
+
+Скачать и прочитать загрузчик, затем `sudo bash install.sh`; фиксированная версия —
+`sudo XM_VERSION=vX.Y.Z bash`. Все три варианта, флаги и что меняется на сервере —
+[руководство по установке](docs/guide/install.md). Сборка из исходников (Go — версия из `go.mod`):
+`CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=0.0.0-dev" -o xm ./cmd/xm`.
 
 ## Команды
 
@@ -58,20 +59,15 @@ xm list               # профили
 xm show <имя>         # ссылка и QR повторно
 xm rm <имя>           # удалить профиль
 xm start|stop|restart # служба Xray
-xm update             # обновить Xray с проверкой и откатом
-xm diag               # диагностика
-xm logs               # журнал
-xm backup             # резервная копия
-xm restore <id>       # восстановление
-xm ui                 # Web UI через SSH-туннель
 xm uninstall          # удаление
 ```
 
-Все команды и флаги — [docs/architecture/interfaces.md](docs/architecture/interfaces.md).
+План: `xm update`, `xm diag`, `xm logs`, `xm backup`, `xm restore`, `xm ui`. Все команды и
+флаги — [docs/architecture/interfaces.md](docs/architecture/interfaces.md).
 
 ## Диагностика
 
-`xm diag` проверяет Xray, порты, IPv4 и IPv6, DNS, TLS, соединения и маршрутизацию. Отчёт
+`xm diag` (в плане) проверяет Xray, порты, IPv4 и IPv6, DNS, TLS, соединения и маршрутизацию. Отчёт
 разделяет подтверждённые факты, вероятные причины и гипотезы и называет пределы каждого
 измерения. `xm diag --export` сохраняет отчёт без адресов, ключей и идентификаторов. Подробнее —
 [docs/operations/diagnostics.md](docs/operations/diagnostics.md).
