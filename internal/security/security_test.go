@@ -151,3 +151,56 @@ func TestUnitHardeningMatchesPolicy(t *testing.T) {
 		t.Errorf("директивы: %v, нужны %v", got, want)
 	}
 }
+
+// Remove без purge снимает только бинарники; с purge — всё по манифесту, последним — состояние;
+// посторонние файлы целы; повтор — не ошибка.
+func TestRemoveFollowsManifest(t *testing.T) {
+	f := fakeHost(t)
+	m := New(f)
+	if err := m.EnsureBaseline(ctx(t)); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.FS().Mkdir("/usr/local/bin", 0o755, platform.Root()); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{XMBinary, "/usr/local/bin/other", "/etc/xm/state.json", "/var/lib/xm/backups/a.tar", "/usr/local/lib/xm/core/x"} {
+		if err := f.FS().WriteFile(p, []byte("x"), 0o600, platform.Root()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gone := func(p string) bool {
+		_, err := os.Lstat(f.Path(p))
+		return os.IsNotExist(err)
+	}
+	if err := m.Remove(ctx(t), false); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{XMBinary, "/usr/local/lib/xm"} {
+		if !gone(p) {
+			t.Errorf("без purge: %s остался", p)
+		}
+	}
+	for _, p := range []string{"/etc/xm/state.json", "/var/lib/xm/backups/a.tar", "/usr/local/etc/xray", "/usr/local/bin/other"} {
+		if gone(p) {
+			t.Errorf("без purge: %s удалён", p)
+		}
+	}
+	if err := m.Remove(ctx(t), true); err != nil {
+		t.Fatal(err)
+	}
+	calls := f.Calls()
+	if calls[len(calls)-2].Op != "userdel" || calls[len(calls)-1].Path != "/etc/xm" {
+		t.Errorf("порядок: последние вызовы %v", calls[len(calls)-2:])
+	}
+	if err := m.Remove(ctx(t), true); err != nil {
+		t.Fatalf("повтор: %v", err)
+	}
+	for _, p := range []string{"/etc/xm", "/var/lib/xm", "/usr/local/etc/xray", "/run/xm"} {
+		if !gone(p) {
+			t.Errorf("purge: %s остался", p)
+		}
+	}
+	if gone("/usr/local/bin/other") || gone("/usr/local/etc") {
+		t.Error("purge удалил постороннее")
+	}
+}

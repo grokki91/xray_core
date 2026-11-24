@@ -62,7 +62,7 @@ func run(ctx context.Context) int {
 		Now:      p.Clock().Now,
 	})
 	return cli.Run(os.Args[1:], cli.Env{
-		Ctx: ctx, Stdout: os.Stdout, Stderr: os.Stderr, Version: version, Clock: p.Clock(), App: a, Redact: reg.Text,
+		Ctx: ctx, Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr, Version: version, Clock: p.Clock(), App: a, Redact: reg.Text,
 	})
 }
 

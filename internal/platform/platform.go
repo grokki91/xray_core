@@ -68,6 +68,10 @@ type FS interface {
 	// Remove удаляет обычный файл или сокет Unix; ссылка на пути или на месте файла, каталог — ошибка.
 	// Принадлежность пути манифесту (docs/architecture/data-model.md §1) проверяет вызывающий.
 	Remove(path string) error
+	// RemoveTree удаляет path со всем содержимым: ссылки внутри удаляются как записи, по ним не
+	// переходит; ссылка на пути или на месте path — ErrSymlink; нет path — не ошибка. Путь — не
+	// короче двух элементов (ErrPath). Принадлежность манифесту проверяет вызывающий.
+	RemoveTree(path string) error
 	// ReadDir возвращает имена записей каталога по возрастанию; нет каталога — ErrNotFound.
 	ReadDir(path string) ([]string, error)
 	// Symlink атомарно ставит на path ссылку на target: временная ссылка в том же каталоге и
@@ -87,6 +91,9 @@ type Users interface {
 	// оболочки и домашнего каталога (группа с тем же именем). Допустимо только ServiceUser,
 	// иначе ErrName. Контекст обязан нести срок.
 	Ensure(ctx context.Context, name string) (Owner, error)
+	// Remove удаляет пользователя name и его группу; нет такого — не ошибка. Допустимо только
+	// ServiceUser, иначе ErrName. Контекст обязан нести срок.
+	Remove(ctx context.Context, name string) error
 	// Effective — владелец процесса xm (эффективные uid и gid): по нему server проверяет root.
 	Effective() Owner
 }

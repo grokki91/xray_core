@@ -101,3 +101,23 @@ func TestUseraddInClosedList(t *testing.T) {
 		t.Fatal("useradd не в закрытом списке")
 	}
 }
+
+func TestUsersRemoveChecks(t *testing.T) {
+	for _, i := range impls(t) {
+		if err := i.p.Users().Remove(deadline(t, time.Second), "root"); !errors.Is(err, ErrName) {
+			t.Errorf("%s: root: %v, нужна ErrName", i.name, err)
+		}
+		if err := i.p.Users().Remove(t.Context(), ServiceUser); !errors.Is(err, ErrDeadline) {
+			t.Errorf("%s: без срока: %v", i.name, err)
+		}
+	}
+	f := NewFake(t.TempDir(), time.Time{})
+	if _, err := f.Users().Ensure(deadline(t, time.Second), ServiceUser); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 { // повтор — не ошибка
+		if err := f.Users().Remove(deadline(t, time.Second), ServiceUser); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

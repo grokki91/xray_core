@@ -15,6 +15,9 @@ const ServiceUser = "xray"
 // useradd — программа создания системного пользователя; путь — в закрытом списке programs.
 const useradd = "useradd"
 
+// userdel — программа удаления пользователя (uninstall --purge, ADR-0042).
+const userdel = "userdel"
+
 func checkName(name string) error {
 	if name != ServiceUser {
 		return fmt.Errorf("%w: %q", ErrName, name)
@@ -71,6 +74,26 @@ func (u realUsers) Ensure(ctx context.Context, name string) (Owner, error) {
 	return o, nil
 }
 
+func (u realUsers) Remove(ctx context.Context, name string) error {
+	if err := checkName(name); err != nil {
+		return err
+	}
+	if _, ok := ctx.Deadline(); !ok {
+		return ErrDeadline
+	}
+	if _, ok, err := lookup(name); err != nil || !ok {
+		return err
+	}
+	res, err := u.r.Exec(ctx, Command{Program: userdel, Args: []string{name}})
+	if err != nil {
+		return err
+	}
+	if res.ExitCode != 0 {
+		return fmt.Errorf("userdel %s: код %d", name, res.ExitCode)
+	}
+	return nil
+}
+
 // fakeUsers — поддельные пользователи: идентификаторы выдаются по порядку с 990; процесс xm —
 // root, пока тест не назначил другого (SetEffective).
 type fakeUsers struct{ f *Fake }
@@ -105,4 +128,21 @@ func (u fakeUsers) Ensure(ctx context.Context, name string) (Owner, error) {
 	u.f.users[name] = o
 	u.f.calls = append(u.f.calls, Call{Op: "user", Path: name})
 	return o, nil
+}
+
+func (u fakeUsers) Remove(ctx context.Context, name string) error {
+	if err := checkName(name); err != nil {
+		return err
+	}
+	if _, ok := ctx.Deadline(); !ok {
+		return ErrDeadline
+	}
+	u.f.mu.Lock()
+	defer u.f.mu.Unlock()
+	if _, ok := u.f.users[name]; !ok {
+		return nil
+	}
+	delete(u.f.users, name)
+	u.f.calls = append(u.f.calls, Call{Op: "userdel", Path: name})
+	return nil
 }

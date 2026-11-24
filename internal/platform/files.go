@@ -262,6 +262,28 @@ func (x files) Remove(path string) error {
 	return syncDir(filepath.Dir(p))
 }
 
+func (x files) RemoveTree(path string) error {
+	x.trace("removetree", path)
+	p, err := x.real(path)
+	if err != nil {
+		return err
+	}
+	if strings.Count(path, "/") < 2 {
+		return fmt.Errorf("%w: удаление дерева %q", ErrPath, path)
+	}
+	if err := x.noSymlinks(p); err != nil {
+		return err
+	}
+	if _, err := os.Lstat(p); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	// os.RemoveAll удаляет ссылки внутри дерева как записи и по ним не переходит.
+	if err := os.RemoveAll(p); err != nil {
+		return fmt.Errorf("удаление %s: %w", path, err)
+	}
+	return syncDir(filepath.Dir(p))
+}
+
 func (x files) ReadDir(path string) ([]string, error) {
 	x.trace("readdir", path)
 	p, err := x.real(path)

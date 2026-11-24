@@ -34,6 +34,7 @@ type Clock interface {
 // App — сценарии, которые вызывают команды; настоящий — app.App.
 type App interface {
 	Install(ctx context.Context, o app.InstallOptions) (app.InstallResult, error)
+	Uninstall(ctx context.Context, purge bool) error
 	Service(ctx context.Context, a app.Action) error
 	Status(ctx context.Context) (contract.Status, error)
 	ProfileAdd(ctx context.Context, name string, o app.ShareOptions) (app.ProfileView, error)
@@ -46,6 +47,7 @@ type App interface {
 // отменяется по сигналу; сроки операций задаёт сам прикладной слой.
 type Env struct {
 	Ctx            context.Context
+	Stdin          io.Reader // ввод слова подтверждения разрушительных действий
 	Stdout, Stderr io.Writer
 	Version        string
 	Clock          Clock
@@ -72,6 +74,8 @@ func commands() []command {
 	return []command{
 		{name: "install", usage: "xm install [--sni <домен>] [--address <адрес>] [--port <порт>]",
 			summary: "установить Xray и запустить службу", flags: installFlags, run: runInstall},
+		{name: "uninstall", usage: "xm uninstall [--purge [--yes]]",
+			summary: "удалить службу и бинарники; --purge — ещё состояние и снимки", flags: uninstallFlags, run: runUninstall},
 		{name: "start", usage: "xm start", summary: "запустить службу Xray", run: service(app.Start)},
 		{name: "stop", usage: "xm stop", summary: "остановить службу Xray", run: service(app.Stop)},
 		{name: "restart", usage: "xm restart", summary: "перезапустить службу Xray", run: service(app.Restart)},
