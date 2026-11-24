@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -36,11 +37,12 @@ const (
 
 // Критерии цели.
 const (
-	CheckTLS13   = "tls13"
-	CheckH2      = "h2"
-	CheckMLKEM   = "x25519mlkem768"
-	CheckCert    = "certificate"
-	CheckAddress = "address"
+	CheckTLS13    = "tls13"
+	CheckH2       = "h2"
+	CheckMLKEM    = "x25519mlkem768"
+	CheckCert     = "certificate"
+	CheckAddress  = "address"
+	CheckRedirect = "redirect"
 )
 
 // Check — итог одного критерия; Reason — почему не прошёл.
@@ -91,7 +93,7 @@ func (m *Manager) ProbeTarget(ctx context.Context, host string) (TargetReport, e
 	r := TargetReport{Host: host, Addr: info.Addr, Handshake: info.Handshake}
 	if err != nil {
 		why := "не проверено: " + err.Error()
-		for _, n := range []string{CheckTLS13, CheckH2, CheckMLKEM, CheckCert, CheckAddress} {
+		for _, n := range []string{CheckTLS13, CheckH2, CheckMLKEM, CheckCert, CheckAddress, CheckRedirect} {
 			c := Check{Name: n, Reason: why}
 			if n == CheckAddress && errors.Is(err, platform.ErrNotAllowed) {
 				c.Reason = "адрес не публичный (частный, петлевой, link-local или CGNAT); соединения не было: " + err.Error()
@@ -116,7 +118,30 @@ func (m *Manager) ProbeTarget(ctx context.Context, host string) (TargetReport, e
 	check(CheckCert, info.CertErr == nil, certWhy)
 	// Платформа подключается только к адресу по public: проверка здесь — страховка контракта.
 	check(CheckAddress, public(info.Addr), fmt.Sprintf("адрес %v не публичный", info.Addr))
+	ok, why := redirectOK(host, info)
+	check(CheckRedirect, ok, why)
 	return r, nil
+}
+
+// redirectOK — критерий ADR-0040: ответ на HEAD / не 3xx или 3xx с Location на то же имя
+// (относительный путь или https на host); нет ответа — «не проверено».
+func redirectOK(host string, info platform.TLSInfo) (bool, string) {
+	if info.HeadErr != nil || info.Status == 0 {
+		return false, fmt.Sprintf("не проверено: нет ответа на HEAD /: %v", info.HeadErr)
+	}
+	if info.Status < 300 || info.Status > 399 {
+		return true, ""
+	}
+	u, err := url.Parse(info.Location)
+	switch {
+	case err != nil:
+		return false, fmt.Sprintf("ответ %d: Location не разобран", info.Status)
+	case u.Scheme == "" && u.Host == "" && info.Location != "":
+		return true, ""
+	case u.Scheme == "https" && strings.EqualFold(u.Hostname(), host) && (u.Port() == "" || u.Port() == "443"):
+		return true, ""
+	}
+	return false, fmt.Sprintf("ответ %d перенаправляет на %q: нужно то же имя по https", info.Status, info.Location)
 }
 
 // SelectTarget выбирает цель REALITY. sni непустое (--sni) — только оно, провал — ошибка.

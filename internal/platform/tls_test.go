@@ -80,7 +80,11 @@ func TestTLSProbeRealWrongName(t *testing.T) {
 
 // tlsServer — локальный TLS-сервер с самоподписанным сертификатом на 127.0.0.1, ALPN h2.
 func tlsServer(t *testing.T) (port int, roots *x509.CertPool) {
-	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	return tlsServerWith(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+}
+
+func tlsServerWith(t *testing.T, h http.Handler) (port int, roots *x509.CertPool) {
+	srv := httptest.NewUnstartedServer(h)
 	srv.EnableHTTP2 = true
 	srv.StartTLS()
 	t.Cleanup(srv.Close)
@@ -100,7 +104,7 @@ func TestTLSProbeAgree(t *testing.T) {
 	real := newReal(nil, http.DefaultTransport)
 	real.net.roots = roots
 	fake := newFake(t.TempDir(), time.Time{}, nil)
-	want := TLSInfo{Version: tls.VersionTLS13, ALPN: "h2", Curve: tls.X25519MLKEM768, Addr: netip.MustParseAddr("127.0.0.1")}
+	want := TLSInfo{Version: tls.VersionTLS13, ALPN: "h2", Curve: tls.X25519MLKEM768, Addr: netip.MustParseAddr("127.0.0.1"), Status: http.StatusOK}
 	fake.SetTLS("127.0.0.1", want, nil)
 	for name, n := range map[string]Net{"real": real.Net(), "fake": fake.Net()} {
 		t.Run(name, func(t *testing.T) {
@@ -109,7 +113,8 @@ func TestTLSProbeAgree(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got.Version != want.Version || got.ALPN != want.ALPN || got.Curve != want.Curve || got.Addr != want.Addr || got.CertErr != nil {
+			if got.Version != want.Version || got.ALPN != want.ALPN || got.Curve != want.Curve || got.Addr != want.Addr || got.CertErr != nil ||
+				got.Status != want.Status || got.HeadErr != nil {
 				t.Fatalf("TLSProbe = %+v", got)
 			}
 			if _, err := n.TLSProbe(context.Background(), TLSRequest{Host: "127.0.0.1", Port: port, Allow: allowAll}); !errors.Is(err, ErrDeadline) {
@@ -145,5 +150,31 @@ func TestFakeTLSUnknownHost(t *testing.T) {
 	}
 	if c := f.Calls(); len(c) != 1 || c[0].Op != "tls" {
 		t.Fatalf("Calls = %+v", c)
+	}
+}
+
+// HEAD / по тому же соединению: код и Location первого ответа, без перехода.
+func TestTLSProbeRealHead(t *testing.T) {
+	for _, c := range []struct {
+		status   int
+		location string
+	}{{200, ""}, {301, "https://127.0.0.1/a"}, {301, "https://other.test/"}, {301, "http://127.0.0.1/"}} {
+		var method, host string
+		port, roots := tlsServerWith(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			method, host = r.Method+" "+r.URL.Path+" "+r.Proto, r.Host
+			if c.location != "" {
+				w.Header().Set("Location", c.location)
+			}
+			w.WriteHeader(c.status)
+		}))
+		real := newReal(nil, http.DefaultTransport)
+		real.net.roots = roots
+		got, err := real.Net().TLSProbe(deadline(t, 5*time.Second), TLSRequest{Host: "127.0.0.1", Port: port, Allow: allowAll})
+		if err != nil || got.HeadErr != nil || got.Status != c.status || got.Location != c.location {
+			t.Fatalf("%d %s: %+v, %v", c.status, c.location, got, err)
+		}
+		if method != "HEAD / HTTP/2.0" || host != "127.0.0.1" {
+			t.Fatalf("запрос %q, Host %q", method, host)
+		}
 	}
 }

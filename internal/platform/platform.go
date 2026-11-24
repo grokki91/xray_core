@@ -118,7 +118,7 @@ type Net interface {
 	Addrs(ctx context.Context) ([]IfAddr, error)
 	// TLSProbe — одно TLS-соединение к r.Host:r.Port на первый адрес имени, допустимый по r.Allow
 	// (нет такого — ErrNotAllowed, соединения нет): TLS 1.3, ALPN h2,
-	// группа только X25519MLKEM768; после рукопожатия данные не передаются. Цепочка
+	// группа только X25519MLKEM768; после рукопожатия — только HEAD / (ADR-0040). Цепочка
 	// проверяется на имя системным пулом, итог — в TLSInfo.CertErr; провал соединения или
 	// рукопожатия — ошибка. Недопустимые узел или порт — ErrURL; контекст обязан нести срок.
 	TLSProbe(ctx context.Context, r TLSRequest) (TLSInfo, error)

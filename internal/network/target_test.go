@@ -14,14 +14,14 @@ import (
 // good — сведения о годной цели; тест портит одно поле.
 func good(ms int) platform.TLSInfo {
 	return platform.TLSInfo{Version: tls.VersionTLS13, ALPN: "h2", Curve: tls.X25519MLKEM768,
-		Addr: netip.MustParseAddr("203.0.113.10"), Handshake: time.Duration(ms) * time.Millisecond}
+		Addr: netip.MustParseAddr("203.0.113.10"), Handshake: time.Duration(ms) * time.Millisecond, Status: 200}
 }
 
 func TestProbeTargetPasses(t *testing.T) {
 	f := fake(t)
 	f.SetTLS("www.example.com", good(30), nil)
 	r, err := New(f).ProbeTarget(ctx(t), "www.example.com")
-	if err != nil || !r.OK() || r.Handshake != 30*time.Millisecond || len(r.Checks) != 5 {
+	if err != nil || !r.OK() || r.Handshake != 30*time.Millisecond || len(r.Checks) != 6 {
 		t.Fatalf("ProbeTarget = %+v, %v", r, err)
 	}
 	if c := f.Calls(); len(c) != 2 || c[1].Op != "dial" || c[1].Path != "www.example.com" {
@@ -37,6 +37,11 @@ func TestProbeTargetEachCriterion(t *testing.T) {
 		{CheckTLS13, func(i *platform.TLSInfo) { i.Version = tls.VersionTLS12 }},
 		{CheckH2, func(i *platform.TLSInfo) { i.ALPN = "http/1.1" }},
 		{CheckMLKEM, func(i *platform.TLSInfo) { i.Curve = tls.X25519 }},
+		{CheckRedirect, func(i *platform.TLSInfo) { i.Status, i.Location = 301, "https://other.example.com/" }},
+		{CheckRedirect, func(i *platform.TLSInfo) { i.Status, i.Location = 302, "http://www.example.com/" }},
+		{CheckRedirect, func(i *platform.TLSInfo) { i.Status, i.Location = 301, "//other.example.com/" }},
+		{CheckRedirect, func(i *platform.TLSInfo) { i.Status, i.Location = 301, "" }},
+		{CheckRedirect, func(i *platform.TLSInfo) { i.Status, i.HeadErr = 0, errors.New("timeout") }},
 		{CheckCert, func(i *platform.TLSInfo) { i.CertErr = errors.New("x509: certificate is valid for other.test") }},
 	}
 	for _, tc := range cases {
@@ -87,7 +92,7 @@ func TestProbeTargetHandshakeFails(t *testing.T) {
 	f := fake(t)
 	f.SetTLS("www.example.com", platform.TLSInfo{}, errors.New("tls: handshake failure"))
 	r, err := New(f).ProbeTarget(ctx(t), "www.example.com")
-	if err != nil || r.OK() || len(r.Checks) != 5 || !strings.Contains(r.Failure(), "handshake failure") {
+	if err != nil || r.OK() || len(r.Checks) != 6 || !strings.Contains(r.Failure(), "handshake failure") {
 		t.Fatalf("ProbeTarget = %+v, %v", r, err)
 	}
 }
@@ -154,5 +159,25 @@ func TestSelectTargetExplicit(t *testing.T) {
 	f.SetTLS("www.example.com", bad, nil)
 	if _, err := New(f).SelectTarget(ctx(t), "www.example.com"); err == nil || !strings.Contains(err.Error(), "X25519MLKEM768") {
 		t.Fatalf("негодное --sni: %v", err)
+	}
+}
+
+func TestProbeTargetRedirectSameName(t *testing.T) {
+	for _, loc := range []string{"/en-us", "https://www.example.com/start", "https://WWW.EXAMPLE.COM/"} {
+		info := good(10)
+		info.Status, info.Location = 301, loc
+		f := fake(t)
+		f.SetTLS("www.example.com", info, nil)
+		if r, err := New(f).ProbeTarget(ctx(t), "www.example.com"); err != nil || !r.OK() {
+			t.Errorf("%s: %+v, %v", loc, r, err)
+		}
+	}
+	info := good(10)
+	info.Status, info.HeadErr = 0, errors.New("i/o timeout")
+	f := fake(t)
+	f.SetTLS("www.example.com", info, nil)
+	r, _ := New(f).ProbeTarget(ctx(t), "www.example.com")
+	if !strings.Contains(r.Failure(), "redirect: не проверено") {
+		t.Fatalf("нет ответа: %q", r.Failure())
 	}
 }
