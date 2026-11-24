@@ -16,6 +16,7 @@ import (
 	"github.com/grokki91/xray_core/internal/core"
 	"github.com/grokki91/xray_core/internal/diag"
 	"github.com/grokki91/xray_core/internal/logging"
+	"github.com/grokki91/xray_core/internal/network"
 	"github.com/grokki91/xray_core/internal/profile"
 	"github.com/grokki91/xray_core/internal/security"
 	"github.com/grokki91/xray_core/internal/server"
@@ -45,6 +46,8 @@ type Services struct {
 	Server  *server.Manager
 	Logging *logging.Manager
 	Profile *profile.Manager
+	// Network — сетевые факты и правило UFW (ADR-0041).
+	Network *network.Manager
 	// Security — базовая защита в начале каждой транзакции и ключи установки.
 	Security *security.Manager
 	// Releases — источник релизов Xray для установки.
@@ -84,6 +87,9 @@ type Change struct {
 	// Create — установка: состояния быть не должно, иначе ErrInstalled. Проверка идёт под
 	// блокировкой: две одновременные установки не перезапишут друг друга.
 	Create bool
+	// UFWPort — порт, для которого транзакция добавляет правило UFW (ADR-0041); 0 — не
+	// добавляет. Правило входит в журнал, и откат его снимает.
+	UFWPort int
 }
 
 // Apply выполняет изменение транзакцией: блокировка → базовая защита → (откат незавершённой) →
@@ -159,7 +165,7 @@ func (a *App) Apply(ctx context.Context, ch Change) error {
 	if err != nil {
 		return err
 	}
-	tx := store.Tx{CoreBefore: string(coreBefore), UnitBefore: unitBefore, WasActive: status.Active == "active", Started: a.s.Now().UTC()}
+	tx := store.Tx{CoreBefore: string(coreBefore), UnitBefore: unitBefore, WasActive: status.Active == "active", Started: a.s.Now().UTC(), UFWPort: ch.UFWPort}
 	// Запускаем службу, что работала, и службу новой установки; остановленную владельцем — нет.
 	run := tx.WasActive || unitBefore == nil
 	if hadState {
@@ -217,6 +223,11 @@ func (a *App) change(ctx context.Context, ch Change, st store.State, r config.Re
 	}
 	if err := a.s.Store.Save(st); err != nil {
 		return err
+	}
+	if ch.UFWPort != 0 {
+		if err := a.s.Network.AllowPort(ctx, ch.UFWPort); err != nil {
+			return err
+		}
 	}
 	if !run {
 		return nil
@@ -443,6 +454,14 @@ func (a *App) rollback(ctx context.Context, tx store.Tx) error {
 	}
 	if err := a.s.Config.Unstage(); err != nil {
 		return err
+	}
+	// Снимается после возврата состояния, конфигурации и юнита: сбой ufw не оставляет их
+	// полуоткаченными. Правило UFW, которое транзакция собиралась добавить: до неё его не было (добавляют только
+	// при отсутствии), поэтому снимается безусловно; отсутствие правила — не ошибка (ADR-0041).
+	if tx.UFWPort != 0 {
+		if err := a.s.Network.RevokePort(ctx, tx.UFWPort); err != nil {
+			return err
+		}
 	}
 	if tx.UnitBefore != nil && tx.WasActive {
 		// Службы без состояния не бывает; порта нет — поднимать и проверять нечего, служба

@@ -4,15 +4,20 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"net/netip"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/grokki91/xray_core/internal/backup"
 	"github.com/grokki91/xray_core/internal/core"
+	"github.com/grokki91/xray_core/internal/network"
 	"github.com/grokki91/xray_core/internal/platform"
 	"github.com/grokki91/xray_core/internal/redact"
 	"github.com/grokki91/xray_core/internal/server"
@@ -142,9 +147,6 @@ func TestInstallAddressKinds(t *testing.T) {
 // Неверный ввод отвергается до первого обращения к сети и системе.
 func TestInstallRejectsBadInputBeforeAnyChange(t *testing.T) {
 	cases := map[string]InstallOptions{
-		"нет --sni":            {Address: "203.0.113.10", Port: 443},
-		"нет --address":        {SNI: "example.com", Port: 443},
-		"порт 0":               {SNI: "example.com", Address: "203.0.113.10", Port: 0},
 		"порт больше 65535":    {SNI: "example.com", Address: "203.0.113.10", Port: 70000},
 		"sni с пробелом":       {SNI: "exa mple.com", Address: "203.0.113.10", Port: 443},
 		"sni с портом":         {SNI: "example.com:443", Address: "203.0.113.10", Port: 443},
@@ -190,17 +192,237 @@ func TestInstallPreflightFailureStopsBeforeDownload(t *testing.T) {
 }
 
 // Повторная установка поверх своей ничего не меняет и называет причину (идемпотентность — фаза 4).
-func TestInstallRefusedWhenAlreadyInstalled(t *testing.T) {
+// Транзакция установки отказывает под блокировкой, если установка уже есть (параллельная
+// команда успела раньше): ErrInstalled.
+func TestInstallTransactionRefusesWhenInstalled(t *testing.T) {
 	s := fresh(t)
 	if _, err := s.app.Install(ctx(t), okOpts); err != nil {
 		t.Fatal(err)
 	}
-	before, calls := s.snap(t), s.rel.latestCalls
-	if _, err := s.app.Install(ctx(t), okOpts); !errors.Is(err, ErrInstalled) {
+	st, err := s.app.s.Store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := s.snap(t)
+	if err := s.app.Apply(ctx(t), Change{Reason: "install", State: st, Create: true}); !errors.Is(err, ErrInstalled) {
 		t.Fatalf("%v", err)
 	}
-	if !before.equal(s.snap(t)) || s.rel.latestCalls != calls {
-		t.Fatal("отказ что-то изменил или загрузил")
+	if !before.equal(s.snap(t)) {
+		t.Fatal("отказ что-то изменил")
+	}
+}
+
+// Повторный запуск ничего не меняет: состояние, конфигурация и ключи те же, релиз не
+// загружается, фаервол не трогается; итог — существующая установка.
+func TestInstallRepeatChangesNothing(t *testing.T) {
+	s := fresh(t)
+	s.ufwStatus = ufwDenyByDefault
+	first, err := s.app.Install(ctx(t), okOpts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, calls, rules := s.snap(t), s.rel.latestCalls, len(s.ufwRules)
+	for _, o := range []InstallOptions{{}, okOpts, {SNI: "EXAMPLE.com"}, {Address: "203.0.113.10", Port: 443}} {
+		res, err := s.app.Install(ctx(t), o)
+		if err != nil {
+			t.Fatalf("%+v: %v", o, err)
+		}
+		if !res.Existing || res.Profile != first.Profile || res.Xray != first.Xray || res.Port != 443 || res.Address != first.Address {
+			t.Fatalf("итог повтора %+v, первый %+v", res, first)
+		}
+	}
+	if !before.equal(s.snap(t)) || s.rel.latestCalls != calls || len(s.ufwRules) != rules {
+		t.Fatal("повтор что-то изменил, загрузил или тронул фаервол")
+	}
+}
+
+// Параметры, расходящиеся с установленным, повтор не меняет: ErrInput, ничего не тронуто.
+func TestInstallRepeatWithOtherParamsIsInputError(t *testing.T) {
+	s := fresh(t)
+	if _, err := s.app.Install(ctx(t), okOpts); err != nil {
+		t.Fatal(err)
+	}
+	before := s.snap(t)
+	for name, o := range map[string]InstallOptions{
+		"sni":    {SNI: "other.example.org"},
+		"порт":   {Port: 8443},
+		"адрес":  {Address: "203.0.113.99"},
+		"домен":  {Address: "vpn.example.org"},
+		"адрес6": {Address: "2001:db8::99"},
+	} {
+		if _, err := s.app.Install(ctx(t), o); !errors.Is(err, ErrInput) {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	if !before.equal(s.snap(t)) {
+		t.Fatal("отказ что-то изменил")
+	}
+}
+
+// Без флагов: адреса — по сетевым фактам (оба семейства), цель — из закрытого списка, DNS — по
+// семействам; профиль получает ссылку на каждый адрес.
+func TestInstallWithoutFlags(t *testing.T) {
+	s := fresh(t)
+	cand := network.Candidates()
+	s.f.SetTLS(cand[0], platform.TLSInfo{Version: tls.VersionTLS13, ALPN: "h2", Curve: tls.X25519MLKEM768,
+		Addr: netip.MustParseAddr("198.51.100.30"), Handshake: 10 * time.Millisecond, Status: 200}, nil)
+	s.f.SetAddrs([]platform.IfAddr{
+		{Iface: "eth0", Addr: netip.MustParseAddr("203.0.113.7")},
+		{Iface: "eth0", Addr: netip.MustParseAddr("2001:db8::7")},
+	})
+	res, err := s.app.Install(ctx(t), InstallOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := s.app.s.Store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Server.Port != 443 || st.Server.Addresses != (store.Addresses{IPv4: "203.0.113.7", IPv6: "2001:db8::7"}) ||
+		st.Inbounds[0].Reality.ServerNames[0] != cand[0] || st.DNS.Strategy != "UseIP" || len(st.DNS.DoH) == 0 {
+		t.Fatalf("состояние: %+v", st)
+	}
+	v, err := s.app.ProfileShow(ctx(t), res.Profile, ShareOptions{})
+	if err != nil || len(v.Links) != 2 {
+		t.Fatalf("ссылки по одной на адрес сервера: %+v, %v", v.Links, err)
+	}
+	if res.Address != "203.0.113.7" {
+		t.Fatalf("итог: %+v", res)
+	}
+}
+
+// Только IPv4: семейство IPv6 в состоянии не появляется, стратегия DNS — UseIPv4.
+func TestInstallIPv4Only(t *testing.T) {
+	s := fresh(t)
+	s.f.SetAddrs([]platform.IfAddr{{Iface: "eth0", Addr: netip.MustParseAddr("203.0.113.7")}})
+	if _, err := s.app.Install(ctx(t), InstallOptions{SNI: "example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	st, err := s.app.s.Store.Load()
+	if err != nil || st.Server.Addresses != (store.Addresses{IPv4: "203.0.113.7"}) || st.DNS.Strategy != "UseIPv4" {
+		t.Fatalf("%+v, %v", st, err)
+	}
+}
+
+func TestInstallNoAddressFoundAsksFlag(t *testing.T) {
+	s := fresh(t) // интерфейсов нет, узел определения адреса не отвечает
+	before := len(s.f.Calls())
+	_, err := s.app.Install(ctx(t), InstallOptions{SNI: "example.com"})
+	var pe *PreflightError
+	if !errors.As(err, &pe) || pe.Issues[0].Code != "preflight.no_address" || !strings.Contains(err.Error(), "--address") {
+		t.Fatalf("%v", err)
+	}
+	if got := s.snap(t); s.rel.latestCalls != 0 || got.state != nil || got.tx {
+		t.Fatalf("до остановки что-то изменено (%d вызовов): %+v", len(s.f.Calls())-before, got)
+	}
+}
+
+func TestInstallPortBusy(t *testing.T) {
+	s := fresh(t)
+	s.f.SetListening(443, true)
+	_, err := s.app.Install(ctx(t), okOpts)
+	var pe *PreflightError
+	if !errors.As(err, &pe) || pe.Issues[0].Code != "preflight.port_busy" || !strings.Contains(err.Error(), "--port") {
+		t.Fatalf("%v", err)
+	}
+	if s.rel.latestCalls != 0 || s.snap(t).state != nil {
+		t.Fatal("занятый порт не остановил установку до загрузки")
+	}
+}
+
+func TestInstallTargetFailureChangesNothing(t *testing.T) {
+	s := fresh(t)
+	o := okOpts
+	o.SNI = "no-answer.example.org" // подделка не отвечает
+	if _, err := s.app.Install(ctx(t), o); err == nil {
+		t.Fatal("цель без ответа принята")
+	}
+	if s.rel.latestCalls != 0 || s.snap(t).state != nil {
+		t.Fatal("провал цели не остановил установку до загрузки")
+	}
+}
+
+// UFW активен и закрывает порт политикой: правило ставит транзакция, метка — в состоянии.
+func TestInstallAddsUFWRule(t *testing.T) {
+	s := fresh(t)
+	s.ufwStatus = ufwDenyByDefault
+	res, err := s.app.Install(ctx(t), okOpts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, _ := s.app.s.Store.Load()
+	if !st.Firewall.UFWRule || strings.Join(s.ufwRules, "|") != "allow 443/tcp" || !res.Firewall.Added || res.Firewall.Open != "" {
+		t.Fatalf("метка %v, вызовы %q, итог %+v", st.Firewall, s.ufwRules, res.Firewall)
+	}
+}
+
+// Правило есть, UFW выключен, чужой фаервол — правило не ставится и метки нет.
+func TestInstallLeavesFirewallAlone(t *testing.T) {
+	for name, ufw := range map[string]string{
+		"уже разрешён": ufwDenyByDefault + "443/tcp ALLOW IN Anywhere\n",
+		"выключен":     "Status: inactive\n",
+		"явный deny":   ufwDenyByDefault + "443 DENY IN Anywhere\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := fresh(t)
+			s.ufwStatus = ufw
+			res, err := s.app.Install(ctx(t), okOpts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			st, _ := s.app.s.Store.Load()
+			if st.Firewall.UFWRule || len(s.ufwRules) != 0 || res.Firewall.Added {
+				t.Fatalf("метка %v, вызовы %q", st.Firewall, s.ufwRules)
+			}
+		})
+	}
+}
+
+// Закрыт ли порт правилами iptables, с сервера не доказать: итог называет «не определено» и
+// команду, которую владелец выполняет сам; xm правил iptables не меняет (ADR-0036).
+func TestInstallNamesCommandForIptables(t *testing.T) {
+	s := fresh(t)
+	s.f.Handle(platform.IPTables, func(platform.Command) (platform.Result, error) {
+		return platform.Result{Stdout: []byte("-P INPUT DROP\n")}, nil
+	})
+	res, err := s.app.Install(ctx(t), okOpts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Firewall.State != "unknown" || !strings.Contains(res.Firewall.Open, "iptables -I INPUT -p tcp --dport 443 -j ACCEPT") {
+		t.Fatalf("%+v", res.Firewall)
+	}
+	for _, c := range s.f.Calls() {
+		if c.Op == "exec" && c.Path == platform.IPTables && len(c.Args) > 0 && c.Args[0] != "-S" {
+			t.Fatalf("iptables изменён: %v", c.Args)
+		}
+	}
+}
+
+// Провал контроля после добавления правила: правило снято, состояния нет — «сбой после
+// изменения → прежнее значение».
+func TestInstallControlFailureRevokesUFWRule(t *testing.T) {
+	s := fresh(t)
+	s.ufwStatus = ufwDenyByDefault
+	s.restartListens = []bool{false}
+	if _, err := s.app.Install(ctx(t), okOpts); !errors.Is(err, ErrRolledBack) {
+		t.Fatalf("%v", err)
+	}
+	if strings.Join(s.ufwRules, "|") != "allow 443/tcp|delete allow 443/tcp" || s.snap(t).state != nil {
+		t.Fatalf("вызовы ufw %q", s.ufwRules)
+	}
+}
+
+// ufw отказал в добавлении: установка откатывается, снятие правила безопасно (его не было).
+func TestInstallUFWFailureRollsBack(t *testing.T) {
+	s := fresh(t)
+	s.ufwStatus = ufwDenyByDefault
+	s.ufwExit = 1
+	if _, err := s.app.Install(ctx(t), okOpts); err == nil {
+		t.Fatal("отказ ufw принят")
+	}
+	if s.snap(t).state != nil || s.snap(t).tx {
+		t.Fatal("отказ ufw оставил установку")
 	}
 }
 
@@ -595,5 +817,44 @@ func TestInstallReturnsHealth(t *testing.T) {
 	res, err := s.app.Install(ctx(t), okOpts)
 	if err != nil || res.Health.Verdict != "ok" {
 		t.Fatalf("%+v %v", res, err)
+	}
+}
+
+// Оборванная установка с правилом UFW: журнал с портом, следующий запуск откатывает и снимает правило.
+func TestRecoverRevokesUFWRuleFromJournal(t *testing.T) {
+	s := fresh(t)
+	s.ufwStatus = ufwDenyByDefault
+	s.restartListens = []bool{false}
+	if _, err := s.app.Install(ctx(t), okOpts); !errors.Is(err, ErrRolledBack) {
+		t.Fatalf("%v", err)
+	}
+	s.ufwRules = nil
+	// Журнал оборванной транзакции: снимок есть, порт правила записан.
+	snap, err := s.app.s.Backup.Create(ctx(t), "install", backup.Meta{XM: "0.1.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.app.s.Store.WriteTx(store.Tx{Snapshot: snap.ID, UFWPort: 443, Started: s.f.Clock().Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if did, err := s.app.Recover(ctx(t)); err != nil || !did {
+		t.Fatalf("Recover: %v %v", did, err)
+	}
+	if strings.Join(s.ufwRules, "|") != "delete allow 443/tcp" || s.snap(t).tx {
+		t.Fatalf("вызовы ufw %q, журнал %v", s.ufwRules, s.snap(t).tx)
+	}
+}
+
+// Отказ ufw при снятии правила — откат не удался (код 5), журнал остаётся для повтора.
+func TestRollbackFailsWhenUFWRevokeFails(t *testing.T) {
+	s := fresh(t)
+	s.ufwStatus = ufwDenyByDefault
+	s.restartListens = []bool{false}
+	s.ufwRevokeExit = 1
+	if _, err := s.app.Install(ctx(t), okOpts); !errors.Is(err, ErrRollbackFailed) {
+		t.Fatalf("%v", err)
+	}
+	if !s.snap(t).tx {
+		t.Fatal("журнал удалён при неудавшемся откате")
 	}
 }

@@ -29,7 +29,7 @@ func fakeStore(t *testing.T) (*Store, *platform.Fake) {
 
 func golden(t *testing.T) []byte {
 	t.Helper()
-	b, err := os.ReadFile("testdata/state-v2.json")
+	b, err := os.ReadFile("testdata/state-v3.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,12 +81,12 @@ func TestLoadRejects(t *testing.T) {
 		{"нет файла", "", ErrNoState},
 		{"не JSON", "{", ErrSchema},
 		{"нет schema_version", `{"server":{}}`, ErrSchema},
-		{"новее сборки", `{"schema_version":3}`, ErrNewerSchema},
+		{"новее сборки", `{"schema_version":4}`, ErrNewerSchema},
 		{"старее без миграции", `{"schema_version":0}`, ErrSchema},
 		{"неизвестное поле", strings.Replace(cur, `"server"`, `"bogus":1,"server"`, 1), ErrSchema},
 		{"данные после документа", cur + "{}", ErrSchema},
 		{"неверный тип", strings.Replace(cur, `"port": 443`, `"port": "443"`, 1), ErrSchema},
-		{"только версия", `{"schema_version":2}`, ErrSchema},
+		{"только версия", `{"schema_version":3}`, ErrSchema},
 		{"id служебного клиента не UUID", strings.Replace(cur, `"id": ""`, `"id": "x"`, 1), ErrSchema},
 		{"нет selftest", strings.Replace(cur, `"selftest": {
     "id": ""
@@ -128,28 +128,49 @@ func TestSaveRejectsForeignSchema(t *testing.T) {
 	}
 }
 
-// Миграция 1 → 2 (ADR-0032): старый файл → Load → Save → новый файл; служебный клиент остаётся
-// пустым — его заполняет транзакция app.
+// Миграции (ADR-0032, ADR-0041): старый файл любой версии → Load → Save → файл текущей схемы;
+// служебный клиент остаётся пустым — его заполняет транзакция app, метка правила UFW — ложь.
 func TestMigrationOldFileToNewFile(t *testing.T) {
+	for _, name := range []string{"state-v1.json", "state-v2.json"} {
+		t.Run(name, func(t *testing.T) {
+			s, f := fakeStore(t)
+			old, err := os.ReadFile("testdata/" + name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			put(t, f, old)
+			st, err := s.Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if st.SchemaVersion != 3 || st.Selftest.ID != "" || st.Firewall.UFWRule {
+				t.Fatalf("после миграции: версия %d, selftest %q, firewall %+v", st.SchemaVersion, st.Selftest.ID, st.Firewall)
+			}
+			if err := s.Save(st); err != nil {
+				t.Fatal(err)
+			}
+			got, _ := f.FS().ReadFile(StatePath)
+			if string(got) != string(golden(t)) {
+				t.Fatalf("после миграции:\n%s", got)
+			}
+		})
+	}
+}
+
+// Метка правила UFW сохраняется и читается без потерь.
+func TestFirewallRuleRoundTrip(t *testing.T) {
 	s, f := fakeStore(t)
-	old, err := os.ReadFile("testdata/state-v1.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	put(t, f, old)
+	put(t, f, []byte(strings.Replace(string(golden(t)), `"ufw_rule": false`, `"ufw_rule": true`, 1)))
 	st, err := s.Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if st.SchemaVersion != 2 || st.Selftest.ID != "" {
-		t.Fatalf("после миграции: версия %d, selftest %q", st.SchemaVersion, st.Selftest.ID)
+	if err != nil || !st.Firewall.UFWRule {
+		t.Fatalf("загрузка: %+v, %v", st.Firewall, err)
 	}
 	if err := s.Save(st); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := f.FS().ReadFile(StatePath)
-	if string(got) != string(golden(t)) {
-		t.Fatalf("после миграции:\n%s", got)
+	if !strings.Contains(string(got), `"ufw_rule": true`) {
+		t.Fatalf("метка потеряна:\n%s", got)
 	}
 }
 

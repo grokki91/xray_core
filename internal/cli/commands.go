@@ -11,9 +11,9 @@ import (
 )
 
 func installFlags(fs *flag.FlagSet) {
-	fs.String("sni", "", "домен цели REALITY, например example.com")
-	fs.String("address", "", "адрес сервера для клиентов: IPv4, IPv6 или домен")
-	fs.Int("port", app.DefaultPort, "порт сервера")
+	fs.String("sni", "", "домен цели REALITY, например example.com (по умолчанию — выбор из закрытого списка)")
+	fs.String("address", "", "внешний адрес сервера: IPv4, IPv6 или домен (по умолчанию — определяется)")
+	fs.Int("port", 0, "порт сервера (по умолчанию 443)")
 }
 
 func runInstall(e Env, fs *flag.FlagSet, _ []string, _ bool) int {
@@ -24,13 +24,22 @@ func runInstall(e Env, fs *flag.FlagSet, _ []string, _ bool) int {
 	if err != nil {
 		return fail(e, false, err)
 	}
-	fmt.Fprintf(e.Stdout, "Xray %s установлен, служба запущена.\nАдрес %s, порт %d.\n", res.Xray, quote(res.Address), res.Port)
-	// Установка завершается ссылкой и QR первого профиля: подключиться можно сразу.
-	v, err := e.App.ProfileShow(e.Ctx, res.Profile, app.ShareOptions{})
-	if err != nil {
-		return fail(e, false, err)
+	if res.Existing {
+		fmt.Fprintf(e.Stdout, "Xray %s уже установлен, ничего не изменено.\nАдрес %s, порт %d.\n", res.Xray, quote(res.Address), res.Port)
+	} else {
+		fmt.Fprintf(e.Stdout, "Xray %s установлен, служба запущена.\nАдрес %s, порт %d.\n", res.Xray, quote(res.Address), res.Port)
 	}
-	printProfile(e, "Первый профиль", v)
+	// Установка завершается ссылкой и QR первого профиля: подключиться можно сразу.
+	if res.Profile == "" {
+		fmt.Fprintln(e.Stdout, "Профилей нет: xm add")
+	} else {
+		v, err := e.App.ProfileShow(e.Ctx, res.Profile, app.ShareOptions{})
+		if err != nil {
+			return fail(e, false, err)
+		}
+		printProfile(e, "Первый профиль", v)
+	}
+	printFirewall(e, res)
 	printHealth(e, res.Health)
 	return exitOK
 }
@@ -134,7 +143,7 @@ func runStatus(e Env, _ *flag.FlagSet, _ []string, asJSON bool) int {
 		return writeJSON(e, contract.New(e.Version, e.Clock.Now(), st))
 	}
 	if !st.Installed {
-		fmt.Fprintf(e.Stdout, "xm %s. Xray не установлен: xm install --sni <домен> --address <адрес>\n", quote(st.Versions.XM))
+		fmt.Fprintf(e.Stdout, "xm %s. Xray не установлен: xm install\n", quote(st.Versions.XM))
 		return exitOK
 	}
 	yes := map[bool]string{true: "да", false: "нет"}
@@ -167,6 +176,24 @@ func runStatus(e Env, _ *flag.FlagSet, _ []string, asJSON bool) int {
 	return exitOK
 }
 
+// printFirewall — что установка сделала с фаерволом; при повторном запуске ничего не сделано и
+// не читалось — строки нет. Состояние — локальный факт: фаервол хостера с сервера не виден.
+func printFirewall(e Env, res app.InstallResult) {
+	if res.Existing {
+		return
+	}
+	f := res.Firewall
+	switch {
+	case f.Added:
+		fmt.Fprintf(e.Stdout, "Фаервол: в UFW добавлено правило для порта %d/tcp; оно снимается при удалении xm.\n", res.Port)
+	case f.State == "allowed":
+		fmt.Fprintf(e.Stdout, "Фаервол: порт %d/tcp локально не закрыт; фаервол хостера с сервера не виден.\n", res.Port)
+	default:
+		fmt.Fprintf(e.Stdout, "Фаервол: порт %d/tcp не определён как открытый (%s). Если подключение не проходит, откройте порт сами: %s\n",
+			res.Port, e.Redact(quote(f.Note)), quote(f.Open))
+	}
+}
+
 // printHealth — последняя строка install и status: вердикт, первопричина, действие; при ok —
 // что не проверено (ADR-0024).
 func printHealth(e Env, h contract.Health) {
@@ -197,7 +224,7 @@ func fail(e Env, asJSON bool, err error) int {
 	case errors.Is(err, app.ErrInstalled):
 		exit, code, hint = exitPreflight, "app.already_installed", "состояние установки: xm status"
 	case errors.Is(err, app.ErrNotInstalled):
-		exit, code, hint = exitPreflight, "app.not_installed", "установка: xm install --sni <домен> --address <адрес>"
+		exit, code, hint = exitPreflight, "app.not_installed", "установка: xm install"
 	case errors.Is(err, app.ErrIncompatible):
 		code, hint = "profile.incompatible", "клиенты и причины — xm status; ссылка без проверки клиента — та же команда без --client"
 	case errors.Is(err, app.ErrRollbackFailed):

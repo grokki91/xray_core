@@ -56,3 +56,4 @@
 | [0038](0038-client-egress-restrictions.md) | Исходящий трафик клиентов — запрет порта 25 и BitTorrent | Принято |
 | [0039](0039-client-dns-via-dns-outbound.md) | Запросы клиентов на :53 — исходящий `dns` с явными правилами | Принято |
 | [0040](0040-reality-target-root-redirect.md) | Цель REALITY не перенаправляет корень на другое имя | Принято |
+| [0041](0041-ufw-rule-in-install-transaction.md) | Правило UFW ставит транзакция установки, метка — в состоянии | Принято |

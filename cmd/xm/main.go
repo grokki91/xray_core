@@ -13,6 +13,7 @@ import (
 	"github.com/grokki91/xray_core/internal/config"
 	"github.com/grokki91/xray_core/internal/core"
 	"github.com/grokki91/xray_core/internal/logging"
+	"github.com/grokki91/xray_core/internal/network"
 	"github.com/grokki91/xray_core/internal/platform"
 	"github.com/grokki91/xray_core/internal/profile"
 	"github.com/grokki91/xray_core/internal/redact"
@@ -52,6 +53,7 @@ func run(ctx context.Context) int {
 		Server:   server.New(p, config.Path),
 		Logging:  logging.New(p, reg, slog.LevelInfo),
 		Profile:  profile.New(),
+		Network:  network.New(p),
 		Security: security.New(p),
 		Redactor: registry{reg},
 		Host:     p,
