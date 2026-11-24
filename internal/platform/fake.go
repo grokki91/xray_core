@@ -32,11 +32,12 @@ type Fake struct {
 	journal   *fakeJournal
 	listening map[int]bool
 	addrs     []IfAddr
+	tls       map[string]fakeTLS
 }
 
 // Call — записанный вызов: операция и путь, имя пользователя или программа с аргументами.
 type Call struct {
-	Op      string // read, write, mkdir, symlink, readlink, lock, exec, start, get, user
+	Op      string // read, write, mkdir, symlink, readlink, lock, exec, start, get, tls, user
 	Path    string // путь файла, имя программы или адрес
 	Version string // версия xray
 	Args    []string
@@ -48,7 +49,7 @@ type Call struct {
 func NewFake(root string, now time.Time) *Fake { return newFake(root, now, programs()) }
 
 func newFake(root string, now time.Time, progs map[string]string) *Fake {
-	f := &Fake{programs: progs, now: now, owners: map[string]Owner{}, handlers: map[string]func(Command) (Result, error){}, underRoot: map[string]bool{}, routes: map[string]fakeRoute{}, starters: map[string]func(Command) error{}, users: map[string]Owner{}, listening: map[int]bool{}}
+	f := &Fake{programs: progs, now: now, owners: map[string]Owner{}, handlers: map[string]func(Command) (Result, error){}, underRoot: map[string]bool{}, routes: map[string]fakeRoute{}, starters: map[string]func(Command) error{}, users: map[string]Owner{}, listening: map[int]bool{}, tls: map[string]fakeTLS{}}
 	f.journal = &fakeJournal{f: f}
 	f.files = files{root: root, chown: f.recordOwner, ownerOf: f.ownerOf, trace: f.trace}
 	return f

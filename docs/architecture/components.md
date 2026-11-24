@@ -34,7 +34,7 @@ type Platform interface {
     Start(ctx context.Context, c Command) (Process, error) // процесс в фоне ([ADR-0032](../adr/0032-selftest-client-and-l3-target.md)); Process{Done, Stop}
     FS() FS            // ReadFile, WriteFile (temp + fchown + fchmod + fsync + rename), Mkdir, ReadDir, Remove, Symlink, Readlink, Lock (flock)
     Systemd() Systemd  // только xray.service: Running, Reload, Enable/Disable, Start/Stop/Restart, Status
-    Net() Net          // Get по HTTPS, Listening — порт слушается (фаза 2); Addrs — адреса интерфейсов (фаза 4)
+    Net() Net          // Get по HTTPS, Listening — порт слушается (фаза 2); Addrs — адреса интерфейсов, TLSProbe — проверка TLS узла (фаза 4)
     Users() Users      // системный пользователь службы; Effective — владелец процесса xm
     Journal() Journal  // запись в journald, идентификатор xm (ADR-0022)
     Clock() Clock
@@ -88,6 +88,14 @@ type Platform interface {
   (нет `tcp6` на хосте без IPv6 — не ошибка); соединений не открывает. `Clock.Sleep(ctx, d)` — ожидание
   до конца `ctx`; у подделки сдвигает часы ([ADR-0023](../adr/0023-transaction-control-and-rollback-scope.md)).
 - `Net.Addrs(ctx)` — адреса интерфейсов (`IfAddr{Iface, Addr}`) без отбора; подделка — `SetAddrs`.
+- `Net.TLSProbe(ctx, TLSRequest{Host, Port, Allow})` — одно TLS-соединение на первый адрес имени,
+  допустимый по `Allow` (нет такого — `ErrNotAllowed` без соединения; время — TCP и TLS без DNS): TLS 1.3,
+  ALPN h2, только группа X25519MLKEM768; `TLSInfo{Version, ALPN, Curve, Addr,
+  CertErr, Handshake, Status, Location, HeadErr}`; после рукопожатия при ALPN h2 — один `HEAD /`
+  с `Host` = имени, без `User-Agent`, по тому же соединению (HTTP/2 стандартной библиотеки, без перехода по
+  перенаправлению, заголовки до 16 КиБ, тело не читается, срок 5 с в пределах общего), цепочка — системным
+  пулом на имя (итог в `CertErr`); недопустимые узел или
+  порт — `ErrURL`, срок обязателен; подделка — `SetTLS`.
   Программы `ss`, `ufw`, `iptables`, `ip6tables` — в закрытом списке (`network`, только чтение).
 - `Users.Ensure(ctx, имя)` — владелец пользователя; нет такого — создаёт системного без оболочки и
   домашнего каталога через `useradd` из закрытого списка. Допустимо одно имя, `ServiceUser`
@@ -100,7 +108,7 @@ type Platform interface {
 - `Users.Effective()` — эффективные uid и gid процесса `xm`; у подделки root, пока тест не назначил
   другого (`SetEffective`).
 - Фаза 1 — `Exec`, `FS`, `Clock`; фаза 2 — `Net.Get`, `xray` по версии, `Remove`, `Symlink`, `Readlink`, `Users`, `Systemd`; A4 — `ReadDir`;
-  фаза 4 — `Net.Addrs`, `ss`, `ufw`, `iptables`, `ip6tables`.
+  фаза 4 — `Net.Addrs`, `Net.TLSProbe`, `ss`, `ufw`, `iptables`, `ip6tables`.
 
 ### store
 
@@ -388,8 +396,20 @@ type Manager interface {
   Срок ufw — `unknown`, иной сбой ufw — в `Note`. У trace, ufw, iptables, ip6tables, ss — свои сроки; имя владельца порта — только печатные символы без пробелов и кавычек.
   `allowed` — только локально: фаервол хостера с сервера не виден. Ничего не меняет
   ([ADR-0036](../adr/0036-install-changes-only-own.md)).
-- Выбор REALITY-цели — список кандидатов с живой проверкой, `--sni` переопределяет
-  ([ADR-0035](../adr/0035-reality-target-candidates.md)). Фаза 4.
+- Цель REALITY ([ADR-0035](../adr/0035-reality-target-candidates.md)): `ProbeTarget(ctx, host)` —
+  имя домена (не IP), одно соединение `Net.TLSProbe` к `host:443` на первый публичный адрес имени (`Allow: public`;
+  публичного нет — соединения нет, `address` не прошёл), свой срок
+  10 с; `TargetReport{Host, Addr, Handshake, Checks}` — критерии `tls13`, `h2`, `x25519mlkem768`
+  (клиент предлагает только эту группу), `certificate` (цепочка системным пулом на имя),
+  `address` (адрес соединения публичный — правило выше), `redirect` (ответ на `HEAD /` не 3xx
+  или 3xx с `Location` — путь с одним ведущим `/` или `https` на то же имя, `\` — провал, в
+  причине не больше 256 байт; нет ответа — «не проверено»;
+  [ADR-0040](../adr/0040-reality-target-root-redirect.md)), у непрошедшего — причина; провал
+  соединения — все критерии не прошли с его причиной. `SelectTarget(ctx, sni)`: `sni` задан —
+  только он, провал — ошибка; иначе все `Candidates()` (закрытый список из 9 имён) параллельно
+  с общим сроком 15 с, выбор прошедшего с наименьшим `Handshake`, при равенстве — раньше по
+  списку; ни один не прошёл — ошибка с причиной по каждому и подсказкой `--sni`. Связь с
+  `xm install` и сохранение в `target` — шаг 5 фазы 4.
 
 ### dns
 
