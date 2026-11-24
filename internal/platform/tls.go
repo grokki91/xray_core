@@ -69,7 +69,7 @@ func (n realNet) TLSProbe(ctx context.Context, r TLSRequest) (TLSInfo, error) {
 	if err := checkTLS(ctx, r); err != nil {
 		return TLSInfo{}, err
 	}
-	addrs, err := net.DefaultResolver.LookupNetIP(ctx, "ip", r.Host)
+	addrs, err := n.lookup(ctx, r.Host)
 	if err != nil {
 		return TLSInfo{}, fmt.Errorf("адрес %s: %w", r.Host, err)
 	}

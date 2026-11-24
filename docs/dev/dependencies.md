@@ -80,4 +80,4 @@ govulncheck, staticcheck, shellcheck подключены 2026-11-15; [release.y
 | `1.1.1.1`, `2606:4700:4700::1111` | `network` | внешний адрес за NAT: `GET /cdn-cgi/trace`, поле `ip`; запрос по адресу — семейство однозначно, DNS не нужен; `--address` переопределяет | 2026-11-23, ответ владельца |
 | `1.1.1.1` | `dns` | DoH по умолчанию: `https://1.1.1.1/dns-query` в разделе `dns` конфигурации Xray | 2026-11-23, ответ владельца |
 | `dns.quad9.net` | `dns` | DoH по умолчанию: `https://dns.quad9.net/dns-query` — второй независимый оператор | 2026-11-23, ответ владельца |
-| кандидаты цели REALITY (до 10 имён, порт 443) | `network` | проверка цели при установке без `--sni`: одно соединение TLS на кандидата; список — [compatibility.md](../compatibility.md) | 2026-11-23, [ADR-0035](../adr/0035-reality-target-candidates.md) |
+| кандидаты цели REALITY (9 имён, порт 443) | `network` | проверка цели при установке без `--sni`: одно соединение TLS на кандидата; список — [compatibility.md](../compatibility.md) | 2026-11-23, [ADR-0035](../adr/0035-reality-target-candidates.md) |

@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/exec"
 	"regexp"
@@ -47,7 +49,7 @@ func New() *Real { return newReal(programs(), http.DefaultTransport) }
 
 // newReal принимает транспорт HTTP: тесты подставляют свой с доверием к локальному серверу.
 func newReal(progs map[string]string, transport http.RoundTripper) *Real {
-	return &Real{programs: progs, net: realNet{transport: transport}, files: files{
+	return &Real{programs: progs, net: realNet{transport: transport, lookup: lookupIP}, files: files{
 		chown: func(f *os.File, _ string, o Owner) error { return f.Chown(o.UID, o.GID) },
 		ownerOf: func(_ string, fi fs.FileInfo) Owner {
 			if st, ok := fi.Sys().(*syscall.Stat_t); ok {
@@ -231,4 +233,9 @@ func checkCommand(ctx context.Context, progs map[string]string, c Command) (stri
 		return "", fmt.Errorf("%s: %w", c.Program, err)
 	}
 	return path, nil
+}
+
+// lookupIP — адреса имени системным резолвером, IPv4 и IPv6.
+func lookupIP(ctx context.Context, host string) ([]netip.Addr, error) {
+	return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
 }

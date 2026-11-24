@@ -22,8 +22,8 @@ import (
 // а не переменная: список не меняется во время работы.
 func Candidates() []string {
 	return []string{
-		"www.microsoft.com", "www.apple.com", "dl.google.com", "www.cloudflare.com", "www.amazon.com",
-		"www.samsung.com", "www.nvidia.com", "www.oracle.com", "www.mozilla.org", "www.intel.com",
+		"www.microsoft.com", "www.apple.com", "www.cloudflare.com", "www.amazon.com", "www.samsung.com",
+		"www.nvidia.com", "www.oracle.com", "www.mozilla.org", "www.intel.com",
 	}
 }
 

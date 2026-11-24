@@ -17,6 +17,23 @@ import (
 
 func allowAll(netip.Addr) bool { return true }
 
+// resolve — подставной резолвер: имя → адреса; IP-литерал — сам себя; иначе ошибка.
+func resolve(m map[string][]string) func(context.Context, string) ([]netip.Addr, error) {
+	return func(_ context.Context, host string) ([]netip.Addr, error) {
+		if a, err := netip.ParseAddr(host); err == nil {
+			return []netip.Addr{a}, nil
+		}
+		var out []netip.Addr
+		for _, a := range m[host] {
+			out = append(out, netip.MustParseAddr(a))
+		}
+		if out == nil {
+			return nil, errors.New("имя не разрешено: " + host)
+		}
+		return out, nil
+	}
+}
+
 func global(a netip.Addr) bool { return a.IsGlobalUnicast() && !a.IsPrivate() }
 
 // Адрес не по Allow — ErrNotAllowed до соединения: сервер не видит ни одного подключения.
@@ -41,12 +58,14 @@ func TestTLSProbeNotAllowedNoDial(t *testing.T) {
 	fake := newFake(t.TempDir(), time.Time{}, nil)
 	fake.SetTLS("127.0.0.1", TLSInfo{Addr: netip.MustParseAddr("127.0.0.1")}, nil)
 	fake.SetTLS("private.test", TLSInfo{Addr: netip.MustParseAddr("10.0.0.1")}, nil)
-	real := newReal(nil, http.DefaultTransport).Net()
+	realImpl := newReal(nil, http.DefaultTransport)
+	realImpl.net.lookup = resolve(map[string][]string{"private.test": {"10.0.0.1", "127.0.0.1", "::1"}})
+	real := realImpl.Net()
 	for _, c := range []struct {
 		name string
 		n    Net
 		host string
-	}{{"real", real, "127.0.0.1"}, {"real", real, "localhost"}, {"fake", fake.Net(), "127.0.0.1"}, {"fake", fake.Net(), "private.test"}} {
+	}{{"real", real, "127.0.0.1"}, {"real", real, "private.test"}, {"fake", fake.Net(), "127.0.0.1"}, {"fake", fake.Net(), "private.test"}} {
 		_, err := c.n.TLSProbe(deadline(t, 5*time.Second), TLSRequest{Host: c.host, Port: port, Allow: global})
 		if !errors.Is(err, ErrNotAllowed) {
 			t.Errorf("%s %s: %v, нужен ErrNotAllowed", c.name, c.host, err)
@@ -68,8 +87,9 @@ func TestTLSProbeRealWrongName(t *testing.T) {
 	port, roots := tlsServer(t)
 	real := newReal(nil, http.DefaultTransport)
 	real.net.roots = roots
-	// Сертификат httptest — на example.com и 127.0.0.1; «localhost» разрешается в петлю, но в нём нет.
-	got, err := real.Net().TLSProbe(deadline(t, 5*time.Second), TLSRequest{Host: "localhost", Port: port, Allow: allowAll})
+	// Сертификат httptest — на example.com и 127.0.0.1; wrong.test ведёт на тот же сервер, но в сертификате его нет.
+	real.net.lookup = resolve(map[string][]string{"wrong.test": {"127.0.0.1"}})
+	got, err := real.Net().TLSProbe(deadline(t, 5*time.Second), TLSRequest{Host: "wrong.test", Port: port, Allow: allowAll})
 	if err != nil {
 		t.Fatal(err)
 	}

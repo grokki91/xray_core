@@ -93,6 +93,8 @@ func readLimited(body io.Reader, max int64) ([]byte, error) {
 type realNet struct {
 	transport http.RoundTripper
 	roots     *x509.CertPool
+	// lookup разрешает имя TLSProbe; тест подставляет свой, чтобы не зависеть от резолвера хоста.
+	lookup func(ctx context.Context, host string) ([]netip.Addr, error)
 }
 
 func (n realNet) Get(ctx context.Context, r Request) ([]byte, error) {
