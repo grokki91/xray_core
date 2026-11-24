@@ -81,6 +81,8 @@
   ([ADR-0027](../adr/0027-private-destinations-via-final-rules.md),
   [ADR-0034](../adr/0034-own-final-rules-over-upstream-default.md)). Без этого правила
   клиент VPN достаёт до панели и API через тоннель.
+- Запросы клиентов на порт 53 отвечает встроенный DNS через исходящий `dns` без действия `direct`:
+  на адрес, указанный клиентом, ничего не уходит ([ADR-0039](../adr/0039-client-dns-via-dns-outbound.md)).
 - Исходящие соединения клиентов на порт 25 запрещает `finalRules` у `freedom`, BitTorrent —
   правило маршрутизации; протокол определяет `sniffing` только для маршрутизации
   ([ADR-0038](../adr/0038-client-egress-restrictions.md); правила — задача A8 фазы 4).

@@ -235,9 +235,11 @@ type Preset interface {  // каталог пресетов: config/preset
 
 - Собирает разделы:
   - `log` — готовый раздел передаёт `app` от `logging` (менеджеры друг друга не импортируют);
-  - `dns` — из `state.dns`; пока `doh` пуст (до фазы 4), раздела нет;
+  - `dns` — из `state.dns` (`servers`, `queryStrategy`); пока `doh` пуст, раздела нет;
   - `inbounds` — пресет и клиенты из `state.profiles`;
-  - `outbounds`, `routing` — в том числе запрет частных и петлевых адресов назначения
+  - `outbounds`, `routing` — `freedom` первым (получает всё, что не поймали правила); при разделе
+    `dns` — исходящий `dns` (`dns-out`) и единственное правило `routing`: порт `53`, `tcp,udp` → он;
+    без раздела `dns` нет ни исходящего `dns`, ни `routing` ([ADR-0039](../adr/0039-client-dns-via-dns-outbound.md)). Запрет частных и петлевых адресов назначения
     ([policy.md](../security/policy.md) §4; способ — [ADR-0027](../adr/0027-private-destinations-via-final-rules.md)).
 - В запрет не входят `100.64.0.0/10` (CGNAT) и `::ffff:0:0/96` (IPv4 в IPv6): политика их не требует,
   обработка второго в `ip`-правиле Xray не проверена. Цель REALITY проверяется по синтаксису;
@@ -255,8 +257,8 @@ type Preset interface {  // каталог пресетов: config/preset
   нет входящего или адреса — `ErrState`. Разборщика ссылок нет: L3 сверяет параметры ссылки с
   параметрами клиента. Ошибки отрисовки несут
   имена полей, не значения. Адреса назначения `0.0.0.0/8`, частные, петлевые и link-local
-  блокирует `settings.finalRules` единственного исходящего `freedom` (`action: block`); раздела
-  `routing` нет (ADR-0027, ADR-0034).
+  блокирует `settings.finalRules` исходящего `freedom` (`action: block`), в том числе для DoH самого
+  Xray (схема `https://` идёт через `freedom`); к исходящему `dns` finalRules не применяются — его правила без `direct` ([ADR-0039](../adr/0039-client-dns-via-dns-outbound.md)).
 - Проверка — `core.Validate` перед записью. Набор полей сверяется с upstream по скилу
   `xray-upstream`. Фаза 2.
 
@@ -394,14 +396,27 @@ type Manager interface {
 Раздел `dns` конфигурации Xray и проверка резолвинга на сервере. Системный резолвер не меняет.
 
 ```go
-type Manager interface {
-    Plan(n NetFacts) DNSSettings                 // DoH-серверы, стратегия IPv4/IPv6
+func Plan(n NetFacts) store.DNS                  // DoH-серверы, стратегия IPv4/IPv6 → state.dns
+
+type Manager interface {                         // после MVP
     Check(ctx context.Context) []Observation     // системный резолвер, DoH, расхождение ответов
 }
 ```
 
-- Запросы клиентов на `:53` внутри тоннеля отвечает встроенный DNS Xray через DoH. Фаза 4
-  (`Plan`); `Check` — после MVP.
+- Запросы клиентов на `:53` внутри тоннеля отвечает встроенный DNS Xray через DoH. `Check` — после MVP.
+- `Plan` — функция пакета: `NetFacts{IPv4, IPv6}` (есть ли внешний адрес семейства; заполняет
+  вызывающий из `network.Facts`) → `store.DNS`, пишется в `state.dns`. Серверы —
+  закрытый список `https://1.1.1.1/dns-query`, `https://dns.quad9.net/dns-query`
+  ([dependencies.md](../dev/dependencies.md) §5); схема `https://` (через маршрутизацию и `freedom`),
+  не `https+local://`. `queryStrategy`: оба семейства — `UseIP`, только IPv6 — `UseIPv6`, иначе
+  `UseIPv4`. `disableCache`, `disableFallback`, bootstrap не задаются; `domainStrategy` freedom не
+  меняется. Фаза 4.
+- Имя `dns.quad9.net` разрешает резолвер ОС (bootstrap в Xray нет, freedom `AsIs`). Вернёт он
+  частный или петлевой адрес — finalRules `freedom` заблокируют этот DoH, и при отказе обоих
+  серверов DNS клиентов перестанет отвечать: отказ, а не утечка.
+- Исходящий `dns-out` — явные правила: `hijack` для `qType` `1,28` (A, AAAA — встроенному DNS),
+  остальное — `return` с `rCode` 5 (REFUSED); на исходный адрес запроса ничего не уходит. L3
+  `TestL3ClientDNSHijacked`: A и TXT через тоннель к слушателю порта DNS до него не доходят.
 
 ### security
 
