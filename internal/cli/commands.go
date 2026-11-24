@@ -185,12 +185,12 @@ func printFirewall(e Env, res app.InstallResult) {
 	f := res.Firewall
 	switch {
 	case f.Added:
-		fmt.Fprintf(e.Stdout, "Фаервол: в UFW добавлено правило для порта %d/tcp; его снимет xm uninstall.\n", res.Port)
+		fmt.Fprintf(e.Stdout, "Фаервол: в UFW добавлено правило для порта %d/tcp; оно снимается при удалении xm.\n", res.Port)
 	case f.State == "allowed":
 		fmt.Fprintf(e.Stdout, "Фаервол: порт %d/tcp локально не закрыт; фаервол хостера с сервера не виден.\n", res.Port)
 	default:
 		fmt.Fprintf(e.Stdout, "Фаервол: порт %d/tcp не определён как открытый (%s). Если подключение не проходит, откройте порт сами: %s\n",
-			res.Port, quote(f.Note), quote(f.Open))
+			res.Port, e.Redact(quote(f.Note)), quote(f.Open))
 	}
 }
 

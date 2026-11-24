@@ -444,13 +444,6 @@ func (a *App) rollback(ctx context.Context, tx store.Tx) error {
 	if err := a.s.Store.Restore(arch.State); err != nil {
 		return err
 	}
-	// Правило UFW, которое транзакция собиралась добавить: до неё его не было (добавляют только
-	// при отсутствии), поэтому снимается безусловно; отсутствие правила — не ошибка (ADR-0041).
-	if tx.UFWPort != 0 {
-		if err := a.s.Network.RevokePort(ctx, tx.UFWPort); err != nil {
-			return err
-		}
-	}
 	if arch.Config != nil {
 		err = a.s.Config.Write(ctx, config.Rendered{Data: arch.Config})
 	} else {
@@ -461,6 +454,14 @@ func (a *App) rollback(ctx context.Context, tx store.Tx) error {
 	}
 	if err := a.s.Config.Unstage(); err != nil {
 		return err
+	}
+	// Снимается после возврата состояния, конфигурации и юнита: сбой ufw не оставляет их
+	// полуоткаченными. Правило UFW, которое транзакция собиралась добавить: до неё его не было (добавляют только
+	// при отсутствии), поэтому снимается безусловно; отсутствие правила — не ошибка (ADR-0041).
+	if tx.UFWPort != 0 {
+		if err := a.s.Network.RevokePort(ctx, tx.UFWPort); err != nil {
+			return err
+		}
 	}
 	if tx.UnitBefore != nil && tx.WasActive {
 		// Службы без состояния не бывает; порта нет — поднимать и проверять нечего, служба

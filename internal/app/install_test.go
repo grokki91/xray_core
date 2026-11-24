@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/grokki91/xray_core/internal/backup"
 	"github.com/grokki91/xray_core/internal/core"
 	"github.com/grokki91/xray_core/internal/network"
 	"github.com/grokki91/xray_core/internal/platform"
@@ -816,5 +817,44 @@ func TestInstallReturnsHealth(t *testing.T) {
 	res, err := s.app.Install(ctx(t), okOpts)
 	if err != nil || res.Health.Verdict != "ok" {
 		t.Fatalf("%+v %v", res, err)
+	}
+}
+
+// Оборванная установка с правилом UFW: журнал с портом, следующий запуск откатывает и снимает правило.
+func TestRecoverRevokesUFWRuleFromJournal(t *testing.T) {
+	s := fresh(t)
+	s.ufwStatus = ufwDenyByDefault
+	s.restartListens = []bool{false}
+	if _, err := s.app.Install(ctx(t), okOpts); !errors.Is(err, ErrRolledBack) {
+		t.Fatalf("%v", err)
+	}
+	s.ufwRules = nil
+	// Журнал оборванной транзакции: снимок есть, порт правила записан.
+	snap, err := s.app.s.Backup.Create(ctx(t), "install", backup.Meta{XM: "0.1.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.app.s.Store.WriteTx(store.Tx{Snapshot: snap.ID, UFWPort: 443, Started: s.f.Clock().Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if did, err := s.app.Recover(ctx(t)); err != nil || !did {
+		t.Fatalf("Recover: %v %v", did, err)
+	}
+	if strings.Join(s.ufwRules, "|") != "delete allow 443/tcp" || s.snap(t).tx {
+		t.Fatalf("вызовы ufw %q, журнал %v", s.ufwRules, s.snap(t).tx)
+	}
+}
+
+// Отказ ufw при снятии правила — откат не удался (код 5), журнал остаётся для повтора.
+func TestRollbackFailsWhenUFWRevokeFails(t *testing.T) {
+	s := fresh(t)
+	s.ufwStatus = ufwDenyByDefault
+	s.restartListens = []bool{false}
+	s.ufwRevokeExit = 1
+	if _, err := s.app.Install(ctx(t), okOpts); !errors.Is(err, ErrRollbackFailed) {
+		t.Fatalf("%v", err)
+	}
+	if !s.snap(t).tx {
+		t.Fatal("журнал удалён при неудавшемся откате")
 	}
 }

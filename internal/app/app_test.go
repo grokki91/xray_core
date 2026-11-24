@@ -85,9 +85,10 @@ type sys struct {
 	startErr           error              // отказ запуска клиента самопроверки
 	started            []platform.Command // запуски клиента самопроверки
 
-	ufwStatus string   // вывод `ufw status verbose`; по умолчанию UFW выключен
-	ufwRules  []string // вызовы ufw, меняющие правила: «allow 443/tcp», «delete allow 443/tcp»
-	ufwExit   int      // код выхода ufw на добавление правила (снятие всегда проходит)
+	ufwStatus     string   // вывод `ufw status verbose`; по умолчанию UFW выключен
+	ufwRules      []string // вызовы ufw, меняющие правила: «allow 443/tcp», «delete allow 443/tcp»
+	ufwRevokeExit int      // код выхода ufw на снятие правила
+	ufwExit       int      // код выхода ufw на добавление правила (снятие всегда проходит)
 }
 
 // ufwDenyByDefault — активный UFW, порт 443 закрыт политикой по умолчанию.
@@ -214,7 +215,7 @@ func build(t *testing.T, installed bool) *sys {
 		if c.Args[0] == "allow" {
 			return platform.Result{ExitCode: s.ufwExit}, nil
 		}
-		return platform.Result{}, nil
+		return platform.Result{ExitCode: s.ufwRevokeExit}, nil
 	})
 	s.ufwStatus = "Status: inactive\n"
 	f.Handle(platform.IPTables, func(platform.Command) (platform.Result, error) {

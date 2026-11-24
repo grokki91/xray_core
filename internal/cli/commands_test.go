@@ -315,7 +315,7 @@ func TestInstallRepeatSaysNothingChanged(t *testing.T) {
 // Итог про фаервол: правило UFW — сказано, что снимет uninstall; закрытый порт — команда владельцу.
 func TestInstallPrintsFirewall(t *testing.T) {
 	_, stdout, _ := runWith(&fakeApp{view: phone, fw: app.FirewallResult{State: "denied", Source: "ufw", Added: true}}, "install")
-	if !strings.Contains(stdout, "в UFW добавлено правило") || !strings.Contains(stdout, "xm uninstall") {
+	if !strings.Contains(stdout, "в UFW добавлено правило") || !strings.Contains(stdout, "при удалении") {
 		t.Fatalf("правило UFW не названо:\n%s", stdout)
 	}
 	open := "iptables -I INPUT -p tcp --dport 443 -j ACCEPT"

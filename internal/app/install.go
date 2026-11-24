@@ -112,10 +112,11 @@ var (
 
 // installInput — проверенный ввод: адрес разложен на внешний IP для сетевых фактов и домен.
 type installInput struct {
-	sni    string
-	ip     string // --address, если это IP: переопределение внешнего адреса
-	domain string // --address, если это домен
-	port   int
+	sni     string
+	ip      string // --address, если это IP: переопределение внешнего адреса
+	domain  string // --address, если это домен
+	port    int
+	portSet bool // --port задан явно: сравнивается с установленным
 }
 
 // checkInstall проверяет ввод по закрытому правилу до любого обращения к системе и сети
@@ -124,7 +125,7 @@ func checkInstall(o InstallOptions) (in installInput, err error) {
 	bad := func(format string, a ...any) error {
 		return fmt.Errorf("%w: "+format, append([]any{ErrInput}, a...)...)
 	}
-	in.port = o.Port
+	in.port, in.portSet = o.Port, o.Port != 0
 	if in.port == 0 {
 		in.port = DefaultPort
 	}
@@ -301,7 +302,7 @@ func (a *App) existing(ctx context.Context, st store.State, in installInput) (In
 	switch {
 	case in.sni != "" && !slices.Contains(st.Inbounds[0].Reality.ServerNames, in.sni):
 		return InstallResult{}, bad("--sni отличается от установленного")
-	case in.port != st.Server.Port && in.port != DefaultPort:
+	case in.portSet && in.port != st.Server.Port:
 		return InstallResult{}, bad("--port отличается от установленного")
 	case in.ip != "" && in.ip != ad.IPv4 && in.ip != ad.IPv6:
 		return InstallResult{}, bad("--address отличается от установленных адресов")
