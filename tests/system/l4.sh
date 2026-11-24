@@ -58,7 +58,7 @@ cat >"$rel/bin/curl" <<'SHIM'
 #!/usr/bin/env bash
 # Заглушка curl для L4: -o ФАЙЛ URL релиза v0.0.0 → копия из $L4_RELEASE; остальное — отказ.
 o= url=
-while (($#)); do case $1 in -o) o=$2; shift 2 ;; -w) shift 2 ;; -*) shift ;; *) url=$1; shift ;; esac; done
+while (($#)); do case $1 in -o) o=$2; shift 2 ;; -w) shift 2 ;; https://*) url=$1; shift ;; *) shift ;; esac; done
 f=${url#https://github.com/grokki91/xray_core/releases/download/v0.0.0/}
 [[ $f != "$url" && $f =~ ^[A-Za-z0-9._-]+$ && -f $L4_RELEASE/$f && -n $o ]] || exit 22
 cp "$L4_RELEASE/$f" "$o"
@@ -270,8 +270,10 @@ for f in "${foreign[@]}"; do check "посторонний файл цел: $f" 
 rm -f "${foreign[@]}"
 "$src" uninstall >"$out/uninstall-again" 2>&1
 eq "uninstall после --purge: не установлено, код" "$?" 3
-# Вывод удаления — тоже канарейка: секретов в нём нет (значения сняты до удаления).
-grep -qF -f "$out/.secrets" "$out/uninstall" "$out/purge-no" "$out/purge" "$out/uninstall-again"
+# Вывод удаления — тоже канарейка: секретов состояния и токена API в нём нет (значения сняты до удаления).
+(umask 077 && cat "$out/.secrets" >"$out/.canary")
+[[ -s $out/.token ]] && cat "$out/.token" >>"$out/.canary"
+grep -qF -f "$out/.canary" "$out/uninstall" "$out/purge-no" "$out/purge" "$out/uninstall-again"
 case $? in
 0) bad "секрет состояния в выводе uninstall" ;;
 1) ok "вывод uninstall без секретов состояния" ;;
