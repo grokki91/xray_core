@@ -141,12 +141,25 @@ func TestRenderDNSFromState(t *testing.T) {
 	if strings.Contains(string(render(t, state()).Data), `"dns"`) {
 		t.Fatal("раздел dns есть при пустом состоянии")
 	}
-	st := state()
-	st.DNS = store.DNS{DoH: []string{"https://1.1.1.1/dns-query"}, Strategy: "UseIP"}
-	out := string(render(t, st).Data)
-	if !strings.Contains(out, `"https://1.1.1.1/dns-query"`) || !strings.Contains(out, `"queryStrategy": "UseIP"`) {
-		t.Fatalf("dns не отрисован:\n%s", out)
+	for _, s := range []string{`"routing"`, `"protocol": "dns"`} {
+		if strings.Contains(string(render(t, state()).Data), s) {
+			t.Fatalf("%s есть без раздела dns", s)
+		}
 	}
+	want, err := os.ReadFile("testdata/config-dns.golden.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := render(t, dnsState()).Data; !bytes.Equal(got, want) {
+		t.Fatalf("конфигурация с dns расходится с эталоном:\n%s", got)
+	}
+}
+
+// dnsState — состояние с разделом dns, как его строит dns.Plan.
+func dnsState() store.State {
+	st := state()
+	st.DNS = store.DNS{DoH: []string{"https://1.1.1.1/dns-query", "https://dns.quad9.net/dns-query"}, Strategy: "UseIPv4"}
+	return st
 }
 
 func TestRenderRejectsBadState(t *testing.T) {
