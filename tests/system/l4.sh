@@ -28,12 +28,13 @@ perm() { # perm ПУТЬ ВЛАДЕЛЕЦ:ГРУППА ПРАВА — строк
 	if [[ $got == "$2 $3" ]]; then ok "права $1"; else bad "права $1: $got, ожидалось $2 $3"; fi
 }
 
-sni=example.com
-# Адрес машины, через который уходит трафик: самопроверка в контроле установки (ADR-0033)
-# подключает клиента к адресу из состояния, поэтому он должен быть достижим с самой машины.
-# Петля не годится: install её отклоняет.
-addr=$(ip -4 -o route get 192.0.2.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p')
-[[ -n $addr ]] || { echo "l4: FAIL (нет IPv4-адреса машины)"; exit 1; }
+# Адрес сервера: у исполнителя CI публичного адреса нет, а install принимает только публичный.
+# Документационный адрес (TEST-NET-3) вешается на петлевой интерфейс: он «публичный» для xm и
+# достижим с самой машины — самопроверка в контроле установки (ADR-0033) подключает клиента
+# к адресу из состояния. Адрес снимается при выходе.
+addr=203.0.113.10
+ip addr add "$addr/32" dev lo 2>/dev/null || { echo "l4: FAIL (не удалось назначить $addr на lo)"; exit 1; }
+trap 'ip addr del "$addr/32" dev lo 2>/dev/null; rm -rf "$out"' EXIT
 port=443
 
 # 0. Среда: факты о машине для разбора провалов (секретов здесь нет)
@@ -45,7 +46,7 @@ echo "env  PID 1: $(ps -p 1 -o comm= 2>&1)"
 echo "env  ОС: $(sed -n 's/^PRETTY_NAME=//p' /usr/lib/os-release), память: $(awk '/^MemTotal:/ {print int($2/1024)}' /proc/meminfo) МиБ"
 
 # 1. Установка
-"$xm" install --sni "$sni" --address "$addr" --port "$port" >"$out/install" 2>&1
+"$xm" install --address "$addr" --port "$port" >"$out/install" 2>&1
 rc=$?
 if [[ $rc == 0 ]]; then
 	ok "install: код 0"
@@ -95,7 +96,7 @@ check "status: версия Xray и порт" jq -e --argjson p "$port" \
 
 # 5. Повторная установка ничего не меняет: код 0, состояние побайтно то же (фаза 4, шаг 5)
 state_before=$(sha256sum /etc/xm/state.json | cut -d' ' -f1)
-"$xm" install --sni "$sni" --address "$addr" --port "$port" >"$out/again" 2>&1
+"$xm" install --address "$addr" --port "$port" >"$out/again" 2>&1
 rc=$?
 eq "повторная установка: код" "$rc" 0
 eq "повторная установка: состояние не изменилось" "$(sha256sum /etc/xm/state.json | cut -d' ' -f1)" "$state_before"
