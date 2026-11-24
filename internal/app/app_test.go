@@ -3,9 +3,11 @@ package app
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/netip"
 	"os"
 	"strings"
 	"testing"
@@ -15,6 +17,7 @@ import (
 	"github.com/grokki91/xray_core/internal/config"
 	"github.com/grokki91/xray_core/internal/core"
 	"github.com/grokki91/xray_core/internal/logging"
+	"github.com/grokki91/xray_core/internal/network"
 	"github.com/grokki91/xray_core/internal/platform"
 	"github.com/grokki91/xray_core/internal/profile"
 	"github.com/grokki91/xray_core/internal/redact"
@@ -81,7 +84,14 @@ type sys struct {
 	restarts, nRestart int
 	startErr           error              // отказ запуска клиента самопроверки
 	started            []platform.Command // запуски клиента самопроверки
+
+	ufwStatus string   // вывод `ufw status verbose`; по умолчанию UFW выключен
+	ufwRules  []string // вызовы ufw, меняющие правила: «allow 443/tcp», «delete allow 443/tcp»
+	ufwExit   int      // код выхода ufw на добавление правила (снятие всегда проходит)
 }
+
+// ufwDenyByDefault — активный UFW, порт 443 закрыт политикой по умолчанию.
+const ufwDenyByDefault = "Status: active\nDefault: deny (incoming), allow (outgoing), disabled (routed)\n\nTo Action From\n-- ------ ----\n22/tcp ALLOW IN Anywhere\n"
 
 // selftestURL — тестовый адрес самопроверки (docs/dev/dependencies.md §5).
 const selftestURL = "https://cp.cloudflare.com/generate_204"
@@ -195,12 +205,33 @@ func build(t *testing.T, installed bool) *sys {
 		}
 		return platform.Result{}, nil
 	})
+	// Фаервол и цель REALITY: чистый хост без UFW; example.com — годная цель.
+	f.Handle(platform.UFW, func(c platform.Command) (platform.Result, error) {
+		if c.Args[0] == "status" {
+			return platform.Result{Stdout: []byte(s.ufwStatus)}, nil
+		}
+		s.ufwRules = append(s.ufwRules, strings.Join(c.Args, " "))
+		if c.Args[0] == "allow" {
+			return platform.Result{ExitCode: s.ufwExit}, nil
+		}
+		return platform.Result{}, nil
+	})
+	s.ufwStatus = "Status: inactive\n"
+	f.Handle(platform.IPTables, func(platform.Command) (platform.Result, error) {
+		return platform.Result{Stdout: []byte("-P INPUT ACCEPT\n")}, nil
+	})
+	f.Handle(platform.IP6Tables, func(platform.Command) (platform.Result, error) {
+		return platform.Result{Stdout: []byte("-P INPUT ACCEPT\n")}, nil
+	})
+	f.SetTLS("example.com", platform.TLSInfo{Version: tls.VersionTLS13, ALPN: "h2", Curve: tls.X25519MLKEM768,
+		Addr: netip.MustParseAddr("198.51.100.20"), Handshake: 30 * time.Millisecond, Status: 200}, nil)
 	reg := redact.New()
 	s.reg = reg
 	cfgPath := config.Path
 	s.app = New(Services{
 		Store: store.New(p.FS()), Backup: backup.New(p), Config: config.New(p), Core: core.New(p),
 		Server: server.New(p, cfgPath), Logging: logging.New(p, reg, slog.LevelInfo), Profile: profile.New(),
+		Network:  network.New(p),
 		Security: security.New(p), Releases: s.rel, Redactor: regAdapter{reg},
 		XM: "0.1.0", Now: f.Clock().Now, ControlTimeout: 150 * time.Millisecond, Host: p,
 	})

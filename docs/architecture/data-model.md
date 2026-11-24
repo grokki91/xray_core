@@ -20,7 +20,7 @@
 | `/etc/systemd/system/xray.service` | root:root | 0644 | нет | юнит с меткой `xm` |
 | `/var/lib/xm/` | root:root | 0700 | да | данные менеджера |
 | `/var/lib/xm/backups/` | root:root | 0700, файлы 0600 | да | снимки |
-| `/var/lib/xm/tx/` | root:root | 0700 | да | журнал незавершённой транзакции `pending.json` (0600) и файл-кандидат `config.candidate.json` (0600) для `xray run -test` ([ADR-0023](../adr/0023-transaction-control-and-rollback-scope.md)) |
+| `/var/lib/xm/tx/` | root:root | 0700 | да | журнал незавершённой транзакции `pending.json` (0600; в нём и порт правила UFW, которое транзакция добавляет) и файл-кандидат `config.candidate.json` (0600) для `xray run -test` ([ADR-0023](../adr/0023-transaction-control-and-rollback-scope.md)) |
 | `/var/lib/xm/diag/` | root:root | 0700, файлы 0600 | нет (отредактировано) | история диагностики |
 | `/var/lib/xm/monitor/` | root:root | 0700, файлы 0600 | нет | хронология замеров |
 | `/var/lib/xm/cache/` | root:root | 0700, файлы 0600 | нет | загруженные архивы релизов: `<тег>-<файл>`, например `v26.11.9-Xray-linux-64.zip`; создаёт `update` до базовой защиты |
@@ -35,7 +35,7 @@
 
 ```json
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "server": {
     "addresses": {"ipv4": "203.0.113.10", "ipv6": "2001:db8::10", "domain": ""},
     "port": 443
@@ -58,6 +58,7 @@
   ],
   "selftest": {"id": "00000000-0000-4000-8000-0000000000aa"},
   "dns": {"doh": ["https://1.1.1.1/dns-query"], "strategy": "UseIP"},
+  "firewall": {"ufw_rule": false},
   "core": {"version": "26.11.9", "previous": "26.10.21", "hold": false},
   "applied": {"config_sha256": "<sha256 последнего применённого config.json>", "at": "2026-01-01T00:00:00Z"}
 }
@@ -70,6 +71,8 @@
   `profiles`); `config` отрисовывает его в клиентах входящего последним. Пустой id — клиента нет:
   миграция 1 → 2 оставляет его пустым, а любая транзакция `app` с пустым id создаёт UUID через
   `security.NewClientID` (установка — тоже). Секрет класса S1: в снимках, в редакторе — UUID.
+- `firewall.ufw_rule` — правило UFW для порта сервера поставил `xm` ([ADR-0041](../adr/0041-ufw-rule-in-install-transaction.md)):
+  снимает правило только `xm` и только по этой метке. Миграция 2 → 3 ставит `false`.
 - `inbounds` — список, в MVP ровно один элемент: второй пресет добавляется без миграции.
 - Профиль — пользователь сервера: присутствует во всех входящих; экспорт даёт по артефакту на
   каждую пару «входящий × адрес».

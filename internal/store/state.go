@@ -12,6 +12,7 @@ type State struct {
 	Profiles      []Profile `json:"profiles"`
 	Selftest      Selftest  `json:"selftest"`
 	DNS           DNS       `json:"dns"`
+	Firewall      Firewall  `json:"firewall"`
 	Core          Core      `json:"core"`
 	Applied       Applied   `json:"applied"`
 }
@@ -54,6 +55,12 @@ type Profile struct {
 // попадает. Пустой id — клиента ещё нет; его создаёт транзакция app.
 type Selftest struct {
 	ID string `json:"id"`
+}
+
+// Firewall — что xm изменил в фаерволе (ADR-0041). UFWRule — правило «allow порт/tcp» поставил
+// xm: только такое правило он снимает при откате и удалении; чужое правило с тем же портом — нет.
+type Firewall struct {
+	UFWRule bool `json:"ufw_rule"`
 }
 
 type DNS struct {

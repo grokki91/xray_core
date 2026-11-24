@@ -17,6 +17,8 @@ import (
 // fakeApp запоминает, что у него просили, и отвечает заданным.
 type fakeApp struct {
 	opts   app.InstallOptions
+	fw     app.FirewallResult // итог фаервола, который вернёт Install
+	exists bool               // Install вернёт существующую установку
 	health contract.Health
 	action app.Action
 	status contract.Status
@@ -31,7 +33,7 @@ type fakeApp struct {
 
 func (f *fakeApp) Install(_ context.Context, o app.InstallOptions) (app.InstallResult, error) {
 	f.opts = o
-	return app.InstallResult{Xray: "26.11.9", Address: o.Address, Port: o.Port, Profile: "profile-1", Health: f.health}, f.err
+	return app.InstallResult{Xray: "26.11.9", Address: o.Address, Port: o.Port, Profile: "profile-1", Existing: f.exists, Firewall: f.fw, Health: f.health}, f.err
 }
 
 func (f *fakeApp) ProfileAdd(_ context.Context, name string, o app.ShareOptions) (app.ProfileView, error) {
@@ -59,13 +61,13 @@ func runWith(a App, args ...string) (code int, stdout, stderr string) {
 	return code, out.String(), errOut.String()
 }
 
-func TestInstallPassesFlagsAndDefaultPort(t *testing.T) {
+func TestInstallPassesFlagsAndNoFlagsAreOptional(t *testing.T) {
 	f := &fakeApp{}
 	code, stdout, stderr := runWith(f, "install", "--sni", "example.com", "--address", "203.0.113.10")
 	if code != exitOK || stderr != "" || !strings.Contains(stdout, "Xray 26.11.9 установлен") {
 		t.Fatalf("код %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
-	if want := (app.InstallOptions{SNI: "example.com", Address: "203.0.113.10", Port: 443}); f.opts != want {
+	if want := (app.InstallOptions{SNI: "example.com", Address: "203.0.113.10"}); f.opts != want {
 		t.Fatalf("app получил %+v", f.opts)
 	}
 	runWith(f, "install", "--sni", "example.com", "--address", "vpn.example.org", "--port", "8443")
@@ -74,6 +76,11 @@ func TestInstallPassesFlagsAndDefaultPort(t *testing.T) {
 	}
 	if code, _, _ := runWith(f, "install", "--port", "много"); code != exitUsage {
 		t.Fatalf("нечисловой порт: код %d", code)
+	}
+	// Флаги необязательны: пустые параметры уходят в app, он определяет их сам.
+	f = &fakeApp{}
+	if code, _, stderr := runWith(f, "install"); code != exitOK || stderr != "" || f.opts != (app.InstallOptions{}) {
+		t.Fatalf("install без флагов: код %d, stderr %q, app получил %+v", code, stderr, f.opts)
 	}
 }
 
@@ -294,6 +301,27 @@ func TestInstallPrintsFirstProfile(t *testing.T) {
 	}
 	if strings.Contains(stdout, "пока нет") {
 		t.Fatal("устаревшее сообщение об отсутствии профилей")
+	}
+}
+
+// Повторный запуск: «ничего не изменено», строки про фаервол нет, ссылка показана.
+func TestInstallRepeatSaysNothingChanged(t *testing.T) {
+	_, stdout, _ := runWith(&fakeApp{view: phone, exists: true}, "install")
+	if !strings.Contains(stdout, "уже установлен, ничего не изменено") || strings.Contains(stdout, "Фаервол") || !strings.Contains(stdout, "vless://") {
+		t.Fatalf("повтор:\n%s", stdout)
+	}
+}
+
+// Итог про фаервол: правило UFW — сказано, что снимет uninstall; закрытый порт — команда владельцу.
+func TestInstallPrintsFirewall(t *testing.T) {
+	_, stdout, _ := runWith(&fakeApp{view: phone, fw: app.FirewallResult{State: "denied", Source: "ufw", Added: true}}, "install")
+	if !strings.Contains(stdout, "в UFW добавлено правило") || !strings.Contains(stdout, "xm uninstall") {
+		t.Fatalf("правило UFW не названо:\n%s", stdout)
+	}
+	open := "iptables -I INPUT -p tcp --dport 443 -j ACCEPT"
+	_, stdout, _ = runWith(&fakeApp{view: phone, fw: app.FirewallResult{State: "unknown", Source: "iptables", Note: "политика DROP", Open: open}}, "install")
+	if !strings.Contains(stdout, "не определён как открытый") || !strings.Contains(stdout, open) {
+		t.Fatalf("команда не названа:\n%s", stdout)
 	}
 }
 

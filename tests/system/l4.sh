@@ -93,10 +93,12 @@ perm /var/lib/xm/cache root:root 700
 check "status: версия Xray и порт" jq -e --argjson p "$port" \
 	'.data.installed and .data.service.active == "active" and .data.versions.xray != "" and .data.port == $p and (.data.drift | not)' "$out/status"
 
-# 5. Повторная установка — отказ с кодом 3 (ADR-0025)
+# 5. Повторная установка ничего не меняет: код 0, состояние побайтно то же (фаза 4, шаг 5)
+state_before=$(sha256sum /etc/xm/state.json | cut -d' ' -f1)
 "$xm" install --sni "$sni" --address "$addr" --port "$port" >"$out/again" 2>&1
 rc=$?
-eq "повторная установка: код" "$rc" 3
+eq "повторная установка: код" "$rc" 0
+eq "повторная установка: состояние не изменилось" "$(sha256sum /etc/xm/state.json | cut -d' ' -f1)" "$state_before"
 
 # 6. stop → start: служба и порт
 "$xm" stop >"$out/stop" 2>&1

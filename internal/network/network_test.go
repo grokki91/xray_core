@@ -292,3 +292,59 @@ func TestFirewallIPTablesReadOnly(t *testing.T) {
 		t.Fatalf("вызовов iptables/ip6tables: %d", n)
 	}
 }
+
+// CanAllow — только когда порт закрыт политикой UFW по умолчанию: явный deny правилом, чужой
+// фаервол и открытый порт правило «allow» не получают (ADR-0041).
+func TestFirewallCanAllow(t *testing.T) {
+	const head = "Status: active\nDefault: deny (incoming), allow (outgoing), disabled (routed)\n\nTo Action From\n-- ------ ----\n22/tcp ALLOW IN Anywhere\n"
+	cases := []struct {
+		name, ufw string
+		want      bool
+	}{
+		{"политика deny, правила нет", head, true},
+		{"явный deny", head + "443 DENY IN Anywhere\n", false},
+		{"уже разрешён", head + "443/tcp ALLOW IN Anywhere\n", false},
+		{"ufw выключен", "Status: inactive\n", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := fake(t)
+			f.Handle(platform.UFW, out(tc.ufw))
+			got, err := New(f).Facts(ctx(t), Request{Address: "203.0.113.7", Port: 443})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Firewall.CanAllow != tc.want {
+				t.Fatalf("CanAllow = %v, нужно %v (%+v)", got.Firewall.CanAllow, tc.want, got.Firewall)
+			}
+		})
+	}
+}
+
+func TestAllowAndRevokePort(t *testing.T) {
+	f := fake(t)
+	f.Handle(platform.UFW, out("Rule added\n"))
+	m := New(f)
+	if err := m.AllowPort(ctx(t), 443); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.RevokePort(ctx(t), 443); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, c := range f.Calls() {
+		if c.Op == "exec" && c.Path == platform.UFW {
+			got = append(got, strings.Join(c.Args, " "))
+		}
+	}
+	if strings.Join(got, "|") != "allow 443/tcp|delete allow 443/tcp" {
+		t.Fatalf("вызовы ufw: %q", got)
+	}
+	if err := m.AllowPort(ctx(t), 0); err == nil {
+		t.Fatal("порт 0 принят")
+	}
+	f.Handle(platform.UFW, func(platform.Command) (platform.Result, error) { return platform.Result{ExitCode: 1}, nil })
+	if err := m.AllowPort(ctx(t), 443); err == nil {
+		t.Fatal("код выхода 1 принят")
+	}
+}

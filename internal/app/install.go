@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"net/netip"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/grokki91/xray_core/internal/contract"
 	"github.com/grokki91/xray_core/internal/core"
 	"github.com/grokki91/xray_core/internal/diag"
+	"github.com/grokki91/xray_core/internal/dns"
+	"github.com/grokki91/xray_core/internal/network"
 	"github.com/grokki91/xray_core/internal/server"
 	"github.com/grokki91/xray_core/internal/store"
 	"github.com/grokki91/xray_core/internal/update"
@@ -37,7 +40,8 @@ var (
 	ErrInput = errors.New("неверные параметры")
 	// ErrPreflight — предусловия не выполнены (подробности — PreflightError). Код выхода 3.
 	ErrPreflight = errors.New("предусловия не выполнены")
-	// ErrInstalled — xm уже установлен: повторная установка — фаза 4. Код выхода 3.
+	// ErrInstalled — xm уже установлен; транзакция установки отказывает под блокировкой, если
+	// установку успела сделать параллельная команда. Код выхода 3.
 	ErrInstalled = errors.New("xm уже установлен")
 	// ErrNotInstalled — команде нужна установка. Код выхода 3.
 	ErrNotInstalled = errors.New("xm не установлен")
@@ -67,20 +71,33 @@ const (
 	Restart Action = "restart"
 )
 
-// InstallOptions — параметры `xm install` (в фазе 2 заданы явно; автоматический выбор — фаза 4).
+// InstallOptions — параметры `xm install`; все необязательны (ADR-0035, ADR-0041): пустые SNI и
+// Address определяются по сетевым фактам, нулевой Port — DefaultPort.
 type InstallOptions struct {
-	SNI     string // имя REALITY: домен цели, например example.com
-	Address string // адрес сервера для клиентов: IPv4, IPv6 или домен
+	SNI     string // имя REALITY: домен цели, например example.com; пусто — выбор из закрытого списка
+	Address string // внешний адрес сервера (IPv4, IPv6) или домен; пусто — определяется
 	Port    int
 }
 
-// InstallResult — итог установки; секретов в нём нет. Ссылки первого профиля — ProfileShow.
+// FirewallResult — что установка сделала с фаерволом и что известно о порте. Состояние — факт
+// локального фаервола: фаервол хостера с сервера не виден (ADR-0036).
+type FirewallResult struct {
+	State  string `json:"state"`  // allowed, denied, unknown
+	Source string `json:"source"` // ufw, iptables или пусто
+	Note   string `json:"note"`
+	Added  bool   `json:"added"` // правило UFW поставил xm в этой установке
+	Open   string `json:"open"`  // команда, которую владелец выполняет сам; пусто — не нужна
+}
+
+// InstallResult — итог установки; секретов в нём нет. Ссылки профиля — ProfileShow.
 type InstallResult struct {
-	Xray    string          `json:"xray"`
-	Address string          `json:"address"`
-	Port    int             `json:"port"`
-	Profile string          `json:"profile"` // имя первого профиля
-	Health  contract.Health `json:"health"`
+	Xray     string          `json:"xray"`
+	Address  string          `json:"address"` // первый из «домен, IPv4, IPv6»; остальные — в ссылках профиля
+	Port     int             `json:"port"`
+	Profile  string          `json:"profile"`  // имя первого профиля; пусто — профилей нет
+	Existing bool            `json:"existing"` // установка уже была: ничего не изменено
+	Firewall FirewallResult  `json:"firewall"`
+	Health   contract.Health `json:"health"`
 }
 
 // Releases — источник релизов Xray; настоящий — update.GitHub.
@@ -93,67 +110,114 @@ var (
 	domainRe = regexp.MustCompile(`^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 )
 
+// installInput — проверенный ввод: адрес разложен на внешний IP для сетевых фактов и домен.
+type installInput struct {
+	sni    string
+	ip     string // --address, если это IP: переопределение внешнего адреса
+	domain string // --address, если это домен
+	port   int
+}
+
 // checkInstall проверяет ввод по закрытому правилу до любого обращения к системе и сети
-// (docs/security/policy.md §5) и раскладывает адрес по полям состояния.
-func checkInstall(o InstallOptions) (sni string, addr store.Addresses, err error) {
+// (docs/security/policy.md §5).
+func checkInstall(o InstallOptions) (in installInput, err error) {
 	bad := func(format string, a ...any) error {
 		return fmt.Errorf("%w: "+format, append([]any{ErrInput}, a...)...)
 	}
-	sni = strings.ToLower(o.SNI)
-	switch {
-	case o.SNI == "":
-		return "", addr, bad("нужен --sni: домен цели REALITY, например example.com")
-	case o.Address == "":
-		return "", addr, bad("нужен --address: адрес сервера для клиентов (IP или домен)")
-	case o.Port < 1 || o.Port > 65535:
-		return "", addr, bad("порт вне 1…65535")
-	case len(sni) > 253 || !domainRe.MatchString(sni):
-		return "", addr, bad("--sni: нужно доменное имя вида example.com")
+	in.port = o.Port
+	if in.port == 0 {
+		in.port = DefaultPort
+	}
+	if in.port < 1 || in.port > 65535 {
+		return in, bad("порт вне 1…65535")
+	}
+	if o.SNI != "" {
+		in.sni = strings.ToLower(o.SNI)
+		if len(in.sni) > 253 || !domainRe.MatchString(in.sni) {
+			return in, bad("--sni: нужно доменное имя вида example.com")
+		}
+	}
+	if o.Address == "" {
+		return in, nil
 	}
 	if ip, perr := netip.ParseAddr(o.Address); perr == nil {
 		switch {
 		case ip.Zone() != "" || ip.Is4In6():
-			return "", addr, bad("--address: адрес с зоной и IPv4-в-IPv6 не поддерживаются")
+			return in, bad("--address: адрес с зоной и IPv4-в-IPv6 не поддерживаются")
 		case ip.IsLoopback() || ip.IsUnspecified() || ip.IsMulticast() || ip.IsLinkLocalUnicast():
-			return "", addr, bad("--address: нужен адрес, по которому клиенты достанут сервер, а не служебный")
-		case ip.Is4():
-			addr.IPv4 = ip.String()
-		default:
-			addr.IPv6 = ip.String()
+			return in, bad("--address: нужен адрес, по которому клиенты достанут сервер, а не служебный")
 		}
-		return sni, addr, nil
+		in.ip = ip.String()
+		return in, nil
 	}
 	if d := strings.ToLower(o.Address); len(d) <= 253 && domainRe.MatchString(d) {
-		addr.Domain = d
-		return sni, addr, nil
+		in.domain = d
+		return in, nil
 	}
-	return "", addr, bad("--address: нужен IPv4, IPv6 или домен")
+	return in, bad("--address: нужен IPv4, IPv6 или домен")
 }
 
-// Install ставит Xray на чистую машину: предусловия → загрузка и проверка релиза → ядро →
-// транзакция (базовая защита, состояние, конфигурация, юнит, запуск, контроль). Повторная
-// установка и автоматический выбор параметров — фаза 4.
+// Install ставит Xray на чистую машину: сетевые факты → цель REALITY → загрузка и проверка
+// релиза → ядро → транзакция (базовая защита, состояние, конфигурация, юнит, правило UFW,
+// запуск, контроль). Повторный запуск на установленной системе ничего не меняет и возвращает
+// итог существующей установки.
 func (a *App) Install(ctx context.Context, o InstallOptions) (InstallResult, error) {
-	sni, addr, err := checkInstall(o)
+	in, err := checkInstall(o)
 	if err != nil {
 		return InstallResult{}, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, installTimeout)
 	defer cancel()
 
-	if _, issues := a.s.Server.Preflight(ctx); len(issues) > 0 {
-		return InstallResult{}, &PreflightError{issues}
+	if err := a.needRoot(); err != nil {
+		return InstallResult{}, err
 	}
 	// Незавершённая транзакция откатывается до проверки: состояние, оставшееся от оборванной
 	// установки, не должно выглядеть как готовая. Решающая проверка — в Apply, под блокировкой.
 	if _, err := a.Recover(ctx); err != nil {
 		return InstallResult{}, err
 	}
-	if _, ok, err := a.installed(); err != nil {
+	if st, ok, err := a.installed(); err != nil {
 		return InstallResult{}, err
 	} else if ok {
-		return InstallResult{}, ErrInstalled
+		return a.existing(ctx, st, in)
 	}
+	if _, issues := a.s.Server.Preflight(ctx); len(issues) > 0 {
+		return InstallResult{}, &PreflightError{issues}
+	}
+
+	facts, err := a.s.Network.Facts(ctx, network.Request{Address: in.ip, Port: in.port})
+	if err != nil {
+		return InstallResult{}, fmt.Errorf("%w: %w", ErrInput, err)
+	}
+	addr := store.Addresses{Domain: in.domain}
+	if facts.V4.Addr.IsValid() {
+		addr.IPv4 = facts.V4.Addr.String()
+	}
+	if facts.V6.Addr.IsValid() {
+		addr.IPv6 = facts.V6.Addr.String()
+	}
+	if addr == (store.Addresses{}) {
+		return InstallResult{}, &PreflightError{[]server.Issue{{Code: "preflight.no_address",
+			Message: "внешний адрес сервера не определён (IPv4: " + facts.V4.Note + "; IPv6: " + facts.V6.Note + "): задайте --address"}}}
+	}
+	free, holder, err := a.s.Network.PortFree(ctx, in.port)
+	if err != nil {
+		return InstallResult{}, err
+	}
+	if !free {
+		who := "процесс не определён"
+		if holder.Name != "" {
+			who = fmt.Sprintf("процесс %q, pid %d", holder.Name, holder.PID)
+		}
+		return InstallResult{}, &PreflightError{[]server.Issue{{Code: "preflight.port_busy",
+			Message: fmt.Sprintf("порт %d занят (%s): освободите его или задайте другой --port", in.port, who)}}}
+	}
+	target, err := a.s.Network.SelectTarget(ctx, in.sni)
+	if err != nil {
+		return InstallResult{}, err
+	}
+	sni := target.Host
 
 	rel, err := a.s.Releases.Latest(ctx)
 	if err != nil {
@@ -188,7 +252,7 @@ func (a *App) Install(ctx context.Context, o InstallOptions) (InstallResult, err
 	a.s.Redactor.Register("uuid", clientID)
 	st := store.State{
 		SchemaVersion: store.SchemaVersion,
-		Server:        store.Server{Addresses: addr, Port: o.Port},
+		Server:        store.Server{Addresses: addr, Port: in.port},
 		Inbounds: []store.Inbound{{
 			Preset: presetID,
 			Reality: store.Reality{
@@ -198,7 +262,10 @@ func (a *App) Install(ctx context.Context, o InstallOptions) (InstallResult, err
 			Params: map[string]string{},
 		}},
 		Profiles: []store.Profile{},
+		DNS:      dns.Plan(dns.NetFacts{IPv4: addr.IPv4 != "", IPv6: addr.IPv6 != ""}),
 		Core:     store.Core{Version: string(version)},
+		// Правило UFW ставится только при активном UFW и порте, закрытом его политикой (ADR-0041).
+		Firewall: store.Firewall{UFWRule: facts.Firewall.CanAllow},
 	}
 	// Первый профиль создаётся в той же транзакции: установка завершается рабочей ссылкой.
 	st, first, err := a.s.Profile.Add(st, a.s.Profile.NextName(st), clientID, a.s.Now())
@@ -209,14 +276,72 @@ func (a *App) Install(ctx context.Context, o InstallOptions) (InstallResult, err
 	for _, o := range a.s.Security.UnitHardening() {
 		spec.Hardening = append(spec.Hardening, server.UnitOption{Key: o.Key, Value: o.Value})
 	}
-	if err := a.Apply(ctx, Change{Reason: "install", State: st, Unit: &spec, Core: version, Create: true}); err != nil {
+	ch := Change{Reason: "install", State: st, Unit: &spec, Core: version, Create: true}
+	if st.Firewall.UFWRule {
+		ch.UFWPort = in.port
+	}
+	if err := a.Apply(ctx, ch); err != nil {
 		return InstallResult{}, err
 	}
-	h, err := a.health(ctx, o.Port)
+	h, err := a.health(ctx, in.port)
 	if err != nil {
 		return InstallResult{}, err
 	}
-	return InstallResult{Xray: string(version), Address: o.Address, Port: o.Port, Profile: first.Name, Health: h}, nil
+	return InstallResult{Xray: string(version), Address: firstAddress(addr), Port: in.port, Profile: first.Name,
+		Firewall: firewallResult(facts.Firewall, in.port, st.Firewall.UFWRule), Health: h}, nil
+}
+
+// existing — повторный запуск на установленной системе: ничего не меняет. Параметры, которых в
+// установке нет, — ошибка ввода: install не меняет установленное.
+func (a *App) existing(ctx context.Context, st store.State, in installInput) (InstallResult, error) {
+	bad := func(format string, args ...any) error {
+		return fmt.Errorf("%w: "+format+"; установленное install не меняет", append([]any{ErrInput}, args...)...)
+	}
+	ad := st.Server.Addresses
+	switch {
+	case in.sni != "" && !slices.Contains(st.Inbounds[0].Reality.ServerNames, in.sni):
+		return InstallResult{}, bad("--sni отличается от установленного")
+	case in.port != st.Server.Port && in.port != DefaultPort:
+		return InstallResult{}, bad("--port отличается от установленного")
+	case in.ip != "" && in.ip != ad.IPv4 && in.ip != ad.IPv6:
+		return InstallResult{}, bad("--address отличается от установленных адресов")
+	case in.domain != "" && in.domain != ad.Domain:
+		return InstallResult{}, bad("--address отличается от установленного домена")
+	}
+	xray, err := a.s.Core.Current(ctx)
+	if err != nil {
+		return InstallResult{}, err
+	}
+	h, err := a.health(ctx, st.Server.Port)
+	if err != nil {
+		return InstallResult{}, err
+	}
+	res := InstallResult{Xray: string(xray), Address: firstAddress(ad), Port: st.Server.Port, Existing: true, Health: h}
+	if len(st.Profiles) > 0 {
+		res.Profile = st.Profiles[0].Name
+	}
+	return res, nil
+}
+
+// firstAddress — первый из порядка «домен, IPv4, IPv6» (так же выбирается адрес QR).
+func firstAddress(a store.Addresses) string {
+	for _, v := range []string{a.Domain, a.IPv4, a.IPv6} {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// firewallResult — факт о порте и, когда xm ничего не сделал, а порт может быть закрыт
+// правилами iptables, команда, которую владелец выполняет сам (ADR-0036). Вывод о фаерволе
+// хостера не делается: он с сервера не виден.
+func firewallResult(f network.Firewall, port int, added bool) FirewallResult {
+	r := FirewallResult{State: string(f.State), Source: f.Source, Note: f.Note, Added: added}
+	if !added && f.State != network.FirewallAllowed && f.Source == "iptables" {
+		r.Open = fmt.Sprintf("iptables -I INPUT -p tcp --dport %d -j ACCEPT; ip6tables -I INPUT -p tcp --dport %d -j ACCEPT", port, port)
+	}
+	return r
 }
 
 // installed читает состояние: есть ли установка.

@@ -26,9 +26,44 @@ type Firewall struct {
 	State  FirewallState
 	Source string
 	Note   string
+	// CanAllow — UFW активен, порт закрыт только политикой по умолчанию и правила для него нет:
+	// правило «allow» откроет порт (ADR-0041). Явное правило deny, ограничение источника или
+	// иной фаервол — не повод: добавленное правило не победило бы или нарушило чужую настройку.
+	CanAllow bool
 }
 
 const fwTimeout = 10 * time.Second
+
+const noteDefaultDeny = "UFW запрещает входящие по умолчанию, правила для порта нет"
+
+// AllowPort добавляет правило UFW «allow порт/tcp» — единственное изменение фаервола при
+// установке (ADR-0041). Вызывает только транзакция app, и только когда факты дали CanAllow.
+func (m *Manager) AllowPort(ctx context.Context, port int) error {
+	return m.ufw(ctx, port, "allow")
+}
+
+// RevokePort снимает такое правило. Правила нет — не ошибка: UFW отвечает кодом 0, поэтому
+// откат безопасно повторять. Правило с другим действием или протоколом не затрагивается.
+func (m *Manager) RevokePort(ctx context.Context, port int) error {
+	return m.ufw(ctx, port, "delete", "allow")
+}
+
+func (m *Manager) ufw(ctx context.Context, port int, verb ...string) error {
+	if err := checkPort(port); err != nil {
+		return err
+	}
+	args := append(verb, strconv.Itoa(port)+"/tcp")
+	c, cancel := context.WithTimeout(ctx, fwTimeout)
+	defer cancel()
+	res, err := m.p.Exec(c, platform.Command{Program: platform.UFW, Args: args})
+	if err != nil {
+		return fmt.Errorf("ufw %s: %w", strings.Join(args, " "), err)
+	}
+	if res.ExitCode != 0 {
+		return fmt.Errorf("ufw %s: код выхода %d", strings.Join(args, " "), res.ExitCode)
+	}
+	return nil
+}
 
 // firewall: UFW активен — его вердикт по правилам и политике входящих; иначе — цепочка INPUT
 // iptables и ip6tables: политика ACCEPT и ни одного правила DROP/REJECT в обоих семействах —
@@ -47,7 +82,7 @@ func (m *Manager) firewall(ctx context.Context, port int) Firewall {
 		ufwNote = fmt.Sprintf("ufw не прочитан: код %d", res.ExitCode)
 	default:
 		if active, st, note := ufwVerdict(string(res.Stdout), port); active {
-			return Firewall{State: st, Source: "ufw", Note: note}
+			return Firewall{State: st, Source: "ufw", Note: note, CanAllow: st == FirewallDenied && note == noteDefaultDeny}
 		}
 	}
 	var notes []string
@@ -138,7 +173,7 @@ func ufwVerdict(out string, port int) (active bool, st FirewallState, note strin
 	case "allow":
 		return active, FirewallAllowed, ""
 	case "deny", "reject":
-		return active, FirewallDenied, "UFW запрещает входящие по умолчанию, правила для порта нет"
+		return active, FirewallDenied, noteDefaultDeny
 	}
 	return active, FirewallUnknown, "политика UFW не разобрана"
 }

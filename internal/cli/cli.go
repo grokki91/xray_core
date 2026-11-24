@@ -70,7 +70,7 @@ type command struct {
 // commands — закрытый список команд в порядке справки.
 func commands() []command {
 	return []command{
-		{name: "install", usage: "xm install --sni <домен> --address <адрес> [--port <порт>]",
+		{name: "install", usage: "xm install [--sni <домен>] [--address <адрес>] [--port <порт>]",
 			summary: "установить Xray и запустить службу", flags: installFlags, run: runInstall},
 		{name: "start", usage: "xm start", summary: "запустить службу Xray", run: service(app.Start)},
 		{name: "stop", usage: "xm stop", summary: "остановить службу Xray", run: service(app.Stop)},
