@@ -170,6 +170,9 @@ func TestTLSProbeRealHead(t *testing.T) {
 		var method, host string
 		port, roots, conns := tlsServerWith(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			method, host = r.Method+" "+r.URL.Path+" "+r.Proto, r.Host
+			if _, ok := r.Header["User-Agent"]; ok {
+				method = "User-Agent: " + r.UserAgent()
+			}
 			if c.location != "" {
 				w.Header().Set("Location", c.location)
 			}

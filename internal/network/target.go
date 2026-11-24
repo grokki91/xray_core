@@ -132,16 +132,31 @@ func redirectOK(host string, info platform.TLSInfo) (bool, string) {
 	if info.Status < 300 || info.Status > 399 {
 		return true, ""
 	}
-	u, err := url.Parse(info.Location)
-	switch {
-	case err != nil:
-		return false, fmt.Sprintf("ответ %d: Location не разобран", info.Status)
-	case u.Scheme == "" && u.Host == "" && info.Location != "":
-		return true, ""
-	case u.Scheme == "https" && strings.EqualFold(u.Hostname(), host) && (u.Port() == "" || u.Port() == "443"):
+	loc := info.Location
+	// Браузеры читают «\» как «/»: «/\чужое.имя» — перенаправление на другое имя.
+	if strings.Contains(loc, `\`) {
+		return false, fmt.Sprintf("ответ %d: перенаправление на другое имя (%q)", info.Status, clip(loc))
+	}
+	// Относительный — только путь с одним ведущим «/».
+	if strings.HasPrefix(loc, "/") && !strings.HasPrefix(loc, "//") {
 		return true, ""
 	}
-	return false, fmt.Sprintf("ответ %d перенаправляет на %q: нужно то же имя по https", info.Status, info.Location)
+	u, err := url.Parse(loc)
+	if err == nil && u.Scheme == "https" && strings.EqualFold(u.Hostname(), host) && (u.Port() == "" || u.Port() == "443") {
+		return true, ""
+	}
+	return false, fmt.Sprintf("ответ %d: перенаправление на другое имя или не по https (%q)", info.Status, clip(loc))
+}
+
+// maxLocation — предел Location в причине: заголовок чужого узла.
+const maxLocation = 256
+
+// clip обрезает строку до maxLocation байт.
+func clip(s string) string {
+	if len(s) > maxLocation {
+		return s[:maxLocation] + "…"
+	}
+	return s
 }
 
 // SelectTarget выбирает цель REALITY. sni непустое (--sni) — только оно, провал — ошибка.

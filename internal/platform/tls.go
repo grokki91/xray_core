@@ -148,6 +148,8 @@ func head(ctx context.Context, c *tls.Conn, host string) (int, string, error) {
 	if err != nil {
 		return 0, "", err
 	}
+	// Пустой User-Agent: Go не шлёт заголовок — чужому узлу не сообщается, что это xm.
+	req.Header.Set("User-Agent", "")
 	resp, err := client.Do(req)
 	if err != nil {
 		var ue *url.Error

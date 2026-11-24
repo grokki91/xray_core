@@ -41,6 +41,9 @@ func TestProbeTargetEachCriterion(t *testing.T) {
 		{CheckRedirect, func(i *platform.TLSInfo) { i.Status, i.Location = 302, "http://www.example.com/" }},
 		{CheckRedirect, func(i *platform.TLSInfo) { i.Status, i.Location = 301, "//other.example.com/" }},
 		{CheckRedirect, func(i *platform.TLSInfo) { i.Status, i.Location = 301, "" }},
+		{CheckRedirect, func(i *platform.TLSInfo) { i.Status, i.Location = 301, `/\other.example.com/` }},
+		{CheckRedirect, func(i *platform.TLSInfo) { i.Status, i.Location = 301, `https://www.example.com\@other.example.com/` }},
+		{CheckRedirect, func(i *platform.TLSInfo) { i.Status, i.Location = 301, "en-us" }},
 		{CheckRedirect, func(i *platform.TLSInfo) { i.Status, i.HeadErr = 0, errors.New("timeout") }},
 		{CheckCert, func(i *platform.TLSInfo) { i.CertErr = errors.New("x509: certificate is valid for other.test") }},
 	}
@@ -179,5 +182,16 @@ func TestProbeTargetRedirectSameName(t *testing.T) {
 	r, _ := New(f).ProbeTarget(ctx(t), "www.example.com")
 	if !strings.Contains(r.Failure(), "redirect: не проверено") {
 		t.Fatalf("нет ответа: %q", r.Failure())
+	}
+}
+
+func TestProbeTargetRedirectReasonClipped(t *testing.T) {
+	info := good(10)
+	info.Status, info.Location = 301, "https://other.example.com/"+strings.Repeat("a", 4096)
+	f := fake(t)
+	f.SetTLS("www.example.com", info, nil)
+	r, _ := New(f).ProbeTarget(ctx(t), "www.example.com")
+	if why := r.Failure(); !strings.Contains(why, "другое имя") || len(why) > 1024 {
+		t.Fatalf("причина %d байт: %.100q", len(why), why)
 	}
 }
