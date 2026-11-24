@@ -80,11 +80,19 @@ func TestTLSProbeRealWrongName(t *testing.T) {
 
 // tlsServer — локальный TLS-сервер с самоподписанным сертификатом на 127.0.0.1, ALPN h2.
 func tlsServer(t *testing.T) (port int, roots *x509.CertPool) {
-	return tlsServerWith(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	port, roots, _ = tlsServerWith(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	return port, roots
 }
 
-func tlsServerWith(t *testing.T, h http.Handler) (port int, roots *x509.CertPool) {
+// tlsServerWith — то же с обработчиком; conns — число принятых соединений.
+func tlsServerWith(t *testing.T, h http.Handler) (port int, roots *x509.CertPool, conns *atomic.Int32) {
 	srv := httptest.NewUnstartedServer(h)
+	conns = new(atomic.Int32)
+	srv.Config.ConnState = func(_ net.Conn, st http.ConnState) {
+		if st == http.StateNew {
+			conns.Add(1)
+		}
+	}
 	srv.EnableHTTP2 = true
 	srv.StartTLS()
 	t.Cleanup(srv.Close)
@@ -95,7 +103,7 @@ func tlsServerWith(t *testing.T, h http.Handler) (port int, roots *x509.CertPool
 	port, _ = strconv.Atoi(p)
 	roots = x509.NewCertPool()
 	roots.AddCert(srv.Certificate())
-	return port, roots
+	return port, roots, conns
 }
 
 // Обе реализации отдают одинаковые сведения о рукопожатии и одинаково отвергают ввод.
@@ -160,7 +168,7 @@ func TestTLSProbeRealHead(t *testing.T) {
 		location string
 	}{{200, ""}, {301, "https://127.0.0.1/a"}, {301, "https://other.test/"}, {301, "http://127.0.0.1/"}} {
 		var method, host string
-		port, roots := tlsServerWith(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		port, roots, conns := tlsServerWith(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			method, host = r.Method+" "+r.URL.Path+" "+r.Proto, r.Host
 			if c.location != "" {
 				w.Header().Set("Location", c.location)
@@ -175,6 +183,9 @@ func TestTLSProbeRealHead(t *testing.T) {
 		}
 		if method != "HEAD / HTTP/2.0" || host != "127.0.0.1" {
 			t.Fatalf("запрос %q, Host %q", method, host)
+		}
+		if n := conns.Load(); n != 1 {
+			t.Fatalf("%d %s: сервер принял %d соединений, нужно одно", c.status, c.location, n)
 		}
 	}
 }
