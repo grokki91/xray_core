@@ -163,13 +163,13 @@ check "show: ссылка профиля" grep -qF -f "$out/.link" "$out/show"
 jq -r '.inbounds[].reality.private_key' /etc/xm/state.json >"$out/.private" 2>/dev/null
 chmod 600 "$out/.private"
 if [[ -s $out/.private ]]; then
-	if grep -qF -f "$out/.private" "$out/install" "$out/show"; then bad "приватный ключ в выводе install или show"; else ok "install и show без приватного ключа"; fi
+	if grep -qF -f "$out/.private" "$out/install" "$out/again" "$out/show"; then bad "приватный ключ в выводе install, повторного install или show"; else ok "install, повторный install и show без приватного ключа"; fi
 else
 	bad "приватный ключ не найден в состоянии"
 fi
 
 # 9. Секреты не попали в вывод команд, чьё назначение — не показывать их: значения из состояния —
-# канарейка (install, add и show показывают ссылку намеренно, поэтому не проверяются). Значения
+# канарейка (install, повторный install, add и show показывают ссылку намеренно, поэтому не проверяются). Значения
 # идут через файл, а не аргументы процесса; пустой список — провал, а не «чисто».
 jq -r '(.inbounds[].reality | .private_key, .public_key, .short_ids[]), (.profiles[]?.id)' /etc/xm/state.json >"$out/.secrets" 2>/dev/null
 chmod 600 "$out/.secrets"
@@ -177,7 +177,7 @@ n=$(grep -c . "$out/.secrets")
 if ((n < 3)); then
 	bad "канарейка: в состоянии найдено $n значений, нужно не меньше 3"
 else
-	grep -qF -f "$out/.secrets" "$out/list" "$out/status" "$out/again" "$out/stop" "$out/start" "$out/restart" "$out/restart-window"
+	grep -qF -f "$out/.secrets" "$out/list" "$out/status" "$out/stop" "$out/start" "$out/restart" "$out/restart-window"
 	case $? in
 	0) bad "секрет состояния в выводе команд" ;;
 	1) ok "вывод команд без секретов состояния" ;;
