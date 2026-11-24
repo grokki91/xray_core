@@ -27,7 +27,7 @@ const (
 // programs — закрытый список программ: имя → абсолютный путь. Пополняется вместе с первым
 // потребителем.
 func programs() map[string]string {
-	return map[string]string{useradd: "/usr/sbin/useradd", systemctl: "/usr/bin/systemctl",
+	return map[string]string{useradd: "/usr/sbin/useradd", userdel: "/usr/sbin/userdel", systemctl: "/usr/bin/systemctl",
 		SS: "/usr/bin/ss", UFW: "/usr/sbin/ufw", IPTables: "/usr/sbin/iptables", IP6Tables: "/usr/sbin/ip6tables"}
 }
 

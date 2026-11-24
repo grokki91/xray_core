@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io/fs"
 
@@ -102,6 +103,48 @@ func (m *Manager) EnsureBaseline(ctx context.Context) error {
 		if err := m.p.FS().Mkdir(d.path, d.perm, owner); err != nil {
 			return fmt.Errorf("базовая защита: %w", err)
 		}
+	}
+	return nil
+}
+
+// XMBinary — бинарник менеджера (docs/architecture/data-model.md §1).
+const XMBinary = "/usr/local/bin/xm"
+
+// Корни манифеста для удаления (ADR-0042): binaries — всегда, purgeTrees — только с --purge;
+// /etc/xm удаляется последним: пока состояние есть, повтор uninstall видит установку.
+var (
+	binaries   = []string{"/usr/local/lib/xm"}
+	purgeTrees = []string{"/usr/local/etc/xray", "/var/lib/xm", "/run/xm"}
+	stateTree  = "/etc/xm"
+)
+
+// Remove удаляет файлы xm по манифесту: всегда — бинарники Xray и xm; с purge — ещё
+// конфигурацию Xray, данные и снимки, пользователя xray и последним — каталог состояния. Пути
+// вне манифеста не трогаются; отсутствующее — не ошибка, поэтому повтор после сбоя доводит
+// удаление до конца.
+func (m *Manager) Remove(ctx context.Context, purge bool) error {
+	f := m.p.FS()
+	for _, d := range binaries {
+		if err := f.RemoveTree(d); err != nil {
+			return fmt.Errorf("удаление: %w", err)
+		}
+	}
+	if err := f.Remove(XMBinary); err != nil && !errors.Is(err, platform.ErrNotFound) {
+		return fmt.Errorf("удаление: %w", err)
+	}
+	if !purge {
+		return nil
+	}
+	for _, d := range purgeTrees {
+		if err := f.RemoveTree(d); err != nil {
+			return fmt.Errorf("удаление: %w", err)
+		}
+	}
+	if err := m.p.Users().Remove(ctx, ServiceUser); err != nil {
+		return fmt.Errorf("удаление: %w", err)
+	}
+	if err := f.RemoveTree(stateTree); err != nil {
+		return fmt.Errorf("удаление: %w", err)
 	}
 	return nil
 }

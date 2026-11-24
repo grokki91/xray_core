@@ -52,6 +52,8 @@ func (f *fakeApp) ProfileRemove(_ context.Context, name string) error { f.remove
 
 func (f *fakeApp) Service(_ context.Context, a app.Action) error { f.action = a; return f.err }
 
+func (f *fakeApp) Uninstall(context.Context, bool) error { return f.err }
+
 func (f *fakeApp) Status(context.Context) (contract.Status, error) { return f.status, f.err }
 
 func runWith(a App, args ...string) (code int, stdout, stderr string) {

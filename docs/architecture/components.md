@@ -100,6 +100,11 @@ type Platform interface {
 - `Users.Ensure(ctx, имя)` — владелец пользователя; нет такого — создаёт системного без оболочки и
   домашнего каталога через `useradd` из закрытого списка. Допустимо одно имя, `ServiceUser`
   (`xray`): политика §3 не разрешает менять других пользователей; иное имя — `ErrName`. Поддельные пользователи получают идентификаторы с 990.
+  `Users.Remove(ctx, имя)` — `userdel` того же единственного имени; нет пользователя — не ошибка
+  (`uninstall --purge`, [ADR-0042](../adr/0042-uninstall-ordered-idempotent.md)).
+- `FS.RemoveTree(путь)` — удаление дерева без перехода по ссылкам; ссылка на пути — `ErrSymlink`,
+  путь короче двух элементов — `ErrPath`, нет пути — не ошибка. Корни задаёт `security.Remove` по
+  манифесту.
 - `Systemd` управляет одним юнитом `xray.service` (имя не параметр, как у `Users`): работает через
   `Exec` с `systemctl` из закрытого списка, одна реализация у `Real` и `Fake`; подделка отвечает на
   `Handle("systemctl", …)`. `Running` — `is-system-running`: `running` и `degraded` годятся, прочее —
@@ -453,13 +458,16 @@ type Manager interface {
     NewClientID() (string, error)
     NewShortID() (string, error)
     EnsureBaseline(ctx context.Context) error    // пользователь xray, владельцы и права по манифесту
+    Remove(ctx context.Context, purge bool) error // удаление по манифесту (uninstall, ADR-0042)
     UnitHardening() []UnitOption                 // директивы изоляции systemd
     Audit(ctx context.Context) []Observation     // после MVP; SSH, фаервол, права, обновления ОС — только чтение
 }
 ```
 
 - Манифест прав — одна таблица ([data-model.md](data-model.md) §1); `EnsureBaseline` создаёт по
-  ней недостающее, `Audit` сверяет.
+  ней недостающее, `Remove` удаляет, `Audit` сверяет. Удаление — здесь, а не у `core` и `backup`:
+  владелец манифеста один, и корни для `uninstall` задаются одним списком рядом с ним
+  ([ADR-0042](../adr/0042-uninstall-ordered-idempotent.md)).
 - Ключи REALITY — пара X25519 из `crypto/rand` (`crypto/ecdh`), base64 RawURL; открытый ключ
   совпадает с выводом `xray x25519 -i` (L3). Идентификатор клиента — UUID v4, shortId — 16
   шестнадцатеричных знаков.

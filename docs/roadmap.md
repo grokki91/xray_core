@@ -259,8 +259,7 @@
   ([ADR-0037](adr/0037-license-mit.md)); ✅ Q14 ([ADR-0038](adr/0038-client-egress-restrictions.md)); внешние адреса — сервис определения внешнего адреса и
   DoH-серверы по умолчанию ✅ ([dependencies.md](dev/dependencies.md) §5).
 - **ADR в фазе**: ✅ правило UFW — [ADR-0041](adr/0041-ufw-rule-in-install-transaction.md);
-  `uninstall` — сценарий, который каркас транзакции не откатывает (ADR-0005 требует для
-  такого ADR).
+  ✅ `uninstall` — [ADR-0042](adr/0042-uninstall-ordered-idempotent.md).
 - **Волны**: 1 → (2, 7) → (3, 4) → 5 → 6 → 8 → 9. Шаг 7 — конвейер и загрузчик; публикация
   выпуска — после шага 8.
 
@@ -277,7 +276,7 @@
 5. ✅ ~~**`xm install` целиком.**~~ Флаги необязательны; идемпотентность (состояние, конфигурация и
    ключи до и после повторного запуска совпадают); профиль на каждый адрес сервера; правило
    UFW — по [ADR-0041](adr/0041-ufw-rule-in-install-transaction.md).
-6. **`xm uninstall [--purge]`** по [data-model.md](architecture/data-model.md) §6 и ADR этой
+6. ✅ ~~**`xm uninstall [--purge]`**~~ по [data-model.md](architecture/data-model.md) §6 и ADR этой
    фазы, с подтверждением вводом слова.
 7. ✅ ~~**Выпуск и загрузчик.**~~ Конвейер: сборка linux/amd64, `SHA256SUMS`, версия из тега; `install.sh`
    по [ADR-0013](adr/0013-distribution-and-bootstrap.md) — только скачать, сверить, запустить

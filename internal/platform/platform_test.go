@@ -346,3 +346,49 @@ func TestFakeRunUnderRoot(t *testing.T) {
 		t.Errorf("версия без бинарника: %v, нужно ErrNotFound", err)
 	}
 }
+
+// RemoveTree удаляет дерево, не переходя по ссылкам внутри; ссылка на пути — отказ.
+func TestRemoveTree(t *testing.T) {
+	for _, i := range impls(t) {
+		t.Run(i.name, func(t *testing.T) {
+			fsys := i.p.FS()
+			outside := i.base + "/outside"
+			tree := i.base + "/lib/xm"
+			for _, d := range []string{i.base + "/lib", tree, tree + "/core", outside} {
+				if err := fsys.Mkdir(d, 0o755, self()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := fsys.WriteFile(outside+"/keep", []byte("x"), 0o600, self()); err != nil {
+				t.Fatal(err)
+			}
+			if err := fsys.WriteFile(tree+"/core/xray", []byte("x"), 0o755, self()); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(onDisk(i, outside), onDisk(i, tree+"/core/current")); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(onDisk(i, tree), onDisk(i, i.base+"/lib/link")); err != nil {
+				t.Fatal(err)
+			}
+			if err := fsys.RemoveTree(i.base + "/lib/link/core"); !errors.Is(err, ErrSymlink) {
+				t.Errorf("ссылка на пути: %v, нужен ErrSymlink", err)
+			}
+			if err := fsys.RemoveTree("/etc"); !errors.Is(err, ErrPath) {
+				t.Errorf("короткий путь: %v, нужен ErrPath", err)
+			}
+			if err := fsys.RemoveTree(tree); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Lstat(onDisk(i, tree)); !errors.Is(err, fs.ErrNotExist) {
+				t.Errorf("дерево осталось: %v", err)
+			}
+			if _, err := fsys.ReadFile(outside + "/keep"); err != nil {
+				t.Errorf("файл за ссылкой удалён: %v", err)
+			}
+			if err := fsys.RemoveTree(tree); err != nil {
+				t.Errorf("повтор: %v", err)
+			}
+		})
+	}
+}
