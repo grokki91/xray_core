@@ -335,12 +335,17 @@ func firstAddress(a store.Addresses) string {
 }
 
 // firewallResult — факт о порте и, когда xm ничего не сделал, а порт может быть закрыт
-// правилами iptables, команда, которую владелец выполняет сам (ADR-0036). Вывод о фаерволе
+// правилами iptables или запрещён правилом UFW, команда, которую владелец выполняет сам (ADR-0036). Вывод о фаерволе
 // хостера не делается: он с сервера не виден.
 func firewallResult(f network.Firewall, port int, added bool) FirewallResult {
 	r := FirewallResult{State: string(f.State), Source: f.Source, Note: f.Note, Added: added}
-	if !added && f.State != network.FirewallAllowed && f.Source == "iptables" {
+	switch {
+	case added || f.State == network.FirewallAllowed:
+	case f.Source == "iptables":
 		r.Open = fmt.Sprintf("iptables -I INPUT -p tcp --dport %d -j ACCEPT; ip6tables -I INPUT -p tcp --dport %d -j ACCEPT", port, port)
+	case f.Source == "ufw" && f.State == network.FirewallDenied:
+		// Правило UFW срабатывает первым совпавшим: разрешение встаёт перед чужим запретом.
+		r.Open = fmt.Sprintf("ufw insert 1 allow %d/tcp", port)
 	}
 	return r
 }

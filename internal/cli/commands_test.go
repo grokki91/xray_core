@@ -327,6 +327,36 @@ func TestInstallPrintsFirewall(t *testing.T) {
 	}
 }
 
+// Каждое состояние локального фаервола даёт свой итог; запрет — факт с командой, а пустой
+// команды итог не печатает (A3).
+func TestInstallFirewallOutcomes(t *testing.T) {
+	cases := []struct {
+		fw   app.FirewallResult
+		want []string
+		not  []string
+	}{
+		{app.FirewallResult{State: "allowed", Source: "ufw"}, []string{"локально не закрыт", "фаервол хостера с сервера не виден"}, []string{"откройте"}},
+		{app.FirewallResult{State: "denied", Source: "ufw", Note: "правило UFW запрещает порт", Open: "ufw insert 1 allow 443/tcp"},
+			[]string{"закрыт локально", "правило UFW запрещает порт", "ufw insert 1 allow 443/tcp"}, []string{"не определён"}},
+		{app.FirewallResult{State: "denied", Source: "iptables", Note: "запрет"}, []string{"закрыт локально (запрет)."}, []string{"сами:"}},
+		{app.FirewallResult{State: "unknown", Source: "ufw", Note: "политика UFW не разобрана"},
+			[]string{"не определён как открытый", "политика UFW не разобрана"}, []string{"сами:"}},
+	}
+	for _, c := range cases {
+		_, stdout, _ := runWith(&fakeApp{view: phone, fw: c.fw}, "install")
+		for _, w := range c.want {
+			if !strings.Contains(stdout, w) {
+				t.Errorf("%s: нет %q:\n%s", c.fw.State, w, stdout)
+			}
+		}
+		for _, n := range c.not {
+			if strings.Contains(stdout, n) {
+				t.Errorf("%s: лишнее %q:\n%s", c.fw.State, n, stdout)
+			}
+		}
+	}
+}
+
 // Ошибки профильных команд идут через общий разбор: неверное имя — код 2, несовместимый
 // клиент — код 1 с причиной.
 func TestProfileFailures(t *testing.T) {

@@ -188,9 +188,17 @@ func printFirewall(e Env, res app.InstallResult) {
 		fmt.Fprintf(e.Stdout, "Фаервол: в UFW добавлено правило для порта %d/tcp; оно снимается при удалении xm.\n", res.Port)
 	case f.State == "allowed":
 		fmt.Fprintf(e.Stdout, "Фаервол: порт %d/tcp локально не закрыт; фаервол хостера с сервера не виден.\n", res.Port)
-	default:
+	case f.State == "denied":
+		fmt.Fprintf(e.Stdout, "Фаервол: порт %d/tcp закрыт локально (%s).", res.Port, e.Redact(quote(f.Note)))
+		if f.Open != "" {
+			fmt.Fprintf(e.Stdout, " Откройте его сами: %s", quote(f.Open))
+		}
+		fmt.Fprintln(e.Stdout)
+	case f.Open != "":
 		fmt.Fprintf(e.Stdout, "Фаервол: порт %d/tcp не определён как открытый (%s). Если подключение не проходит, откройте порт сами: %s\n",
 			res.Port, e.Redact(quote(f.Note)), quote(f.Open))
+	default:
+		fmt.Fprintf(e.Stdout, "Фаервол: порт %d/tcp не определён как открытый (%s).\n", res.Port, e.Redact(quote(f.Note)))
 	}
 }
 
