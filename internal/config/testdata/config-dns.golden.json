@@ -102,15 +102,15 @@
   "routing": {
     "rules": [
       {
+        "port": "53",
+        "network": "tcp,udp",
+        "outboundTag": "dns-out"
+      },
+      {
         "protocol": [
           "bittorrent"
         ],
         "outboundTag": "block"
-      },
-      {
-        "port": "53",
-        "network": "tcp,udp",
-        "outboundTag": "dns-out"
       }
     ]
   }

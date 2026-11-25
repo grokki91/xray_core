@@ -105,7 +105,8 @@ func (m *Manager) Render(st store.State, logSection json.RawMessage) (Rendered, 
 		doc.Outbounds = append(doc.Outbounds, outbound{Tag: tagDNS, Protocol: "dns", Settings: dnsOutSettings{
 			Rules: []dnsRule{{Action: "hijack", QType: "1,28"}, {Action: "return", RCode: 5}},
 		}})
-		doc.Routing.Rules = append(doc.Routing.Rules, rule{Port: "53", Network: "tcp,udp", OutboundTag: tagDNS})
+		// Первым: запрос DNS клиента, ложно распознанный как BitTorrent, не уходит в blackhole.
+		doc.Routing.Rules = append([]rule{{Port: "53", Network: "tcp,udp", OutboundTag: tagDNS}}, doc.Routing.Rules...)
 	}
 	return finish(doc)
 }

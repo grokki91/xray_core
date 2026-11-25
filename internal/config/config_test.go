@@ -203,6 +203,16 @@ func TestRenderDNSFromState(t *testing.T) {
 			t.Fatalf("%s есть без раздела dns", s)
 		}
 	}
+	// Перехват DNS — первым правилом routing, до правила bittorrent.
+	var doc struct {
+		Routing struct{ Rules []struct{ Port string } }
+	}
+	if err := json.Unmarshal(render(t, dnsState()).Data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Routing.Rules) == 0 || doc.Routing.Rules[0].Port != "53" {
+		t.Fatalf("первое правило routing — не порт 53: %+v", doc.Routing.Rules)
+	}
 	want, err := os.ReadFile("testdata/config-dns.golden.json")
 	if err != nil {
 		t.Fatal(err)
