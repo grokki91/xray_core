@@ -24,6 +24,10 @@
         ],
         "decryption": "none"
       },
+      "sniffing": {
+        "enabled": true,
+        "routeOnly": true
+      },
       "streamSettings": {
         "network": "xhttp",
         "security": "reality",
@@ -52,6 +56,11 @@
         "finalRules": [
           {
             "action": "block",
+            "network": "tcp",
+            "port": "25"
+          },
+          {
+            "action": "block",
             "ip": [
               "0.0.0.0/8",
               "10.0.0.0/8",
@@ -67,6 +76,11 @@
           }
         ]
       }
+    },
+    {
+      "tag": "block",
+      "protocol": "blackhole",
+      "settings": {}
     },
     {
       "tag": "dns-out",
@@ -87,6 +101,12 @@
   ],
   "routing": {
     "rules": [
+      {
+        "protocol": [
+          "bittorrent"
+        ],
+        "outboundTag": "block"
+      },
       {
         "port": "53",
         "network": "tcp,udp",

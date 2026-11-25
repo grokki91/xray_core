@@ -1,8 +1,8 @@
 // Пакет config — конфигурация Xray, производная от состояния (docs/architecture/components.md,
 // config; ADR-0004). Одно состояние → побайтно один файл. Разделы: log (готовый раздел
 // приносит вызывающий — от logging), dns (из состояния), inbounds (пресет и клиенты), outbounds,
-// исходящий freedom с запретом частных, петлевых и link-local адресов назначения в finalRules
-// (docs/security/policy.md §4, ADR-0027). Проверку `xray run -test` выполняет вызывающий через core.Validate: менеджеры друг друга
+// исходящий freedom с запретом частных, петлевых и link-local адресов назначения и порта 25 в
+// finalRules (docs/security/policy.md §4, ADR-0027, ADR-0038), blackhole для BitTorrent. Проверку `xray run -test` выполняет вызывающий через core.Validate: менеджеры друг друга
 // не импортируют.
 package config
 
@@ -84,10 +84,17 @@ func (m *Manager) Render(st store.State, logSection json.RawMessage) (Rendered, 
 		DNS:      dnsSection(st.DNS),
 		Inbounds: []json.RawMessage{inbound},
 		// freedom — первым: первый исходящий получает всё, что не поймали правила routing.
+		// Порт 25 любого адреса — тем же механизмом, что частные адреса: хостеры блокируют VPS за
+		// рассылку почты (ADR-0038). BitTorrent — правилом protocol: finalRules не видят результат
+		// определения протокола; blackhole — только для этого правила.
 		Outbounds: []outbound{{
 			Tag: tagDirect, Protocol: "freedom",
-			Settings: freedomSettings{FinalRules: []finalRule{{Action: "block", IP: deniedCIDRs}}},
-		}},
+			Settings: freedomSettings{FinalRules: []finalRule{
+				{Action: "block", Network: "tcp", Port: "25"},
+				{Action: "block", IP: deniedCIDRs},
+			}},
+		}, {Tag: tagBlock, Protocol: "blackhole", Settings: struct{}{}}},
+		Routing: &routing{Rules: []rule{{Protocol: []string{"bittorrent"}, OutboundTag: tagBlock}}},
 	}
 	// Встроенный DNS сам :53 не перехватывает: запросы клиентов внутри тоннеля к нему ведёт
 	// исходящий dns и правило routing. DoH самого Xray (схема https://) идёт через freedom, и
@@ -98,7 +105,7 @@ func (m *Manager) Render(st store.State, logSection json.RawMessage) (Rendered, 
 		doc.Outbounds = append(doc.Outbounds, outbound{Tag: tagDNS, Protocol: "dns", Settings: dnsOutSettings{
 			Rules: []dnsRule{{Action: "hijack", QType: "1,28"}, {Action: "return", RCode: 5}},
 		}})
-		doc.Routing = &routing{Rules: []rule{{Port: "53", Network: "tcp,udp", OutboundTag: tagDNS}}}
+		doc.Routing.Rules = append(doc.Routing.Rules, rule{Port: "53", Network: "tcp,udp", OutboundTag: tagDNS})
 	}
 	return finish(doc)
 }
@@ -202,7 +209,10 @@ func (m *Manager) Drift(st store.State) (bool, error) {
 	return got != st.Applied.ConfigSHA256, nil
 }
 
-const tagDirect = "direct"
+const (
+	tagDirect = "direct"
+	tagBlock  = "block"
+)
 
 // deniedCIDRs — адреса назначения, которые клиент VPN не должен достать через тоннель:
 // частные, петлевые, link-local и «этот хост» (0.0.0.0 на Linux ведёт на сам сервер). Запрет —
@@ -230,9 +240,10 @@ type routing struct {
 }
 
 type rule struct {
-	Port        string `json:"port"`
-	Network     string `json:"network"`
-	OutboundTag string `json:"outboundTag"`
+	Protocol    []string `json:"protocol,omitempty"`
+	Port        string   `json:"port,omitempty"`
+	Network     string   `json:"network,omitempty"`
+	OutboundTag string   `json:"outboundTag"`
 }
 
 type dns struct {
@@ -251,7 +262,7 @@ func dnsSection(d store.DNS) *dns {
 type outbound struct {
 	Tag      string `json:"tag"`
 	Protocol string `json:"protocol"`
-	Settings any    `json:"settings"` // freedomSettings или dnsOutSettings
+	Settings any    `json:"settings"` // freedomSettings, dnsOutSettings или пустой объект blackhole
 }
 
 type dnsOutSettings struct {
@@ -269,8 +280,10 @@ type freedomSettings struct {
 }
 
 type finalRule struct {
-	Action string   `json:"action"`
-	IP     []string `json:"ip"`
+	Action  string   `json:"action"`
+	Network string   `json:"network,omitempty"`
+	Port    string   `json:"port,omitempty"`
+	IP      []string `json:"ip,omitempty"`
 }
 
 // CandidatePath — временный файл новой конфигурации для `xray run -test`: до атомарной записи в

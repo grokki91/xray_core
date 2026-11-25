@@ -150,9 +150,14 @@ func testDNSConfig(t *testing.T, cfg []byte, port string) []byte {
 		t.Fatal(err)
 	}
 	doc["dns"].(map[string]any)["hosts"] = map[string]any{"xm.test": "192.0.2.1"}
-	rule := doc["routing"].(map[string]any)["rules"].([]any)[0].(map[string]any)
-	if rule["port"] != "53" {
-		t.Fatalf("правило routing: порт %v, нужен 53", rule["port"])
+	var rule map[string]any
+	for _, r := range doc["routing"].(map[string]any)["rules"].([]any) {
+		if m := r.(map[string]any); m["port"] == "53" {
+			rule = m
+		}
+	}
+	if rule == nil {
+		t.Fatal("в routing нет правила порта 53")
 	}
 	rule["port"] = port
 	out, err := json.Marshal(doc)

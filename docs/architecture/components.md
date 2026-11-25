@@ -271,7 +271,9 @@ type Preset interface {  // каталог пресетов: config/preset
   параметрами клиента. Ошибки отрисовки несут
   имена полей, не значения. Адреса назначения `0.0.0.0/8`, частные, петлевые и link-local
   блокирует `settings.finalRules` исходящего `freedom` (`action: block`), в том числе для DoH самого
-  Xray (схема `https://` идёт через `freedom`); к исходящему `dns` finalRules не применяются — его правила без `direct` ([ADR-0039](../adr/0039-client-dns-via-dns-outbound.md)).
+  Xray (схема `https://` идёт через `freedom`); к исходящему `dns` finalRules не применяются — его правила без `direct` ([ADR-0039](../adr/0039-client-dns-via-dns-outbound.md)). Там же первым правилом —
+  `tcp:25` любого адреса; BitTorrent — правило маршрутизации `protocol: bittorrent` в `blackhole`,
+  для чего у входящего `sniffing` с `routeOnly` ([ADR-0038](../adr/0038-client-egress-restrictions.md)).
 - Проверка — `core.Validate` перед записью. Набор полей сверяется с upstream по скилу
   `xray-upstream`. Фаза 2.
 

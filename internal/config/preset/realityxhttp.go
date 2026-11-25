@@ -65,6 +65,9 @@ func (realityXHTTP) Inbound(p Params) (json.RawMessage, error) {
 		Port:     p.Port,
 		Protocol: "vless",
 		Settings: settings{Clients: clients, Decryption: "none"},
+		// Определение протокола — только для правила bittorrent (ADR-0038): routeOnly не подменяет
+		// адрес назначения, destOverride не нужен — BitTorrent распознаётся без него.
+		Sniffing: sniffing{Enabled: true, RouteOnly: true},
 		Stream: stream{
 			Network:  "xhttp",
 			Security: "reality",
@@ -174,7 +177,13 @@ type inbound struct {
 	Port     int      `json:"port"`
 	Protocol string   `json:"protocol"`
 	Settings settings `json:"settings"`
+	Sniffing sniffing `json:"sniffing"`
 	Stream   stream   `json:"streamSettings"`
+}
+
+type sniffing struct {
+	Enabled   bool `json:"enabled"`
+	RouteOnly bool `json:"routeOnly"`
 }
 
 type settings struct {

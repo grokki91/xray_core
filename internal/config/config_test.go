@@ -100,7 +100,8 @@ func TestRenderNoProfilesIsValidDocument(t *testing.T) {
 }
 
 func TestRenderBlocksPrivateDestinations(t *testing.T) {
-	// ADR-0027: запрет — finalRules единственного исходящего freedom; маршрутизации и blackhole нет.
+	// ADR-0027: запрет — finalRules исходящего freedom; freedom — первым, он получает всё, что не
+	// поймали правила маршрутизации.
 	var doc struct {
 		Outbounds []struct {
 			Tag, Protocol string
@@ -111,24 +112,20 @@ func TestRenderBlocksPrivateDestinations(t *testing.T) {
 				}
 			}
 		}
-		Routing json.RawMessage
 	}
 	if err := json.Unmarshal(render(t, state()).Data, &doc); err != nil {
 		t.Fatal(err)
 	}
-	if len(doc.Outbounds) != 1 || doc.Outbounds[0].Protocol != "freedom" {
+	if len(doc.Outbounds) == 0 || doc.Outbounds[0].Protocol != "freedom" {
 		t.Fatalf("outbounds: %+v", doc.Outbounds)
 	}
-	if doc.Routing != nil {
-		t.Fatalf("раздел routing остался: %s", doc.Routing)
-	}
-	rules := doc.Outbounds[0].Settings.FinalRules
-	if len(rules) != 1 || rules[0].Action != "block" {
-		t.Fatalf("finalRules: %+v", rules)
-	}
 	have := map[string]bool{}
-	for _, c := range rules[0].IP {
-		have[c] = true
+	for _, r := range doc.Outbounds[0].Settings.FinalRules {
+		if r.Action == "block" {
+			for _, c := range r.IP {
+				have[c] = true
+			}
+		}
 	}
 	for _, c := range []string{"0.0.0.0/8", "10.0.0.0/8", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16", "::/128", "::1/128", "fc00::/7", "fe80::/10"} {
 		if !have[c] {
@@ -137,11 +134,71 @@ func TestRenderBlocksPrivateDestinations(t *testing.T) {
 	}
 }
 
+// ADR-0038, A8: порт 25 любого адреса — finalRules freedom тем же механизмом, что частные адреса;
+// BitTorrent — правилом protocol в blackhole, для чего у входящего sniffing только для
+// маршрутизации: адрес назначения не подменяется.
+func TestRenderRestrictsClientEgress(t *testing.T) {
+	var doc struct {
+		Inbounds []struct {
+			Sniffing *struct {
+				Enabled, RouteOnly, MetadataOnly bool
+			}
+		}
+		Outbounds []struct {
+			Tag, Protocol string
+			Settings      struct {
+				FinalRules []struct {
+					Action, Network, Port string
+					IP                    []string
+				}
+			}
+		}
+		Routing *struct {
+			Rules []struct {
+				Protocol    []string
+				OutboundTag string
+			}
+		}
+	}
+	if err := json.Unmarshal(render(t, state()).Data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	port25 := false
+	for _, r := range doc.Outbounds[0].Settings.FinalRules {
+		if r.Action == "block" && r.Port == "25" && r.Network == "tcp" && len(r.IP) == 0 {
+			port25 = true
+		}
+	}
+	if !port25 {
+		t.Errorf("в finalRules нет запрета tcp:25: %+v", doc.Outbounds[0].Settings.FinalRules)
+	}
+	if sn := doc.Inbounds[0].Sniffing; sn == nil || !sn.Enabled || !sn.RouteOnly || sn.MetadataOnly {
+		t.Errorf("sniffing: %+v", sn)
+	}
+	blackhole := map[string]bool{}
+	for _, o := range doc.Outbounds {
+		if o.Protocol == "blackhole" {
+			blackhole[o.Tag] = true
+		}
+	}
+	torrent := false
+	if doc.Routing != nil {
+		for _, r := range doc.Routing.Rules {
+			if len(r.Protocol) == 1 && r.Protocol[0] == "bittorrent" && blackhole[r.OutboundTag] {
+				torrent = true
+			}
+		}
+	}
+	if !torrent {
+		t.Errorf("нет правила bittorrent → blackhole: %+v", doc.Routing)
+	}
+}
+
 func TestRenderDNSFromState(t *testing.T) {
 	if strings.Contains(string(render(t, state()).Data), `"dns"`) {
 		t.Fatal("раздел dns есть при пустом состоянии")
 	}
-	for _, s := range []string{`"routing"`, `"protocol": "dns"`} {
+	for _, s := range []string{`"port": "53"`, `"protocol": "dns"`} {
 		if strings.Contains(string(render(t, state()).Data), s) {
 			t.Fatalf("%s есть без раздела dns", s)
 		}
