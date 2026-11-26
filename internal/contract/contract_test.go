@@ -34,6 +34,10 @@ func TestGolden(t *testing.T) {
 			Range: Range{Min: "26.10.21", Max: "26.11.9"}, InRange: true, Updated: true,
 			Checked: "2026-01-01T00:00:00Z", Unchecked: "сторонние клиентские ядра не проверялись",
 		}),
+		"backups": New("0.1.0", at, Backups{Backups: []BackupItem{
+			{ID: "20260101T000000Z-manual", Created: 1767225600, Kind: "manual", XM: "0.1.0", Xray: "26.11.9", Valid: true},
+			{ID: "20260101T010000Z-profile-add", Created: 1767229200, Kind: "auto"},
+		}}),
 		"profiles": New("0.1.0", at, Profiles{Profiles: []ProfileItem{
 			{Name: "phone", Created: 1767225600, Enabled: true},
 			{Name: "laptop", Created: 1767229200},

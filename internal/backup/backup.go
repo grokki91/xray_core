@@ -1,6 +1,6 @@
 // Пакет backup — снимок состояния и конфигурации (tar.gz с манифестом SHA-256) и чтение снимка
 // с проверкой. Запись файлов обратно — дело транзакции app: здесь только создать и вернуть
-// проверенное содержимое; хранение автоснимков — Prune. Список и команды — фаза 5.
+// проверенное содержимое; список — List, хранение по виду — Prune.
 package backup
 
 import (
@@ -37,8 +37,11 @@ const (
 	manifestName = "manifest.json"
 
 	manifestVersion = 1
-	// AutoKeep — сколько последних автоснимков хранится (data-model.md §4).
-	AutoKeep = 10
+	// AutoKeep и ManualKeep — сколько последних снимков каждого вида хранится (data-model.md §4).
+	AutoKeep   = 10
+	ManualKeep = 20
+	// ManualReason — причина ручного снимка `xm backup`; вид снимка определяется по ней.
+	ManualReason = "manual"
 	// maxEntry — предел одной записи при чтении: защита от архива-бомбы. Состояние и
 	// конфигурация — килобайты.
 	maxEntry = 8 << 20
@@ -60,6 +63,22 @@ var (
 	idRe     = regexp.MustCompile(`^[0-9]{8}T[0-9]{6}Z-[a-z0-9]+(-[a-z0-9]+)*$`)
 	xmVerRe  = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}$`)
 )
+
+// Kind — вид снимка: ручной (причина ManualReason) или автоматический (любая другая).
+type Kind string
+
+const (
+	Auto   Kind = "auto"
+	Manual Kind = "manual"
+)
+
+// KindOf — вид снимка по идентификатору.
+func KindOf(id string) Kind {
+	if strings.HasSuffix(id, "Z-"+ManualReason) {
+		return Manual
+	}
+	return Auto
+}
 
 // Meta — версии, которые снимок записывает в манифест. Xray пуст, пока ядра нет.
 type Meta struct {
@@ -250,20 +269,78 @@ func (m *Manager) Read(ctx context.Context, id string) (Archive, error) {
 	return Archive{Manifest: mf, State: got[stateName], Config: got[configName]}, nil
 }
 
-// Prune удаляет снимки, кроме keep самых новых. Порядок — по идентификатору: он начинается с
-// UTC-времени. Файлы каталога, не похожие на снимок, не трогаются. Вызывать только без
-// незавершённой транзакции: её снимок нужен откату. Ручных снимков пока нет; с ними (фаза 5)
-// Prune должен отбирать снимки по виду, иначе удалит и ручные.
-func (m *Manager) Prune(ctx context.Context, keep int) error {
-	if err := ctx.Err(); err != nil {
-		return err
+// Entry — снимок в списке. Manifest заполнен, только если снимок прошёл проверку Read; иначе
+// Corrupt — причина отказа.
+type Entry struct {
+	ID       string
+	Created  time.Time
+	Kind     Kind
+	Manifest Manifest
+	Corrupt  error
+}
+
+// List — снимки каталога от старого к новому, каждый проверен целиком. Повреждённый снимок
+// остаётся в списке с причиной: владелец должен его видеть, а restore его не примет.
+func (m *Manager) List(ctx context.Context) ([]Entry, error) {
+	ids, err := m.ids(ctx)
+	if err != nil {
+		return nil, err
 	}
+	out := make([]Entry, 0, len(ids))
+	for _, id := range ids {
+		created, err := time.Parse("20060102T150405Z", id[:16])
+		if err != nil {
+			return nil, fmt.Errorf("снимок %s: время: %w", id, err)
+		}
+		e := Entry{ID: id, Created: created, Kind: KindOf(id)}
+		arch, err := m.Read(ctx, id)
+		switch {
+		case err == nil:
+			e.Manifest = arch.Manifest
+		case errors.Is(err, ErrCorrupt):
+			e.Corrupt = err
+		default:
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, nil
+}
+
+// Prune удаляет снимки вида kind, кроме keep самых новых; снимки другого вида не трогаются.
+// Порядок — по идентификатору: он начинается с UTC-времени. Файлы каталога, не похожие на снимок,
+// не трогаются. Вызывать только без незавершённой транзакции: её снимок нужен откату.
+func (m *Manager) Prune(ctx context.Context, kind Kind, keep int) error {
 	if keep < 1 {
 		return fmt.Errorf("%w: keep %d", ErrInput, keep)
 	}
+	all, err := m.ids(ctx)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for _, id := range all {
+		if KindOf(id) == kind {
+			ids = append(ids, id)
+		}
+	}
+	for len(ids) > keep {
+		if err := m.p.FS().Remove(Dir + "/" + ids[0] + ".tar.gz"); err != nil {
+			return fmt.Errorf("снимок %s: %w", ids[0], err)
+		}
+		ids = ids[1:]
+	}
+	return nil
+}
+
+// ids — идентификаторы снимков каталога по возрастанию.
+func (m *Manager) ids(ctx context.Context) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	names, err := m.p.FS().ReadDir(Dir)
 	if err != nil {
-		return fmt.Errorf("снимки: %w", err)
+		return nil, fmt.Errorf("снимки: %w", err)
 	}
 	var ids []string
 	for _, n := range names {
@@ -272,13 +349,7 @@ func (m *Manager) Prune(ctx context.Context, keep int) error {
 		}
 	}
 	slices.Sort(ids)
-	for len(ids) > keep {
-		if err := m.p.FS().Remove(Dir + "/" + ids[0] + ".tar.gz"); err != nil {
-			return fmt.Errorf("снимок %s: %w", ids[0], err)
-		}
-		ids = ids[1:]
-	}
-	return nil
+	return ids, nil
 }
 
 func sum(b []byte) string {

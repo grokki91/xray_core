@@ -24,7 +24,7 @@ func runUninstall(e Env, fs *flag.FlagSet, _ []string, _ bool) int {
 	}
 	if purge && !yes {
 		fmt.Fprintf(e.Stderr, "Будут удалены состояние, профили, ключи и снимки — без возврата.\nДля подтверждения введите %s: ", purgeWord)
-		if !confirmed(e.Stdin) {
+		if !confirmed(e.Stdin, purgeWord) {
 			fmt.Fprintln(e.Stderr, "\nxm: подтверждение не получено, ничего не удалено")
 			return exitUsage
 		}
@@ -40,8 +40,8 @@ func runUninstall(e Env, fs *flag.FlagSet, _ []string, _ bool) int {
 	return exitOK
 }
 
-// confirmed читает одну строку и сверяет её со словом подтверждения.
-func confirmed(r io.Reader) bool {
+// confirmed читает одну строку и сверяет её со словом подтверждения word.
+func confirmed(r io.Reader, word string) bool {
 	if r == nil {
 		return false
 	}
@@ -49,5 +49,5 @@ func confirmed(r io.Reader) bool {
 	if err != nil && err != io.EOF {
 		return false
 	}
-	return strings.TrimSpace(line) == purgeWord
+	return strings.TrimSpace(line) == word
 }

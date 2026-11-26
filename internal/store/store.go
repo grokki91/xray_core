@@ -71,7 +71,7 @@ func New(fs platform.FS) *Store {
 	return &Store{fs: fs, current: SchemaVersion, migrations: migrations()}
 }
 
-// Load читает состояние, переводит его на текущую схему и проверяет. Мигрированное состояние
+// Load читает состояние, переводит его на текущую схему и проверяет (Parse). Мигрированное состояние
 // на диск не пишется: это делает следующий Save внутри транзакции.
 func (s *Store) Load() (State, error) {
 	data, err := s.fs.ReadFile(StatePath)
@@ -81,7 +81,13 @@ func (s *Store) Load() (State, error) {
 	if err != nil {
 		return State{}, err
 	}
-	data, err = s.migrate(data)
+	return s.Parse(data)
+}
+
+// Parse переводит документ состояния на текущую схему и проверяет его так же, как Load: нужен
+// восстановлению из снимка, где документ приходит не с диска.
+func (s *Store) Parse(data []byte) (State, error) {
+	data, err := s.migrate(data)
 	if err != nil {
 		return State{}, err
 	}

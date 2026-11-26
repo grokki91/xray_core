@@ -1,0 +1,31 @@
+{
+  "schema": {
+    "name": "backups",
+    "major": 1,
+    "minor": 0
+  },
+  "xm": {
+    "version": "0.1.0"
+  },
+  "time": 1767225600,
+  "data": {
+    "backups": [
+      {
+        "id": "20260101T000000Z-manual",
+        "created": 1767225600,
+        "kind": "manual",
+        "xm": "0.1.0",
+        "xray": "26.11.9",
+        "valid": true
+      },
+      {
+        "id": "20260101T010000Z-profile-add",
+        "created": 1767229200,
+        "kind": "auto",
+        "xm": "",
+        "xray": "",
+        "valid": false
+      }
+    ]
+  }
+}

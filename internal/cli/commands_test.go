@@ -32,7 +32,18 @@ type fakeApp struct {
 	// обновление
 	upd     contract.Update
 	updOpts app.UpdateOptions
+	// снимки
+	backups  contract.Backups
+	restored string
 }
+
+func (f *fakeApp) Backup(context.Context) (contract.BackupItem, error) {
+	return contract.BackupItem{ID: "20260101T000000Z-manual", Kind: "manual", Valid: true}, f.err
+}
+
+func (f *fakeApp) BackupList(context.Context) (contract.Backups, error) { return f.backups, f.err }
+
+func (f *fakeApp) Restore(_ context.Context, id string) error { f.restored = id; return f.err }
 
 func (f *fakeApp) Update(_ context.Context, o app.UpdateOptions) (contract.Update, error) {
 	f.updOpts = o

@@ -42,6 +42,9 @@ type App interface {
 	ProfileList(ctx context.Context) (contract.Profiles, error)
 	ProfileShow(ctx context.Context, name string, o app.ShareOptions) (app.ProfileView, error)
 	ProfileRemove(ctx context.Context, name string) error
+	Backup(ctx context.Context) (contract.BackupItem, error)
+	BackupList(ctx context.Context) (contract.Backups, error)
+	Restore(ctx context.Context, id string) error
 }
 
 // Env — то, что получает команда: потоки вывода, версия сборки, часы и прикладной слой. Ctx
@@ -90,6 +93,10 @@ func commands() []command {
 		{name: "show", usage: "xm show <имя> [--client <id>] [--address <адрес>] [--json]",
 			summary: "ссылки и QR профиля повторно", json: true, flags: shareFlags, minArgs: 1, maxArgs: 1, run: runShow},
 		{name: "rm", usage: "xm rm <имя>", summary: "удалить профиль", minArgs: 1, maxArgs: 1, run: runRemove},
+		{name: "backup", usage: "xm backup [--list] [--json]", summary: "создать снимок состояния; --list — показать снимки",
+			json: true, flags: backupFlags, run: runBackup},
+		{name: "restore", usage: "xm restore <id> [--yes]", summary: "восстановить состояние из снимка",
+			flags: restoreFlags, minArgs: 1, maxArgs: 1, run: runRestore},
 		{name: "version", usage: "xm version [--json]", summary: "версия xm", json: true, run: runVersion},
 		{name: "help", usage: "xm help", summary: "эта справка", run: runHelp},
 	}
