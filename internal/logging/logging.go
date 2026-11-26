@@ -1,7 +1,7 @@
 // Пакет logging — журнал самого xm и раздел log конфигурации Xray (docs/architecture/
 // components.md, ADR-0022). Журнал xm — slog поверх редактора: каждая запись целиком проходит
 // redact.Text до записи в journald через platform. Журнал доступа Xray выключен — в нём адреса
-// клиентов. Чтение журнала Xray — фаза 5.
+// клиентов. Чтение журнала — journalctl через platform.Stream (ADR-0044).
 package logging
 
 import (
@@ -36,15 +36,19 @@ type Settings struct {
 type Manager struct {
 	h     *handler
 	level slog.Level
+	p     platform.Platform
+	r     *redact.Redactor
 }
 
 // New возвращает менеджер: записи журнала идут через r в journald платформы p.
 func New(p platform.Platform, r *redact.Redactor, level slog.Level) *Manager {
-	return &Manager{h: &handler{j: p.Journal(), r: r, level: level}, level: level}
+	return &Manager{h: &handler{j: p.Journal(), r: r, level: level}, level: level, p: p, r: r}
 }
 
 // Logger возвращает журнал xm; всегда поверх редактора.
 func (m *Manager) Logger() *slog.Logger { return slog.New(m.h) }
+
+func (m *Manager) now() time.Time { return m.p.Clock().Now() }
 
 // Settings возвращает действующие настройки.
 func (m *Manager) Settings() Settings {
