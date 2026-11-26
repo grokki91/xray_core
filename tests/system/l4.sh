@@ -246,7 +246,9 @@ fi
 # 11. Обновление и откат между двумя версиями Xray (updates.md §4–§6): установка стоит на
 # верхней границе проверенного диапазона, update --to ставит нижнюю (настоящая загрузка с
 # github.com и проверки xm), update --rollback возвращает верхнюю; оба раза служба проходит контроль.
-sums_core() { sha256sum /etc/xm/state.json /usr/local/etc/xray/config.json | cut -d' ' -f1 | tr '\n' ' '; }
+# Состояние сравнивается без applied.at: время применения пишет каждая транзакция, restore тоже.
+state_core() { jq -S 'del(.applied.at)' /etc/xm/state.json 2>/dev/null; }
+sums_core() { { state_core | sha256sum; sha256sum </usr/local/etc/xray/config.json; } | cut -d' ' -f1 | tr '\n' ' '; }
 "$xm" update --check --json >"$out/update-check" 2>&1
 hi=$(jq -r '.data.current' "$out/update-check" 2>/dev/null)
 lo=$(jq -r '.data.range.min' "$out/update-check" 2>/dev/null)
@@ -271,6 +273,7 @@ check "update --rollback: обе версии на диске" test -x "/usr/loc
 # 12. Снимки (data-model.md §4): xm backup → порча состояния → xm restore возвращает его,
 # служба проходит контроль.
 before=$(sums_core)
+(umask 077 && state_core >"$out/.state-before")
 "$xm" backup --json >"$out/backup" 2>&1
 eq "backup: код" "$?" 0
 id=$(jq -r '.data.backups[0].id' "$out/backup" 2>/dev/null)
@@ -278,7 +281,10 @@ if [[ $id =~ ^[0-9A-Za-z._-]+$ ]]; then ok "backup: id снимка"; else bad "
 printf '{испорчено' >/etc/xm/state.json
 echo restore | "$xm" restore "$id" >"$out/restore" 2>&1
 eq "restore: код" "$?" 0
-eq "restore: состояние и конфигурация вернулись" "$(sums_core)" "$before"
+eq "restore: состояние (кроме applied.at) и конфигурация вернулись" "$(sums_core)" "$before"
+if [[ $(sums_core) != "$before" ]]; then # только имена расходящихся ключей: значения — секреты
+	echo "env  restore: расходятся ключи $(state_core | jq -r --slurpfile b "$out/.state-before" '[paths(scalars) as $p | select(getpath($p) != ($b[0] | getpath($p))) | $p | map(tostring) | join(".")] | join(", ")' 2>&1)"
+fi
 check "restore: служба активна, порт слушается" bash -c "systemctl is-active --quiet xray.service && ss -ltnH 'sport = :$port' | grep -q ."
 "$xm" status --json >"$out/status-restored" 2>&1
 check "restore: status — вердикт ok" jq -e '.data.health.verdict == "ok"' "$out/status-restored"
