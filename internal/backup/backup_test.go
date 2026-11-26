@@ -351,7 +351,7 @@ func TestPruneKeepsNewest(t *testing.T) {
 		ids = append(ids, s.ID)
 	}
 	put(t, f, Dir+"/notes.txt", []byte("x"))
-	if err := m.Prune(ctx(t), 10); err != nil {
+	if err := m.Prune(ctx(t), Auto, 10); err != nil {
 		t.Fatal(err)
 	}
 	for i, id := range ids {
@@ -363,7 +363,69 @@ func TestPruneKeepsNewest(t *testing.T) {
 	if _, err := f.FS().ReadFile(Dir + "/notes.txt"); err != nil {
 		t.Errorf("чужой файл удалён: %v", err)
 	}
-	if err := m.Prune(ctx(t), 0); !errors.Is(err, ErrInput) {
+	if err := m.Prune(ctx(t), Auto, 0); !errors.Is(err, ErrInput) {
 		t.Errorf("keep=0: %v, нужен ErrInput", err)
+	}
+}
+
+// Хранение по виду: удаление старых автоснимков не трогает ручные, и наоборот.
+func TestPruneByKind(t *testing.T) {
+	f, m := env(t)
+	var manual []string
+	for i := range 4 {
+		f.SetNow(now.Add(time.Duration(i) * time.Minute))
+		s, err := m.Create(ctx(t), ManualReason, meta)
+		if err != nil {
+			t.Fatal(err)
+		}
+		manual = append(manual, s.ID)
+		if _, err := m.Create(ctx(t), "install", meta); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := m.Prune(ctx(t), Auto, 1); err != nil {
+		t.Fatal(err)
+	}
+	list, err := m.List(ctx(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	autos := 0
+	for _, e := range list {
+		if e.Kind == Manual {
+			got = append(got, e.ID)
+		} else {
+			autos++
+		}
+	}
+	if autos != 1 || strings.Join(got, ",") != strings.Join(manual, ",") {
+		t.Fatalf("после Prune(Auto, 1): авто %d, ручные %v", autos, got)
+	}
+	if err := m.Prune(ctx(t), Manual, 2); err != nil {
+		t.Fatal(err)
+	}
+	if list, _ = m.List(ctx(t)); len(list) != 3 || list[0].ID != manual[2] {
+		t.Fatalf("после Prune(Manual, 2): %+v", list)
+	}
+}
+
+// List показывает повреждённый снимок с причиной, а целый — с манифестом.
+func TestListMarksCorrupt(t *testing.T) {
+	f, m := env(t)
+	s, err := m.Create(ctx(t), ManualReason, meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	put(t, f, Dir+"/20260102T030406Z-install.tar.gz", []byte("не архив"))
+	list, err := m.List(ctx(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 || list[0].ID != s.ID || list[0].Corrupt != nil || list[0].Manifest.XM != meta.XM || list[0].Kind != Manual {
+		t.Fatalf("целый снимок: %+v", list)
+	}
+	if !errors.Is(list[1].Corrupt, ErrCorrupt) || list[1].Kind != Auto || !list[1].Created.Equal(now.Add(time.Second)) {
+		t.Fatalf("повреждённый снимок: %+v", list[1])
 	}
 }

@@ -58,11 +58,13 @@ xm add [имя]          # создать профиль: ссылка и QR
 xm list               # профили
 xm show <имя>         # ссылка и QR повторно
 xm rm <имя>           # удалить профиль
+xm backup [--list]    # снимок состояния; список снимков
+xm restore <id>       # восстановить из снимка
 xm start|stop|restart # служба Xray
 xm uninstall          # удаление
 ```
 
-План: `xm update`, `xm diag`, `xm logs`, `xm backup`, `xm restore`, `xm ui`. Все команды и
+План: `xm update`, `xm diag`, `xm logs`, `xm ui`. Все команды и
 флаги — [docs/architecture/interfaces.md](docs/architecture/interfaces.md).
 
 ## Диагностика

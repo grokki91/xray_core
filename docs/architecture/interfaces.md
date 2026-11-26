@@ -21,8 +21,8 @@
 | `xm rm <имя>` | удалить профиль | да |
 | `xm diag [--only <категория>] [--export <файл>]` | диагностика; экспорт — отредактированный отчёт | нет |
 | `xm logs [-f] [--since <время>]` | журнал Xray и `xm` | нет |
-| `xm backup [--list]` | создать снимок или показать список | да |
-| `xm restore <id>` | восстановить из снимка | да |
+| `xm backup [--list]` | создать ручной снимок (хранятся 20 последних, автоснимки их не вытесняют) или показать снимки с видом, версиями и пометкой повреждённых; нужна установка | да |
+| `xm restore <id> [--yes]` | восстановить состояние из снимка транзакцией: конфигурация перерисовывается, служба проверяется, текущее состояние — в автоснимке `restore`; версия Xray не меняется. Подтверждение — ввод слова `restore`; повреждённый снимок, снимок без состояния или с другим портом — код 1, ничего не изменено; работает и при повреждённом текущем состоянии | да |
 | `xm ui [--port <порт>]` | локальный Web UI для SSH-туннеля | нет |
 | `xm version` · `xm help` | версия `xm`; справка (версия Xray в `version` — отдельной правкой, сейчас её показывает `status`) | нет |
 
@@ -31,7 +31,7 @@
 
 `add` и `show`: ссылка на каждый заданный адрес сервера (порядок: домен, IPv4, IPv6) и QR одного — первого или названного `--address`. Флаги можно ставить до, между и после имени. Без `--client` ссылка выдаётся всегда, а клиенты, которым она не подойдёт (Hiddify 4.x, sing-box), названы в stderr с причиной из таблицы совместимости. С `--client <id>` (`v2rayn`, `v2rayng`, `hiddify-5`, `hiddify-4`, `sing-box`) несовместимый клиент — отказ с кодом 1, `profile.incompatible` и причиной; `add` при отказе профиль не создаёт; неизвестный клиент — код 2. QR несёт ANSI-цвета и предназначен терминалу: в файл и журнал его не пишут.
 
-Команды `install`, `start`, `stop`, `restart`, `status` и `update` требуют root (код 3 `preflight.not_root`).
+Команды `install`, `start`, `stop`, `restart`, `status`, `update`, `backup` и `restore` требуют root (код 3 `preflight.not_root`).
 `start`, `stop`, `restart` — не транзакции: служба, остановленная `xm stop`, остаётся остановленной после
 любого изменения ([ADR-0025](../adr/0025-stopped-service-and-install-scenario.md)).
 
@@ -88,7 +88,7 @@
   «обновите `xm`». Форма конверта совпадает с принятой в `xray_client` (`schema: {name, major, minor}`).
 
 Схемы первой версии: `status`, `profiles`, `profile`, `update`, `diag-report`, `backups`,
-`version`, `error`. Реализованы `version` (`data: {xm}`), `status`, `update` и
+`version`, `error`. Реализованы `version` (`data: {xm}`), `status`, `update`, `backups` и
 `error`; эталоны — `internal/contract/testdata/`. `status`: `installed`, `service`
 (`loaded`, `active`, `sub`, `enabled`, `restarts`), `versions` (`xm`, `xray`), `addresses`
 (`ipv4`, `ipv6`, `domain`), `port`, `drift`; не установлено — `installed: false`. Добавлены (`minor 1`): `profiles` —
@@ -96,7 +96,7 @@
 `works`, `condition`, `reason`; пусто — `[]`). Добавлено (`minor 2`): `health` — вердикт набора `control`
 (`verdict`: `ok`, `degraded`, `down`, `unknown`; `cause`, `action`; `unchecked` — при `ok`, что не проверено;
 не установлено — `verdict` пуст). `xm install` и `xm status` заканчиваются строкой вердикта.
-Добавлено (`minor 3`): `update` — доступное обновление по итогу последней проверки (`version` — новее активной, пусто — нет; `checked` — RFC 3339, пусто — проверки не было). Схема `update` — `current`, `target`, `latest` (пусто при `--to`), `range` (`min`, `max`), `in_range`, `held`, `updated`, `checked`, `unchecked` — чего контроль не доказывает. Схема `profiles` — `profiles[]` из `name`, `created`
+Добавлено (`minor 3`): `update` — доступное обновление по итогу последней проверки (`version` — новее активной, пусто — нет; `checked` — RFC 3339, пусто — проверки не было). Схема `update` — `current`, `target`, `latest` (пусто при `--to`), `range` (`min`, `max`), `in_range`, `held`, `updated`, `checked`, `unchecked` — чего контроль не доказывает. Схема `backups` — `backups[]` от старого к новому из `id`, `created` (секунды Unix), `kind` (`auto`, `manual`), `xm`, `xray` (из манифеста; пусты у повреждённого), `valid`; `xm backup --json` — тот же документ с одним созданным снимком. Схема `profiles` — `profiles[]` из `name`, `created`
 (секунды Unix), `enabled`, без секретов. Схема `profile` — те же поля и `links[]` (`address`, `uri` —
 секрет), `qr_address`, `unfit[]` (`client`, `reason`); QR в документ не входит.
 

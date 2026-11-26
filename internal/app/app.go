@@ -87,6 +87,11 @@ type Change struct {
 	// не разделены, параллельная команда не потеряет чужое изменение. Задан Edit — State не
 	// используется, а установка должна быть (иначе ErrNotInstalled).
 	Edit func(store.State) (store.State, error)
+	// Restore — восстановление из снимка: новое состояние целиком, вычисляется под блокировкой.
+	// Текущее состояние может быть повреждено — ради этого и восстанавливают: ошибка его чтения
+	// не отказ (prev — nil), снимок транзакции снимает его как есть. Состояния нет совсем —
+	// ErrNotInstalled. Задан Restore — State, Edit и Create не задаются.
+	Restore func(prev *store.State) (store.State, error)
 	// Create — установка: состояния быть не должно, иначе ErrInstalled. Проверка идёт под
 	// блокировкой: две одновременные установки не перезапишут друг друга.
 	Create bool
@@ -123,8 +128,28 @@ func (a *App) apply(ctx context.Context, ch Change) (err error) {
 
 	// До первого изменения: всё, что можно проверить без записи.
 	prev, hadState, err := a.loadPrev()
-	if err != nil {
+	if err != nil && ch.Restore == nil {
 		return err
+	}
+	if ch.Restore != nil {
+		if ch.Edit != nil || ch.Create || ch.State.SchemaVersion != 0 {
+			return errors.New("восстановление задаёт ещё State, Edit или Create")
+		}
+		var p *store.State
+		switch {
+		case err == nil && !hadState:
+			return ErrNotInstalled
+		case err == nil:
+			p = &prev
+		default:
+			// Порт прежнего состояния неизвестен: откат вернёт файлы, а службу оставит
+			// остановленной (PortBefore 0, ADR-0023).
+			a.s.Logging.Logger().Warn("текущее состояние не читается, восстановление поверх него", "причина", err.Error())
+		}
+		hadState = p != nil
+		if ch.State, err = ch.Restore(p); err != nil {
+			return err
+		}
 	}
 	if ch.Create && hadState {
 		return ErrInstalled
@@ -197,7 +222,7 @@ func (a *App) apply(ctx context.Context, ch Change) (err error) {
 		return fmt.Errorf("фиксация: %w", err)
 	}
 	// Изменение уже зафиксировано: сбой хранения его не отменяет, а повторится при следующем.
-	if err := a.s.Backup.Prune(ctx, backup.AutoKeep); err != nil {
+	if err := a.s.Backup.Prune(ctx, backup.Auto, backup.AutoKeep); err != nil {
 		a.s.Logging.Logger().Warn("старые снимки не удалены", "причина", err.Error())
 	}
 	return nil
