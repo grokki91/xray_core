@@ -21,6 +21,7 @@ import (
 	"github.com/grokki91/xray_core/internal/security"
 	"github.com/grokki91/xray_core/internal/server"
 	"github.com/grokki91/xray_core/internal/store"
+	"github.com/grokki91/xray_core/internal/update"
 )
 
 var (
@@ -52,6 +53,8 @@ type Services struct {
 	Security *security.Manager
 	// Releases — источник релизов Xray для установки.
 	Releases Releases
+	// Checks — итог последней проверки обновления: пишет Update, читает Status.
+	Checks *update.Checks
 	// Redactor — реестр редактора: значения состояния регистрируются сразу, как app их узнал.
 	Redactor Redactor
 	XM       string           // версия xm — в манифест снимка
@@ -103,6 +106,12 @@ func (a *App) Apply(ctx context.Context, ch Change) error {
 		return fmt.Errorf("блокировка: %w", err)
 	}
 	defer unlock()
+	return a.apply(ctx, ch)
+}
+
+// apply — Apply под блокировкой, которую уже взял вызывающий (сценарий, которому решение до
+// транзакции нужно под той же блокировкой, — update).
+func (a *App) apply(ctx context.Context, ch Change) (err error) {
 	// Каталоги и права по манифесту нужны снимку и журналу; чужие права не исправляются молча,
 	// поэтому сбой здесь — отказ до всякого изменения (docs/security/policy.md §2).
 	if err := a.s.Security.EnsureBaseline(ctx); err != nil {

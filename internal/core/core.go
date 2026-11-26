@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"slices"
 	"strings"
 
 	"github.com/grokki91/xray_core/internal/platform"
@@ -278,6 +279,24 @@ func checkELF(bin []byte) error {
 	defer f.Close()
 	if f.Class != elf.ELFCLASS64 || f.Machine != elf.EM_X86_64 || (f.Type != elf.ET_EXEC && f.Type != elf.ET_DYN) {
 		return fmt.Errorf("%w: ELF %v %v %v, нужен исполняемый ELF64 x86-64", ErrBinary, f.Class, f.Machine, f.Type)
+	}
+	return nil
+}
+
+// Prune удаляет каталоги версий, кроме keep: после успешного обновления остаются активная и
+// предыдущая (docs/operations/updates.md §4). Ссылка current и чужие имена не трогаются.
+func (m *Manager) Prune(keep ...Version) error {
+	names, err := m.p.FS().ReadDir(platform.CoreDir)
+	if err != nil {
+		return fmt.Errorf("версии: %w", err)
+	}
+	for _, n := range names {
+		if !platform.ValidVersion(n) || slices.Contains(keep, Version(n)) {
+			continue
+		}
+		if err := m.p.FS().RemoveTree(platform.CoreDir + "/" + n); err != nil {
+			return fmt.Errorf("версия %s: %w", n, err)
+		}
 	}
 	return nil
 }

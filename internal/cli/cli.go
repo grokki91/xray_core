@@ -37,6 +37,7 @@ type App interface {
 	Uninstall(ctx context.Context, purge bool) error
 	Service(ctx context.Context, a app.Action) error
 	Status(ctx context.Context) (contract.Status, error)
+	Update(ctx context.Context, o app.UpdateOptions) (contract.Update, error)
 	ProfileAdd(ctx context.Context, name string, o app.ShareOptions) (app.ProfileView, error)
 	ProfileList(ctx context.Context) (contract.Profiles, error)
 	ProfileShow(ctx context.Context, name string, o app.ShareOptions) (app.ProfileView, error)
@@ -81,6 +82,8 @@ func commands() []command {
 		{name: "restart", usage: "xm restart", summary: "перезапустить службу Xray", run: service(app.Restart)},
 		{name: "status", usage: "xm status [--json]", summary: "состояние службы, версии, адреса, порт",
 			json: true, run: runStatus},
+		{name: "update", usage: "xm update [--check] [--to <версия>] [--json]",
+			summary: "обновить Xray до последней проверенной версии с контролем и откатом", json: true, flags: updateFlags, run: runUpdate},
 		{name: "add", usage: "xm add [имя] [--client <id>] [--address <адрес>] [--json]",
 			summary: "создать профиль, показать ссылки и QR", json: true, flags: shareFlags, maxArgs: 1, run: runAdd},
 		{name: "list", usage: "xm list [--json]", summary: "профили: имя, дата, состояние", json: true, run: runList},

@@ -197,8 +197,7 @@ type Manager interface {
     Activate(ctx context.Context, v Version) error               // проверить версию, атомарно переключить current
     Validate(ctx context.Context, v Version, configPath string) error // xray run -test бинарником версии v
     ValidateCurrent(ctx context.Context, configPath string) error     // то же действующей версией (контроль)
-    Previous() (Version, bool)                                   // фаза 5
-    Prune(keep int) error                                        // фаза 5
+    Prune(keep ...Version) error                                 // удалить каталоги версий N.N.N, кроме keep (активной и предыдущей)
     Tool(ctx context.Context, v Version, sub Subcommand, args ...string) ([]byte, error) // сигнатура — с первым потребителем (api statsquery)
 }
 ```
@@ -566,15 +565,18 @@ type Manager interface {
 ```go
 type Source interface {  // единственная реализация GitHub: релизы XTLS/Xray-core
     Latest(ctx context.Context) (Release, error)                   // канал один — стабильные
+    Tag(ctx context.Context, version string) (Release, error)      // стабильный релиз v<version>
     Fetch(ctx context.Context, r Release, a Arch) (Archive, error) // Archive{Data, Digests}, сверенный
 }
 
-type Manager interface {
-    Check(ctx context.Context) (Available, error)       // есть ли новее, входит ли в проверенный диапазон
-    Plan(ctx context.Context, target Version) (Plan, error)
-}
+Verified() Range                                              // проверенный диапазон: Min, Max включительно
+Choose(ctx, src, rg) (target, latest Release, err error)      // последняя стабильная в диапазоне
+NewChecks(p).Save(Check) / Load() (Check, bool, error)        // итог последней проверки для status
 ```
 
+- Выбор версии и итог проверки — [ADR-0043](../adr/0043-verified-range-and-update-check.md);
+  сценарий `xm update` (выбор → загрузка → `core.Stage` → `xray run -test` новой версией на
+  действующей конфигурации → транзакция `Change{Core}` → `core.Prune(новая, прежняя)`) — `app.Update`.
 - Проверка целостности, диапазон проверенных версий, откат — [updates.md](../operations/updates.md).
 - `NewGitHub(p, token)`: `token` — значение `XM_GITHUB_TOKEN`, его читает `cmd/xm` и
   регистрирует в редакторе (вид `token`), если `ValidToken`; `Latest` проверяет формат до сети и шлёт токен только в

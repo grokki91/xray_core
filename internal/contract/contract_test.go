@@ -27,6 +27,12 @@ func TestGolden(t *testing.T) {
 				{Name: "v2rayN", Works: true, Condition: "ядро Xray клиента не старше v25.7.26"},
 				{Name: "Hiddify 4.x", Reason: "вырезает X25519MLKEM768"},
 			},
+			Update: Available{Version: "26.11.9", Checked: "2026-01-01T00:00:00Z"},
+		}),
+		"update": New("0.1.0", at, Update{
+			Current: "26.10.21", Target: "26.11.9", Latest: "26.12.1",
+			Range: Range{Min: "26.10.21", Max: "26.11.9"}, InRange: true, Updated: true,
+			Checked: "2026-01-01T00:00:00Z", Unchecked: "сторонние клиентские ядра не проверялись",
 		}),
 		"profiles": New("0.1.0", at, Profiles{Profiles: []ProfileItem{
 			{Name: "phone", Created: 1767225600, Enabled: true},

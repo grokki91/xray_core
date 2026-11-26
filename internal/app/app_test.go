@@ -24,6 +24,7 @@ import (
 	"github.com/grokki91/xray_core/internal/security"
 	"github.com/grokki91/xray_core/internal/server"
 	"github.com/grokki91/xray_core/internal/store"
+	"github.com/grokki91/xray_core/internal/update"
 )
 
 const (
@@ -233,7 +234,7 @@ func build(t *testing.T, installed bool) *sys {
 		Store: store.New(p.FS()), Backup: backup.New(p), Config: config.New(p), Core: core.New(p),
 		Server: server.New(p, cfgPath), Logging: logging.New(p, reg, slog.LevelInfo), Profile: profile.New(),
 		Network:  network.New(p),
-		Security: security.New(p), Releases: s.rel, Redactor: regAdapter{reg},
+		Security: security.New(p), Releases: s.rel, Checks: update.NewChecks(p), Redactor: regAdapter{reg},
 		XM: "0.1.0", Now: f.Clock().Now, ControlTimeout: 150 * time.Millisecond, Host: p,
 	})
 	return s

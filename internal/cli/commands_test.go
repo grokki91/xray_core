@@ -29,6 +29,14 @@ type fakeApp struct {
 	view     app.ProfileView
 	profiles contract.Profiles
 	removed  string
+	// обновление
+	upd     contract.Update
+	updOpts app.UpdateOptions
+}
+
+func (f *fakeApp) Update(_ context.Context, o app.UpdateOptions) (contract.Update, error) {
+	f.updOpts = o
+	return f.upd, f.err
 }
 
 func (f *fakeApp) Install(_ context.Context, o app.InstallOptions) (app.InstallResult, error) {
@@ -144,6 +152,7 @@ var installed = contract.Status{
 		{Name: "v2rayN", Works: true, Condition: "ядро Xray клиента не старше v25.7.26"},
 		{Name: "Hiddify 4.x", Reason: "вырезает X25519MLKEM768"},
 	},
+	Update: contract.Available{Version: "26.11.9", Checked: "2026-01-01T00:00:00Z"},
 }
 
 // Вывод xm status --json побайтно совпадает с эталоном схемы status.
@@ -161,7 +170,8 @@ func TestStatusJSONMatchesGolden(t *testing.T) {
 func TestStatusHuman(t *testing.T) {
 	code, stdout, _ := runWith(&fakeApp{status: installed}, "status")
 	for _, want := range []string{"active (running)", "Xray 26.11.9", "IPv4: 203.0.113.10", "Порт: 443", "совпадает с состоянием",
-		"Профилей: 2", "Клиент v2rayN: подключится, если ядро Xray клиента", "Клиент Hiddify 4.x: не подключится (вырезает X25519MLKEM768)"} {
+		"Профилей: 2", "Клиент v2rayN: подключится, если ядро Xray клиента", "Клиент Hiddify 4.x: не подключится (вырезает X25519MLKEM768)",
+		"Доступен Xray 26.11.9 (проверено 2026-01-01T00:00:00Z): xm update"} {
 		if code != exitOK || !strings.Contains(stdout, want) {
 			t.Errorf("нет %q: код %d, stdout:\n%s", want, code, stdout)
 		}
@@ -387,5 +397,47 @@ func TestVerdictLineEndsStatusAndInstall(t *testing.T) {
 	_, stdout, _ = runWith(&fakeApp{view: phone, health: down}, "install", "--sni", "example.com", "--address", "203.0.113.10")
 	if !strings.HasSuffix(strings.TrimSpace(stdout), "Что делать: xm start.") {
 		t.Fatalf("install заканчивается не вердиктом:\n%s", stdout)
+	}
+}
+
+var updated = contract.Update{
+	Current: "26.10.21", Target: "26.11.9", Latest: "26.12.1",
+	Range: contract.Range{Min: "26.10.21", Max: "26.11.9"}, InRange: true, Updated: true,
+	Checked: "2026-01-01T00:00:00Z", Unchecked: "сторонние клиентские ядра не проверялись",
+}
+
+// Вывод xm update --json побайтно совпадает с эталоном схемы update; флаги доходят до app.
+func TestUpdateJSONMatchesGolden(t *testing.T) {
+	want, err := os.ReadFile("../contract/testdata/update.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := &fakeApp{upd: updated}
+	code, stdout, stderr := runWith(f, "update", "--to", "v26.11.9", "--check", "--json")
+	if code != exitOK || stderr != "" || stdout != string(want) || f.updOpts != (app.UpdateOptions{Check: true, To: "v26.11.9"}) {
+		t.Fatalf("код %d, stderr %q, опции %+v, stdout:\n%s", code, stderr, f.updOpts, stdout)
+	}
+}
+
+func TestUpdateHuman(t *testing.T) {
+	cases := []struct {
+		args []string
+		res  func(contract.Update) contract.Update
+		want []string
+	}{
+		{nil, func(u contract.Update) contract.Update { return u },
+			[]string{"новее проверенного диапазона 26.10.21–26.11.9", "Xray обновлён: 26.10.21 → 26.11.9", "Не проверено: сторонние"}},
+		{[]string{"--check"}, func(u contract.Update) contract.Update { u.Updated = false; return u }, []string{"Доступен Xray 26.11.9 (сейчас 26.10.21): xm update"}},
+		{nil, func(u contract.Update) contract.Update { u.Updated, u.Held = false, true; return u }, []string{"удержано"}},
+		{nil, func(u contract.Update) contract.Update { u.Updated, u.Current = false, u.Target; return u }, []string{"уже эта версия"}},
+		{nil, func(u contract.Update) contract.Update { u.InRange, u.Latest, u.Target = false, "", "27.0.0"; return u }, []string{"вне проверенного диапазона"}},
+	}
+	for _, c := range cases {
+		_, stdout, _ := runWith(&fakeApp{upd: c.res(updated)}, append([]string{"update"}, c.args...)...)
+		for _, w := range c.want {
+			if !strings.Contains(stdout, w) {
+				t.Errorf("%v: нет %q:\n%s", c.args, w, stdout)
+			}
+		}
 	}
 }

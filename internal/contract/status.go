@@ -1,7 +1,7 @@
 package contract
 
 // Status — данные схемы status: состояние установки. Не установлено — Installed=false, прочие
-// поля пусты. Доступное обновление добавится полем (minor+1) в своей фазе.
+// поля пусты.
 type Status struct {
 	Installed bool          `json:"installed"`
 	Service   ServiceState  `json:"service"`
@@ -17,6 +17,8 @@ type Status struct {
 	Clients []ClientSupport `json:"clients"`
 	// Health — вердикт здоровья по набору control (minor 2, ADR-0024).
 	Health Health `json:"health"`
+	// Update — доступное обновление Xray по итогу последней проверки (minor 3).
+	Update Available `json:"update"`
 }
 
 // Health — вердикт: ok, degraded, down или unknown. Cause и Action — первопричина и действие
@@ -60,4 +62,4 @@ type ServerAddress struct {
 }
 
 // Schema возвращает схему status.
-func (Status) Schema() Schema { return Schema{Name: "status", Major: 1, Minor: 2} }
+func (Status) Schema() Schema { return Schema{Name: "status", Major: 1, Minor: 3} }
