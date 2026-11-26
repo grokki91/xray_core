@@ -31,9 +31,11 @@ func TestBackupListAndCreate(t *testing.T) {
 	f := &fakeApp{backups: contract.Backups{Backups: []contract.BackupItem{
 		{ID: "20260101T000000Z-manual", Created: 1767225600, Kind: "manual", XM: "0.1.0", Xray: "26.11.9", Valid: true},
 		{ID: "20260101T010000Z-install", Created: 1767229200, Kind: "auto"},
+		{ID: "20260101T020000Z-install", Created: 1767232800, Kind: "auto", XM: "0.1.0", Valid: true},
 	}}}
 	code, stdout, _ := runWith(f, "backup", "--list")
-	if code != exitOK || !strings.Contains(stdout, "ручной  xm 0.1.0, Xray 26.11.9") || !strings.Contains(stdout, "повреждён") {
+	if code != exitOK || !strings.Contains(stdout, "ручной  xm 0.1.0, Xray 26.11.9") || !strings.Contains(stdout, "повреждён") ||
+		!strings.Contains(stdout, "Xray не установлен") {
 		t.Fatalf("код %d, stdout %q", code, stdout)
 	}
 	if code, stdout, _ := runWith(&fakeApp{}, "backup", "--list"); code != exitOK || !strings.Contains(stdout, "Снимков нет") {

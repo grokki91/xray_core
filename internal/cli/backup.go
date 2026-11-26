@@ -49,7 +49,11 @@ func printBackups(e Env, list contract.Backups) {
 	}
 	kinds := map[string]string{"auto": "авто", "manual": "ручной"}
 	for _, b := range list.Backups {
-		note := "xm " + quote(b.XM) + ", Xray " + quote(b.Xray)
+		xray := quote(b.Xray)
+		if xray == "" {
+			xray = "не установлен" // снимок снят до установки ядра
+		}
+		note := "xm " + quote(b.XM) + ", Xray " + xray
 		if !b.Valid {
 			note = "повреждён — восстановить нельзя"
 		}
