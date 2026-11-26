@@ -32,6 +32,7 @@
 type Platform interface {
     Exec(ctx context.Context, c Command) (Result, error) // Command{Program, Args, Stdin}; без оболочки
     Start(ctx context.Context, c Command) (Process, error) // процесс в фоне ([ADR-0032](../adr/0032-selftest-client-and-l3-target.md)); Process{Done, Stop}
+    Stream(ctx context.Context, c Command) (io.ReadCloser, error) // stdout потоком (ADR-0044)
     FS() FS            // ReadFile, WriteFile (temp + fchown + fchmod + fsync + rename), Mkdir, ReadDir, Remove, Symlink, Readlink, Lock (flock)
     Systemd() Systemd  // только xray.service: Running, Reload, Enable/Disable, Start/Stop/Restart, Status
     Net() Net          // Get по HTTPS, Listening — порт слушается (фаза 2); Addrs — адреса интерфейсов, TLSProbe — проверка TLS узла (фаза 4)
@@ -77,6 +78,10 @@ type Platform interface {
   `Proxy` — путь сокета Unix с HTTP-прокси (CONNECT; окружение тогда не действует; не абсолютный
   или не очищенный путь — `ErrPath`; подделка записывает его в `Call.Proxy`); `Status` — ожидаемый
   код ответа, по умолчанию 200, иной — ошибка.
+- `Stream(ctx, Command)` — правила `Exec`, stdout потоком без предела, stderr отбрасывается;
+  ненулевой код — `ErrExit` в конце чтения; `Close` убивает группу и ждёт. Подделка —
+  `HandleStream(программа, обработчик)`; читатель с `Close` закрывается вместе с потоком. Программа `journalctl` — в закрытом списке (`logging`:
+  только чтение, [ADR-0044](../adr/0044-journal-read-via-journalctl-stream.md)).
 - `Start(ctx, Command)` — фоновый процесс по правилам `Exec` (закрытый список, без оболочки,
   окружение, своя группа, срок обязателен); `Stdin` подаётся целиком и закрывается, вывод
   отбрасывается. `Process.Done()` закрывается при завершении (сам, по сроку, по `Stop`);
@@ -555,8 +560,12 @@ type Manager interface {
   идентификатором `xm` ([ADR-0022](../adr/0022-journald-from-platform.md)); ошибка записи не
   заменяется выводом в stderr. Каждая запись целиком проходит `redact.Text` до `Journal`.
 - Раздел `log` Xray — `{"access":"none","loglevel":"warning"}`: журнал доступа выключен, в нём
-  адреса клиентов; ошибки идут в стандартный вывод юнита, то есть в journald. Фаза 2;
-  `XrayLog` — фаза 5.
+  адреса клиентов; ошибки идут в стандартный вывод юнита, то есть в journald. Фаза 2.
+- `XrayLog(ctx, Query{Since, Follow})` — `journalctl` через `platform.Stream`: юнит Xray и
+  идентификатор `xm`, строки «время UTC источник: сообщение», управляющие символы заменены,
+  каждая строка — через `redact.Text`; неверный `Since` — `ErrSince` до запуска
+  ([ADR-0044](../adr/0044-journal-read-via-journalctl-stream.md)). Данные установки регистрирует
+  `app.Logs` чтением состояния до вызова.
 
 ### update
 

@@ -28,7 +28,8 @@ const (
 // потребителем.
 func programs() map[string]string {
 	return map[string]string{useradd: "/usr/sbin/useradd", userdel: "/usr/sbin/userdel", systemctl: "/usr/bin/systemctl",
-		SS: "/usr/bin/ss", UFW: "/usr/sbin/ufw", IPTables: "/usr/sbin/iptables", IP6Tables: "/usr/sbin/ip6tables"}
+		SS: "/usr/bin/ss", UFW: "/usr/sbin/ufw", IPTables: "/usr/sbin/iptables", IP6Tables: "/usr/sbin/ip6tables",
+		Journalctl: "/usr/bin/journalctl"}
 }
 
 // childEnv — окружение процесса: ничего от родителя, секретов через окружение не передаём.

@@ -6,6 +6,7 @@ package platform
 import (
 	"context"
 	"errors"
+	"io"
 	"io/fs"
 	"net/netip"
 	"time"
@@ -20,6 +21,9 @@ type Platform interface {
 	// группа процессов и окружение, срок в контексте обязателен; вывод отбрасывается, Stdin
 	// подаётся целиком и закрывается. Процесс завершается по сроку контекста или Process.Stop.
 	Start(ctx context.Context, c Command) (Process, error)
+	// Stream запускает программу из закрытого списка по правилам Exec и отдаёт stdout потоком:
+	// для вывода без предела и без конца (journalctl -f). Срок в контексте обязателен.
+	Stream(ctx context.Context, c Command) (io.ReadCloser, error)
 	FS() FS
 	Net() Net
 	Users() Users

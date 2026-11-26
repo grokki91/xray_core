@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -35,6 +36,14 @@ type fakeApp struct {
 	// снимки
 	backups  contract.Backups
 	restored string
+	// журнал
+	logs app.LogsOptions
+}
+
+func (f *fakeApp) Logs(_ context.Context, o app.LogsOptions, w io.Writer) error {
+	f.logs = o
+	io.WriteString(w, "line\n")
+	return f.err
 }
 
 func (f *fakeApp) Backup(context.Context) (contract.BackupItem, error) {

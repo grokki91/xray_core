@@ -330,7 +330,7 @@
    наблюдения `local`; категория `host`; проверки с пометкой MVP из [diagnostics.md](operations/diagnostics.md) §4;
    история отчётов; `xm diag [--only] [--export]`, код 4, схема `diag-report`. Отчёт
    редактируется до сохранения; контрольные узлы — в `dependencies.md` §5.
-6. **`xm logs [-f] [--since]`.** Журнал Xray и `xm` из journald; строки журнала — недоверенные.
+6. ✅ ~~**`xm logs [-f] [--since]`.**~~ Журнал Xray и `xm` из journald; строки журнала — недоверенные.
 7. **Документация.** README в один экран команд; пользовательское руководство; чек-лист
    приёмки L5 ([testing.md](testing.md) §7).
 8. **Выпуск 0.1.0.** Замер бюджетов ([overview.md](architecture/overview.md) §8); L0–L4 зелёные;
