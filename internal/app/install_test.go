@@ -378,6 +378,20 @@ func TestInstallLeavesFirewallAlone(t *testing.T) {
 	}
 }
 
+// Явный запрет порта в UFW — чужое правило: xm его не трогает, а итог называет факт и команду,
+// которая встанет перед запретом (A3, ADR-0036).
+func TestInstallNamesCommandForUFWDeny(t *testing.T) {
+	s := fresh(t)
+	s.ufwStatus = ufwDenyByDefault + "443 DENY IN Anywhere\n"
+	res, err := s.app.Install(ctx(t), okOpts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Firewall.State != "denied" || res.Firewall.Added || res.Firewall.Open != "ufw insert 1 allow 443/tcp" {
+		t.Fatalf("%+v", res.Firewall)
+	}
+}
+
 // Закрыт ли порт правилами iptables, с сервера не доказать: итог называет «не определено» и
 // команду, которую владелец выполняет сам; xm правил iptables не меняет (ADR-0036).
 func TestInstallNamesCommandForIptables(t *testing.T) {

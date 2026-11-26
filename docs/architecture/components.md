@@ -250,9 +250,10 @@ type Preset interface {  // каталог пресетов: config/preset
   - `log` — готовый раздел передаёт `app` от `logging` (менеджеры друг друга не импортируют);
   - `dns` — из `state.dns` (`servers`, `queryStrategy`); пока `doh` пуст, раздела нет;
   - `inbounds` — пресет и клиенты из `state.profiles`;
-  - `outbounds`, `routing` — `freedom` первым (получает всё, что не поймали правила); при разделе
-    `dns` — исходящий `dns` (`dns-out`) и единственное правило `routing`: порт `53`, `tcp,udp` → он;
-    без раздела `dns` нет ни исходящего `dns`, ни `routing` ([ADR-0039](../adr/0039-client-dns-via-dns-outbound.md)). Запрет частных и петлевых адресов назначения
+  - `outbounds`, `routing` — `freedom` первым (получает всё, что не поймали правила), `blackhole`
+    (`block`) и при разделе `dns` — исходящий `dns` (`dns-out`). `routing` есть всегда: при разделе
+    `dns` первое правило — порт `53`, `tcp,udp` → `dns-out` ([ADR-0039](../adr/0039-client-dns-via-dns-outbound.md)), затем
+    `protocol: bittorrent` → `block` ([ADR-0038](../adr/0038-client-egress-restrictions.md)). Запрет частных и петлевых адресов назначения
     ([policy.md](../security/policy.md) §4; способ — [ADR-0027](../adr/0027-private-destinations-via-final-rules.md)).
 - В запрет не входят `100.64.0.0/10` (CGNAT) и `::ffff:0:0/96` (IPv4 в IPv6): политика их не требует,
   обработка второго в `ip`-правиле Xray не проверена. Цель REALITY проверяется по синтаксису;
@@ -271,7 +272,9 @@ type Preset interface {  // каталог пресетов: config/preset
   параметрами клиента. Ошибки отрисовки несут
   имена полей, не значения. Адреса назначения `0.0.0.0/8`, частные, петлевые и link-local
   блокирует `settings.finalRules` исходящего `freedom` (`action: block`), в том числе для DoH самого
-  Xray (схема `https://` идёт через `freedom`); к исходящему `dns` finalRules не применяются — его правила без `direct` ([ADR-0039](../adr/0039-client-dns-via-dns-outbound.md)).
+  Xray (схема `https://` идёт через `freedom`); к исходящему `dns` finalRules не применяются — его правила без `direct` ([ADR-0039](../adr/0039-client-dns-via-dns-outbound.md)). Там же первым правилом —
+  `tcp:25` любого адреса; BitTorrent — правило маршрутизации `protocol: bittorrent` в `blackhole`,
+  для чего у входящего `sniffing` с `routeOnly` ([ADR-0038](../adr/0038-client-egress-restrictions.md)).
 - Проверка — `core.Validate` перед записью. Набор полей сверяется с upstream по скилу
   `xray-upstream`. Фаза 2.
 
