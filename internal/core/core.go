@@ -50,6 +50,8 @@ var (
 	ErrBinary = errors.New("бинарник Xray не прошёл проверку")
 	// ErrStaged — версия уже выложена: Stage её не перезаписывает.
 	ErrStaged = errors.New("версия уже выложена")
+	// ErrNotStaged — бинарника версии нет на диске.
+	ErrNotStaged = errors.New("версия не выложена")
 	// ErrConfig — `xray run -test` отверг конфигурацию (код 23).
 	ErrConfig = errors.New("xray отверг конфигурацию")
 )
@@ -199,6 +201,9 @@ func (m *Manager) run(ctx context.Context, v Version, sub string, args ...string
 		return platform.Result{}, fmt.Errorf("подкоманда xray %q не из закрытого списка", sub)
 	}
 	res, err := m.p.Exec(ctx, platform.Command{Program: binary, Version: string(v), Args: append([]string{sub}, args...)})
+	if errors.Is(err, platform.ErrNotFound) {
+		return platform.Result{}, fmt.Errorf("xray %s %s: %w: %w", v, sub, ErrNotStaged, err)
+	}
 	if err != nil {
 		return platform.Result{}, fmt.Errorf("xray %s %s: %w", v, sub, err)
 	}

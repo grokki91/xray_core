@@ -403,3 +403,13 @@ func TestStartClient(t *testing.T) {
 		t.Error("пустая конфигурация принята")
 	}
 }
+
+// Версии нет на диске — ErrNotStaged: по нему `xm update --rollback` отличает удалённую версию.
+func TestValidateNotStaged(t *testing.T) {
+	m := New(platform.NewFake(t.TempDir(), time.Time{}))
+	c, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	if err := m.Validate(c, "26.1.1", "/etc/xray/config.json"); !errors.Is(err, ErrNotStaged) {
+		t.Fatalf("%v", err)
+	}
+}

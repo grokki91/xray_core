@@ -451,6 +451,8 @@ func TestUpdateHuman(t *testing.T) {
 		{nil, func(u contract.Update) contract.Update { u.Updated, u.Held = false, true; return u }, []string{"удержано"}},
 		{nil, func(u contract.Update) contract.Update { u.Updated, u.Current = false, u.Target; return u }, []string{"уже эта версия"}},
 		{nil, func(u contract.Update) contract.Update { u.InRange, u.Latest, u.Target = false, "", "27.0.0"; return u }, []string{"вне проверенного диапазона"}},
+		{[]string{"--rollback"}, func(u contract.Update) contract.Update { u.Latest = ""; return u }, []string{"возвращён на предыдущую версию: 26.10.21 → 26.11.9"}},
+		{[]string{"--rollback"}, func(u contract.Update) contract.Update { u.Latest, u.Updated, u.Held = "", false, true; return u }, []string{"Откат на Xray 26.11.9 удержан"}},
 	}
 	for _, c := range cases {
 		_, stdout, _ := runWith(&fakeApp{upd: c.res(updated)}, append([]string{"update"}, c.args...)...)

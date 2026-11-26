@@ -204,3 +204,86 @@ func TestUpdateSameVersionChangesNothing(t *testing.T) {
 		t.Fatalf("версии: %v", dirs)
 	}
 }
+
+// --rollback возвращает предыдущую версию той же транзакцией: current, состояние и версии на
+// диске меняются местами, каталоги не удаляются, загрузки нет.
+func TestUpdateRollbackSwitchesBack(t *testing.T) {
+	s := installedOn(t)
+	if _, err := s.app.Update(ctx(t), UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	fetches := s.rel.fetches
+	res, err := s.app.Update(ctx(t), UpdateOptions{Rollback: true})
+	if err != nil || !res.Updated || res.Current != v2 || res.Target != v1 || res.Latest != "" {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if got := s.snap(t); got.current != v1 || !got.active || got.tx {
+		t.Fatalf("после отката: %+v", got)
+	}
+	st, err := s.app.s.Store.Load()
+	if err != nil || st.Core.Version != v1 || st.Core.Previous != v2 {
+		t.Fatalf("состояние: %+v %v", st.Core, err)
+	}
+	if dirs := coreDirs(t, s); !slices.Equal(dirs, []string{v1, v2, "foreign"}) || s.rel.fetches != fetches || s.rel.latestCalls+len(s.rel.tags) > 2 {
+		t.Fatalf("версии %v, загрузок %d", dirs, s.rel.fetches-fetches)
+	}
+}
+
+// Провал контроля на предыдущей версии — автоматический возврат на активную.
+func TestUpdateRollbackControlFailure(t *testing.T) {
+	s := installedOn(t)
+	if _, err := s.app.Update(ctx(t), UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	before := s.snap(t)
+	s.restartListens = append(make([]bool, s.nRestart), false)
+	for i := range s.nRestart {
+		s.restartListens[i] = true
+	}
+	if _, err := s.app.Update(ctx(t), UpdateOptions{Rollback: true}); !errors.Is(err, ErrRolledBack) {
+		t.Fatalf("нужен откат: %v", err)
+	}
+	if after := s.snap(t); after.current != v2 || string(after.state) != string(before.state) || after.tx {
+		t.Fatalf("после провала: %+v", after)
+	}
+}
+
+// Нет предыдущей версии в состоянии или на диске — отказ без изменений.
+func TestUpdateRollbackWithoutPrevious(t *testing.T) {
+	s := installedOn(t)
+	before := s.snap(t)
+	if _, err := s.app.Update(ctx(t), UpdateOptions{Rollback: true}); !errors.Is(err, ErrNoPrevious) {
+		t.Fatalf("%v", err)
+	}
+	if err := s.app.Apply(ctx(t), Change{Reason: "same", Edit: func(st store.State) (store.State, error) {
+		st.Core.Previous = st.Core.Version
+		return st, nil
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.app.Update(ctx(t), UpdateOptions{Rollback: true}); !errors.Is(err, ErrNoPrevious) {
+		t.Fatalf("предыдущая совпадает с активной: %v", err)
+	}
+	if _, err := s.app.Update(ctx(t), UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.f.FS().RemoveTree(platform.CoreDir + "/" + v1); err != nil {
+		t.Fatal(err)
+	}
+	mid := s.snap(t)
+	if _, err := s.app.Update(ctx(t), UpdateOptions{Rollback: true}); !errors.Is(err, ErrNoPrevious) {
+		t.Fatalf("каталога нет: %v", err)
+	}
+	if !s.snap(t).equal(mid) || before.current != v1 {
+		t.Fatal("отказ изменил систему")
+	}
+}
+
+func TestUpdateRollbackExclusiveFlags(t *testing.T) {
+	s := installedOn(t)
+	for _, o := range []UpdateOptions{{Rollback: true, Check: true}, {Rollback: true, To: v2}} {
+		if _, err := s.app.Update(ctx(t), o); !errors.Is(err, ErrInput) {
+			t.Errorf("%+v: %v", o, err)
+		}
+	}
+}
