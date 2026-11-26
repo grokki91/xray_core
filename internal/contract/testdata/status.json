@@ -2,7 +2,7 @@
   "schema": {
     "name": "status",
     "major": 1,
-    "minor": 2
+    "minor": 3
   },
   "xm": {
     "version": "0.1.0"
@@ -48,6 +48,10 @@
       "cause": "",
       "action": "",
       "unchecked": "доступность порта снаружи и самопроверка не проверены"
+    },
+    "update": {
+      "version": "26.11.9",
+      "checked": "2026-01-01T00:00:00Z"
     }
   }
 }

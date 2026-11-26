@@ -103,6 +103,7 @@ type InstallResult struct {
 // Releases — источник релизов Xray; настоящий — update.GitHub.
 type Releases interface {
 	Latest(ctx context.Context) (update.Release, error)
+	Tag(ctx context.Context, version string) (update.Release, error)
 	Fetch(ctx context.Context, r update.Release, a update.Arch) (update.Archive, error)
 }
 
@@ -220,7 +221,8 @@ func (a *App) Install(ctx context.Context, o InstallOptions) (InstallResult, err
 	}
 	sni := target.Host
 
-	rel, err := a.s.Releases.Latest(ctx)
+	// Та же версия, что выбрал бы `xm update`: последняя стабильная в проверенном диапазоне.
+	rel, _, err := update.Choose(ctx, a.s.Releases, update.Verified())
 	if err != nil {
 		return InstallResult{}, err
 	}
@@ -430,6 +432,10 @@ func (a *App) Status(ctx context.Context) (contract.Status, error) {
 	if err != nil {
 		return out, err
 	}
+	avail, err := a.available(xray)
+	if err != nil {
+		return out, err
+	}
 	a4 := st.Server.Addresses
 	clients := []contract.ClientSupport{}
 	for _, c := range a.s.Profile.Clients(st) {
@@ -445,6 +451,7 @@ func (a *App) Status(ctx context.Context) (contract.Status, error) {
 		Profiles:  len(st.Profiles),
 		Clients:   clients,
 		Health:    h,
+		Update:    avail,
 	}, nil
 }
 

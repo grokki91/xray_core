@@ -31,12 +31,18 @@ type fakeReleases struct {
 	archive              []byte
 	latestErr, fetchErr  error
 	latestCalls, fetches int
-	onFetch              func() // что произойдёт между проверкой «состояния нет» и транзакцией
+	tags                 []string // запрошенные по тегу версии
+	onFetch              func()   // что произойдёт между проверкой «состояния нет» и транзакцией
 }
 
 func (r *fakeReleases) Latest(context.Context) (update.Release, error) {
 	r.latestCalls++
 	return update.Release{Tag: r.tag}, r.latestErr
+}
+
+func (r *fakeReleases) Tag(_ context.Context, v string) (update.Release, error) {
+	r.tags = append(r.tags, v)
+	return update.Release{Tag: "v" + v}, nil
 }
 
 func (r *fakeReleases) Fetch(context.Context, update.Release, update.Arch) (update.Archive, error) {

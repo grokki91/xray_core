@@ -172,6 +172,12 @@ func runStatus(e Env, _ *flag.FlagSet, _ []string, asJSON bool) int {
 	} else {
 		fmt.Fprintln(e.Stdout, "Конфигурация Xray совпадает с состоянием.")
 	}
+	switch {
+	case st.Update.Version != "":
+		fmt.Fprintf(e.Stdout, "Доступен Xray %s (проверено %s): xm update\n", quote(st.Update.Version), quote(st.Update.Checked))
+	case st.Update.Checked != "":
+		fmt.Fprintf(e.Stdout, "Новее проверенной версии Xray нет (проверено %s).\n", quote(st.Update.Checked))
+	}
 	printHealth(e, st.Health)
 	return exitOK
 }

@@ -24,6 +24,7 @@ const (
 	hostAssets = "release-assets.githubusercontent.com"
 
 	latestURL   = "https://" + hostAPI + "/repos/XTLS/Xray-core/releases/latest"
+	tagURL      = "https://" + hostAPI + "/repos/XTLS/Xray-core/releases/tags/"
 	downloadURL = "https://" + hostGitHub + "/XTLS/Xray-core/releases/download/"
 )
 
@@ -115,12 +116,30 @@ func validTag(tag string) bool {
 
 // Latest возвращает последний стабильный релиз.
 func (g *GitHub) Latest(ctx context.Context) (Release, error) {
-	if g.token != "" && !ValidToken(g.token) {
-		return Release{}, fmt.Errorf("последний релиз: %s: допустимы 40–4096 символов A-Z, a-z, 0-9, «.», «-», «_»", TokenEnv)
+	return g.release(ctx, latestURL, "последний релиз")
+}
+
+// Tag возвращает стабильный релиз с тегом "v"+версия; версия не N.N.N — ошибка до сети.
+func (g *GitHub) Tag(ctx context.Context, version string) (Release, error) {
+	what := "релиз v" + version
+	if !platform.ValidVersion(version) {
+		return Release{}, fmt.Errorf("%s: версия не вида N.N.N", what)
 	}
-	body, err := g.p.Net().Get(ctx, platform.Request{URL: latestURL, Hosts: apiHosts, Max: maxRelease, Token: g.token})
+	r, err := g.release(ctx, tagURL+"v"+version, what)
+	if err == nil && r.Version() != version {
+		return Release{}, fmt.Errorf("%s: API вернул тег %q", what, r.Tag)
+	}
+	return r, err
+}
+
+// release запрашивает и разбирает один релиз; предварительный и черновик — ошибка.
+func (g *GitHub) release(ctx context.Context, url, what string) (Release, error) {
+	if g.token != "" && !ValidToken(g.token) {
+		return Release{}, fmt.Errorf("%s: %s: допустимы 40–4096 символов A-Z, a-z, 0-9, «.», «-», «_»", what, TokenEnv)
+	}
+	body, err := g.p.Net().Get(ctx, platform.Request{URL: url, Hosts: apiHosts, Max: maxRelease, Token: g.token})
 	if err != nil {
-		return Release{}, fmt.Errorf("последний релиз: %w", err)
+		return Release{}, fmt.Errorf("%s: %w", what, err)
 	}
 	var resp struct {
 		Tag        string `json:"tag_name"`
@@ -132,13 +151,13 @@ func (g *GitHub) Latest(ctx context.Context) (Release, error) {
 		} `json:"assets"`
 	}
 	if err := json.Unmarshal(body, &resp); err != nil {
-		return Release{}, fmt.Errorf("последний релиз: ответ API не разобран: %w", err)
+		return Release{}, fmt.Errorf("%s: ответ API не разобран: %w", what, err)
 	}
 	if !validTag(resp.Tag) {
-		return Release{}, fmt.Errorf("последний релиз: тег %q не вида vX.Y.Z", resp.Tag)
+		return Release{}, fmt.Errorf("%s: тег %q не вида vX.Y.Z", what, resp.Tag)
 	}
 	if resp.Prerelease || resp.Draft {
-		return Release{}, fmt.Errorf("последний релиз %s: не стабильный", resp.Tag)
+		return Release{}, fmt.Errorf("%s: %s не стабильный", what, resp.Tag)
 	}
 	r := Release{Tag: resp.Tag, sha256: map[string]string{}}
 	for _, a := range resp.Assets {

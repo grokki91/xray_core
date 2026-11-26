@@ -58,3 +58,4 @@
 | [0040](0040-reality-target-root-redirect.md) | Цель REALITY не перенаправляет корень на другое имя | Принято |
 | [0041](0041-ufw-rule-in-install-transaction.md) | Правило UFW ставит транзакция установки, метка — в состоянии | Принято |
 | [0042](0042-uninstall-ordered-idempotent.md) | `uninstall` — упорядоченные идемпотентные шаги без отката | Принято |
+| [0043](0043-verified-range-and-update-check.md) | Проверенный диапазон версий Xray и итог проверки обновления | Принято |

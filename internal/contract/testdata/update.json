@@ -1,0 +1,25 @@
+{
+  "schema": {
+    "name": "update",
+    "major": 1,
+    "minor": 0
+  },
+  "xm": {
+    "version": "0.1.0"
+  },
+  "time": 1767225600,
+  "data": {
+    "current": "26.10.21",
+    "target": "26.11.9",
+    "latest": "26.12.1",
+    "range": {
+      "min": "26.10.21",
+      "max": "26.11.9"
+    },
+    "in_range": true,
+    "held": false,
+    "updated": true,
+    "checked": "2026-01-01T00:00:00Z",
+    "unchecked": "сторонние клиентские ядра не проверялись"
+  }
+}

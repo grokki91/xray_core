@@ -23,7 +23,7 @@
 | `/var/lib/xm/tx/` | root:root | 0700 | да | журнал незавершённой транзакции `pending.json` (0600; в нём и порт правила UFW, которое транзакция добавляет) и файл-кандидат `config.candidate.json` (0600) для `xray run -test` ([ADR-0023](../adr/0023-transaction-control-and-rollback-scope.md)) |
 | `/var/lib/xm/diag/` | root:root | 0700, файлы 0600 | нет (отредактировано) | история диагностики |
 | `/var/lib/xm/monitor/` | root:root | 0700, файлы 0600 | нет | хронология замеров |
-| `/var/lib/xm/cache/` | root:root | 0700, файлы 0600 | нет | загруженные архивы релизов: `<тег>-<файл>`, например `v26.11.9-Xray-linux-64.zip`; создаёт `update` до базовой защиты |
+| `/var/lib/xm/cache/` | root:root | 0700, файлы 0600 | нет | загруженные архивы релизов: `<тег>-<файл>`, например `v26.11.9-Xray-linux-64.zip`, и итог последней проверки обновления `update-check.json` ([ADR-0043](../adr/0043-verified-range-and-update-check.md)); создаёт `update` до базовой защиты |
 | `/run/xm/` | root:root | 0700 | да | блокировка, сессия `xm ui`, сокет клиента самопроверки `selftest.sock` (0600) и его `selftest.sock.lock` на время проверки ([ADR-0032](../adr/0032-selftest-client-and-l3-target.md)) |
 
 Журналы — journald (`xray.service` и идентификатор `xm`), собственных файлов журналов нет.

@@ -13,8 +13,8 @@
 | `xm install [--sni <домен>] [--address <адрес>] [--port <порт>]` | установка на чистую машину; завершается ссылкой и QR первого профиля `profile-1`. Флаги необязательны: цель REALITY — из закрытого списка ([ADR-0035](../adr/0035-reality-target-candidates.md)), адреса — по сетевым фактам, порт — 443. Повторный запуск на своей установке — код 0, «ничего не изменено», те же ссылки; флаг, расходящийся с установленным, — код 2 | да |
 | `xm uninstall [--purge [--yes]]` | убрать службу, юнит, правило UFW `xm` и бинарники; `--purge` — ещё состояние, снимки и пользователя `xray`, после ввода слова `purge` ([ADR-0042](../adr/0042-uninstall-ordered-idempotent.md)); не подтверждено — код 2, ничего не удалено; чужой юнит — код 3 | да |
 | `xm start` · `xm stop` · `xm restart` | управление службой Xray | да |
-| `xm status` | служба, версии, адреса и порт, дрейф; число профилей — с фазы 3, доступное обновление — с фазы 5 | нет |
-| `xm update [--check] [--to <версия>] [--rollback] [--self]` | обновить Xray; `--self` — сам `xm` | да |
+| `xm status` | служба, версии, адреса и порт, дрейф, число профилей; доступное обновление — по итогу последней `xm update [--check]`, без сети ([ADR-0043](../adr/0043-verified-range-and-update-check.md)) | нет |
+| `xm update [--check] [--to <версия>] [--rollback] [--self]` | обновить Xray до последней стабильной версии внутри проверенного диапазона с контролем и автоматическим откатом (провал — код 1, служба на прежней версии); `--check` — только проверить; `--to <N.N.N>` — любую стабильную, вне диапазона — с предупреждением; удержание `core.hold` — ничего не меняет, код 0 ([ADR-0043](../adr/0043-verified-range-and-update-check.md)). `--rollback` и `--self` — шаги 2 и 3 фазы 5 | да |
 | `xm add [имя] [--client <id>] [--address <адрес>]` | создать профиль (без имени — `profile-N`), показать ссылку на каждый адрес сервера и QR одного из них | да |
 | `xm list` | профили: имя, дата, состояние (без секретов) | нет |
 | `xm show <имя> [--client <id>] [--address <адрес>]` | ссылки и QR профиля повторно | нет |
@@ -31,7 +31,7 @@
 
 `add` и `show`: ссылка на каждый заданный адрес сервера (порядок: домен, IPv4, IPv6) и QR одного — первого или названного `--address`. Флаги можно ставить до, между и после имени. Без `--client` ссылка выдаётся всегда, а клиенты, которым она не подойдёт (Hiddify 4.x, sing-box), названы в stderr с причиной из таблицы совместимости. С `--client <id>` (`v2rayn`, `v2rayng`, `hiddify-5`, `hiddify-4`, `sing-box`) несовместимый клиент — отказ с кодом 1, `profile.incompatible` и причиной; `add` при отказе профиль не создаёт; неизвестный клиент — код 2. QR несёт ANSI-цвета и предназначен терминалу: в файл и журнал его не пишут.
 
-Команды `install`, `start`, `stop`, `restart` и `status` требуют root (код 3 `preflight.not_root`).
+Команды `install`, `start`, `stop`, `restart`, `status` и `update` требуют root (код 3 `preflight.not_root`).
 `start`, `stop`, `restart` — не транзакции: служба, остановленная `xm stop`, остаётся остановленной после
 любого изменения ([ADR-0025](../adr/0025-stopped-service-and-install-scenario.md)).
 
@@ -88,7 +88,7 @@
   «обновите `xm`». Форма конверта совпадает с принятой в `xray_client` (`schema: {name, major, minor}`).
 
 Схемы первой версии: `status`, `profiles`, `profile`, `update`, `diag-report`, `backups`,
-`version`, `error`. Реализованы `version` (`data: {xm}`), `status` и
+`version`, `error`. Реализованы `version` (`data: {xm}`), `status`, `update` и
 `error`; эталоны — `internal/contract/testdata/`. `status`: `installed`, `service`
 (`loaded`, `active`, `sub`, `enabled`, `restarts`), `versions` (`xm`, `xray`), `addresses`
 (`ipv4`, `ipv6`, `domain`), `port`, `drift`; не установлено — `installed: false`. Добавлены (`minor 1`): `profiles` —
@@ -96,7 +96,7 @@
 `works`, `condition`, `reason`; пусто — `[]`). Добавлено (`minor 2`): `health` — вердикт набора `control`
 (`verdict`: `ok`, `degraded`, `down`, `unknown`; `cause`, `action`; `unchecked` — при `ok`, что не проверено;
 не установлено — `verdict` пуст). `xm install` и `xm status` заканчиваются строкой вердикта.
-Доступное обновление добавится полем (`minor + 1`). Схема `profiles` — `profiles[]` из `name`, `created`
+Добавлено (`minor 3`): `update` — доступное обновление по итогу последней проверки (`version` — новее активной, пусто — нет; `checked` — RFC 3339, пусто — проверки не было). Схема `update` — `current`, `target`, `latest` (пусто при `--to`), `range` (`min`, `max`), `in_range`, `held`, `updated`, `checked`, `unchecked` — чего контроль не доказывает. Схема `profiles` — `profiles[]` из `name`, `created`
 (секунды Unix), `enabled`, без секретов. Схема `profile` — те же поля и `links[]` (`address`, `uri` —
 секрет), `qr_address`, `unfit[]` (`client`, `reason`); QR в документ не входит.
 
