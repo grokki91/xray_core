@@ -97,8 +97,8 @@ func (m *Manager) copyLines(w io.Writer, src io.Reader) error {
 	sc.Buffer(make([]byte, 64<<10), maxLine)
 	for sc.Scan() {
 		line, err := entry(sc.Bytes())
-		if err != nil {
-			return err
+		if err != nil { // чужая запись не обрывает просмотр, в том числе -f
+			line = "[нечитаемая запись]"
 		}
 		if _, err := io.WriteString(w, m.r.Text(line)+"\n"); err != nil {
 			return err
@@ -148,13 +148,13 @@ func text(raw json.RawMessage) string {
 	return s
 }
 
-// clean заменяет управляющие символы: строка журнала не должна управлять терминалом.
+// clean заменяет управляющие символы и символы формата (bidi, невидимые): строка журнала не должна управлять терминалом.
 func clean(s string) string {
 	return strings.Map(func(r rune) rune {
 		if r == '\t' {
 			return ' '
 		}
-		if unicode.IsControl(r) || r == unicode.ReplacementChar {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
 			return '?'
 		}
 		return r

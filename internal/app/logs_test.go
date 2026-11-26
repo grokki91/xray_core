@@ -1,11 +1,13 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"io"
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/grokki91/xray_core/internal/logging"
 	"github.com/grokki91/xray_core/internal/platform"
@@ -42,5 +44,18 @@ func TestLogsBadSinceIsInput(t *testing.T) {
 		if c.Op == "stream" {
 			t.Fatalf("journalctl запущен: %+v", c)
 		}
+	}
+}
+
+// Конец слежения -f по отмене (Ctrl-C) — не ошибка.
+func TestLogsFollowCancelIsOK(t *testing.T) {
+	s := newFresh(t)
+	pr, _ := io.Pipe()
+	s.f.HandleStream(platform.Journalctl, func(platform.Command) (io.Reader, error) { return pr, nil })
+	c, cancel := context.WithCancel(ctx(t))
+	go func() { time.Sleep(50 * time.Millisecond); cancel() }()
+	go func() { <-c.Done(); pr.CloseWithError(c.Err()) }()
+	if err := s.app.Logs(c, LogsOptions{Follow: true}, io.Discard); err != nil {
+		t.Fatalf("%v", err)
 	}
 }

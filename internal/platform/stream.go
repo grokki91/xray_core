@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"syscall"
 )
 
@@ -31,7 +32,10 @@ func (r *Real) Stream(ctx context.Context, c Command) (io.ReadCloser, error) {
 	return streamProcess(ctx, path, c)
 }
 
-func streamProcess(ctx context.Context, path string, c Command) (io.ReadCloser, error) {
+func streamProcess(parent context.Context, path string, c Command) (io.ReadCloser, error) {
+	// Close отменяет свой контекст: группу убивает exec через Cancel — тот же путь, что по сроку,
+	// без чтения состояния процесса из другой горутины.
+	ctx, cancel := context.WithCancel(parent)
 	cmd := exec.CommandContext(ctx, path, c.Args...)
 	cmd.Env = childEnv
 	cmd.Dir = "/"
@@ -40,21 +44,25 @@ func streamProcess(ctx context.Context, path string, c Command) (io.ReadCloser, 
 	cmd.WaitDelay = waitDelay
 	out, err := cmd.StdoutPipe()
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("%s: %w", c.Program, err)
 	}
 	if err := cmd.Start(); err != nil {
+		cancel()
 		return nil, fmt.Errorf("%s: %w", c.Program, err)
 	}
-	return &stream{cmd: cmd, out: out, name: c.Program, ctx: ctx}, nil
+	return &stream{cmd: cmd, out: out, name: c.Program, parent: parent, cancel: cancel}, nil
 }
 
 type stream struct {
-	cmd  *exec.Cmd
-	out  io.Reader
-	name string
-	ctx  context.Context
-	once sync.Once
-	err  error
+	cmd    *exec.Cmd
+	out    io.Reader
+	name   string
+	parent context.Context
+	cancel context.CancelFunc
+	once   sync.Once
+	closed atomic.Bool
+	err    error
 }
 
 func (s *stream) Read(p []byte) (int, error) {
@@ -73,8 +81,10 @@ func (s *stream) wait() error {
 		err := s.cmd.Wait()
 		var exitErr *exec.ExitError
 		switch {
-		case s.ctx.Err() != nil:
-			s.err = fmt.Errorf("%s: %w", s.name, s.ctx.Err())
+		case s.parent.Err() != nil:
+			s.err = fmt.Errorf("%s: %w", s.name, s.parent.Err())
+		case s.closed.Load():
+			s.err = fmt.Errorf("%s: %w", s.name, io.ErrClosedPipe)
 		case errors.As(err, &exitErr):
 			s.err = fmt.Errorf("%s: %w %d", s.name, ErrExit, exitErr.ExitCode())
 		case err != nil:
@@ -85,15 +95,14 @@ func (s *stream) wait() error {
 }
 
 func (s *stream) Close() error {
-	if s.cmd.ProcessState == nil {
-		syscall.Kill(-s.cmd.Process.Pid, syscall.SIGKILL)
-	}
+	s.closed.Store(true)
+	s.cancel()
 	s.wait()
 	return nil
 }
 
 // HandleStream задаёт поток программы для Stream подделки: h возвращает stdout целиком или
-// блокирующий читатель; ошибка h — ошибка Stream.
+// блокирующий читатель; читатель с Close закрывается Close потока; ошибка h — ошибка Stream.
 func (f *Fake) HandleStream(program string, h func(Command) (io.Reader, error)) {
 	if _, ok := f.programs[program]; !ok {
 		panic(fmt.Sprintf("platform.Fake: программы %q нет в закрытом списке", program)) // ошибка теста
@@ -123,6 +132,9 @@ func (f *Fake) Stream(ctx context.Context, c Command) (io.ReadCloser, error) {
 	r, err := h(c)
 	if err != nil {
 		return nil, err
+	}
+	if rc, ok := r.(io.ReadCloser); ok { // Close останавливает и поток подделки, как у Real
+		return rc, nil
 	}
 	return io.NopCloser(r), nil
 }

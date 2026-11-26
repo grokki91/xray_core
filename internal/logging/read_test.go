@@ -41,7 +41,8 @@ func TestXrayLogRedactsAndCleans(t *testing.T) {
 	m, f, r := newManager(t, 0)
 	r.Register(redact.UUID, c.UUID)
 	in := `{"__REALTIME_TIMESTAMP":"1767225600000000","SYSLOG_IDENTIFIER":"xray","MESSAGE":"accepted ` + c.UUID + ` from ` + c.IPv4 + `"}` + "\n" +
-		`{"__REALTIME_TIMESTAMP":"1767225601000000","SYSLOG_IDENTIFIER":"xm","MESSAGE":"esc \u001b[31m red\nnext"}` + "\n" +
+		`{"__REALTIME_TIMESTAMP":"1767225601000000","SYSLOG_IDENTIFIER":"xm","MESSAGE":"esc \u001b[31m red\nnext\u202e"}` + "\n" +
+		"not json\n" +
 		`{"__REALTIME_TIMESTAMP":"1767225602000000","MESSAGE":[1,2,3]}` + "\n"
 	f.HandleStream(platform.Journalctl, func(platform.Command) (io.Reader, error) { return strings.NewReader(in), nil })
 	out := read(t, m, Query{})
@@ -51,11 +52,12 @@ func TestXrayLogRedactsAndCleans(t *testing.T) {
 		}
 	}
 	want := []string{
-		"2026-01-01T00:00:01Z xm: esc ?[31m red?next",
+		"2026-01-01T00:00:01Z xm: esc ?[31m red?next?",
+		"[нечитаемая запись]",
 		"2026-01-01T00:00:02Z xray: [двоичное сообщение]",
 	}
 	lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
-	if len(lines) != 3 || !strings.HasPrefix(lines[0], "2026-01-01T00:00:00Z xray: accepted ") || !slices.Equal(lines[1:], want) {
+	if len(lines) != 4 || !strings.HasPrefix(lines[0], "2026-01-01T00:00:00Z xray: accepted ") || !slices.Equal(lines[1:], want) {
 		t.Errorf("вывод:\n%s", out)
 	}
 }

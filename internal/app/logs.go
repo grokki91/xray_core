@@ -46,8 +46,8 @@ func (a *App) Logs(ctx context.Context, o LogsOptions, w io.Writer) error {
 	}
 	defer rc.Close()
 	_, err = io.Copy(w, rc)
-	if o.Follow && errors.Is(ctx.Err(), context.Canceled) {
-		return nil // Ctrl-C — обычный конец слежения
+	if o.Follow && ctx.Err() != nil {
+		return nil // Ctrl-C или предел 24 ч — обычный конец слежения
 	}
 	return err
 }
