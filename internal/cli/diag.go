@@ -13,7 +13,7 @@ import (
 const exitProblems = 4
 
 func diagFlags(fs *flag.FlagSet) {
-	fs.String("only", "", "одна категория каталога: xray, reach, ipv4, ipv6")
+	fs.String("only", "", "одна категория каталога: xray, reach, ipv4, ipv6, host")
 	fs.String("export", "", "новый файл в /root, /home или /tmp для отредактированного отчёта")
 }
 
