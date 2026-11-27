@@ -65,6 +65,15 @@ func (m *Manager) ufw(ctx context.Context, port int, verb ...string) error {
 	return nil
 }
 
+// Firewall — состояние порта в локальном фаерволе, то же, что в Facts, без определения внешних
+// адресов: для диагностики (каталог local). Ничего не меняет.
+func (m *Manager) Firewall(ctx context.Context, port int) (Firewall, error) {
+	if err := checkPort(port); err != nil {
+		return Firewall{}, err
+	}
+	return m.firewall(ctx, port), nil
+}
+
 // firewall: UFW активен — его вердикт по правилам и политике входящих; иначе — цепочка INPUT
 // iptables и ip6tables: политика ACCEPT и ни одного правила DROP/REJECT в обоих семействах —
 // «разрешён»; иначе запрет не доказан — «не определено». Ничего не меняет (ADR-0036).

@@ -17,6 +17,8 @@ type localCase struct {
 	fam     platform.Families
 	served  platform.Families
 	egress  *fakeEgress
+	fw      string
+	fwErr   error
 }
 
 type famNet struct{ f platform.Families }
@@ -59,6 +61,7 @@ func healthyLocal() localCase {
 		fam:         platform.Families{IPv4: true, IPv6: true},
 		served:      platform.Families{IPv4: true, IPv6: true},
 		egress:      allUp(),
+		fw:          FirewallAllowed,
 	}
 }
 
@@ -72,6 +75,9 @@ func (c localCase) run(t *testing.T) Report {
 		Families:    famNet{c.fam},
 		Served:      func(context.Context) (platform.Families, error) { return c.served, nil },
 		Egress:      c.egress,
+		Firewall: func(context.Context, int) (string, string, error) {
+			return c.fw, "ufw", c.fwErr
+		},
 	})
 	if err != nil {
 		t.Fatalf("NewLocal: %v", err)
@@ -85,7 +91,7 @@ func (c localCase) run(t *testing.T) Report {
 
 func TestLocalHealthy(t *testing.T) {
 	r := healthyLocal().run(t)
-	if r.Health != HealthOK || r.Summary.OK != 11 {
+	if r.Health != HealthOK || r.Summary.OK != 12 {
 		t.Fatalf("health %s, summary %+v", r.Health, r.Summary)
 	}
 }
@@ -117,6 +123,9 @@ func TestLocalCatalog(t *testing.T) {
 			c.egress.addrs = []platform.IfAddr{{Addr: netip.MustParseAddr("10.0.0.5")}, {Addr: netip.MustParseAddr("fe80::1")}}
 		}, CheckEgressIPv6, StatusSkip, HealthOK},
 		{"второй узел IPv4", func(c *localCase) { delete(c.egress.ok, egressNodes[false][0]) }, CheckEgressIPv4, StatusOK, HealthOK},
+		{"фаервол запрещает", func(c *localCase) { c.fw = FirewallDenied }, CheckFirewall, StatusFail, HealthDown},
+		{"фаервол не определён", func(c *localCase) { c.fw = FirewallUnknown }, CheckFirewall, StatusSkip, HealthOK},
+		{"фаервол не прочитан", func(c *localCase) { c.fwErr = errors.New("x") }, CheckFirewall, StatusError, HealthOK},
 		{"дрейф не измерен", func(c *localCase) { c.drift = func(context.Context) (bool, error) { return false, errors.New("x") } }, CheckConfigDrift, StatusError, HealthOK},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

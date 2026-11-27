@@ -179,6 +179,10 @@ func TestFirewallStates(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			only, err := New(f).Firewall(ctx(t), 443)
+			if err != nil || only.State != got.Firewall.State || only.Source != got.Firewall.Source {
+				t.Fatalf("Firewall = %+v %v, Facts = %+v", only, err, got.Firewall)
+			}
 			if got.Firewall.State != c.want || got.Firewall.Source != c.source {
 				t.Fatalf("Firewall = %+v, want %s от %s", got.Firewall, c.want, c.source)
 			}
@@ -191,6 +195,12 @@ func TestFirewallStates(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestFirewallBadPort(t *testing.T) {
+	if _, err := New(fake(t)).Firewall(ctx(t), 0); err == nil {
+		t.Fatal("порт 0 принят")
 	}
 }
 

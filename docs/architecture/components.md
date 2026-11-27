@@ -392,7 +392,7 @@ type Manager interface {
     Facts(ctx context.Context, r Request) (Facts, error) // Request{Address, Port}: адреса IPv4/IPv6, внешний адрес, фаервол для Port
     PortFree(ctx context.Context, port int) (bool, Holder, error) // Holder{Name, PID}, пустой — не определено
     ProbeTarget(ctx context.Context, host string) (TargetReport, error) // TLS 1.3, h2, X25519MLKEM768, сертификат
-    Outbound(ctx context.Context, family Family) (Reachability, error)
+    Firewall(ctx context.Context, port int) (Firewall, error) // то же, что Facts.Firewall, без внешнего адреса: для diag
 }
 ```
 
@@ -547,7 +547,7 @@ type Vantage interface { // точка наблюдения: сейчас local;
   `degraded`: зависимые не запускаются, поэтому он без проваленных зависимостей.
 - Анализ — правила «наблюдения → вывод» классов `probable | hypothesis`; факт строит проверка (ADR-0029); модель и
   каталог проверок — [diagnostics.md](../operations/diagnostics.md).
-- Отчёт всегда проходит `redact` перед сохранением и экспортом. Движок, вердикт и набор `control` есть; поле `health` схемы `status` и строка вердикта в `install` и `status` есть, поле схемы `diag-report` — с отчётом фазы 5 ([ADR-0024](../adr/0024-health-verdict-and-shared-checks.md), задача A2 в [roadmap.md](../roadmap.md) §7); каталог — фаза 5: проверки категории `xray`, `reach.listen.ipv4` и `.ipv6`, `ipv4.egress` и `ipv6.egress` (`diag.NewLocal`, набор `local`) есть, остальное — по шагу 5; полностью — после MVP.
+- Отчёт всегда проходит `redact` перед сохранением и экспортом. Движок, вердикт и набор `control` есть; поле `health` схемы `status` и строка вердикта в `install` и `status` есть, поле схемы `diag-report` — с отчётом фазы 5 ([ADR-0024](../adr/0024-health-verdict-and-shared-checks.md), задача A2 в [roadmap.md](../roadmap.md) §7); каталог — фаза 5: проверки категории `xray`, `reach.listen.ipv4` и `.ipv6`, `ipv4.egress` и `ipv6.egress`, `reach.firewall` (`diag.NewLocal`, набор `local`) есть, остальное — по шагу 5; полностью — после MVP. Исходящая связность измеряется в `diag` через `platform.Net.Connect` к контрольным узлам, без метода `network`.
 
 ### logging
 
