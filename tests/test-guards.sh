@@ -213,9 +213,18 @@ expect 0 "go.mod вместе с реестром" bash "$copy/scripts/check.sh"
 printf 'package x\nfunc  F() {}\n' >"$copy/x.go"
 expect 1 "неотформатированный Go" bash "$copy/scripts/check.sh"
 printf 'package x\n' >"$copy/x.go"
-printf 'package x\n\nimport "testing"\n\nfunc TestFail(t *testing.T) { t.Fatal("x") }\n' >"$copy/x_test.go"
+printf 'package x\n\nimport "testing"\n\nfunc TestFail(t *testing.T) { t.Fatal("причина-провала") }\n' >"$copy/x_test.go"
 expect 1 "падающий go test" bash "$copy/scripts/check.sh"
+# Строка t.Fatal не содержит FAIL: без неё причина провала в CI не видна.
+if grep -q 'x_test.go:5: причина-провала' "$work/out"; then ok "go test: причина провала в выводе"; else no "go test: причины провала нет в выводе — $(tr '\n' ' ' <"$work/out" | head -c 300)"; fi
 expect 1 "падающий go test при GOFLAGS=-run" env GOFLAGS='-run=^$' bash "$copy/scripts/check.sh"
+printf 'package x\n\nimport "testing"\n\nfunc TestFail(t *testing.T) { panic("паника-теста") }\n' >"$copy/x_test.go"
+expect 1 "go test с panic" bash "$copy/scripts/check.sh"
+if grep -q 'panic: паника-теста' "$work/out"; then ok "go test: panic в выводе"; else no "go test: panic нет в выводе"; fi
+printf 'package x\n\nfunc F() { neOpredeleno() }\n' >"$copy/x.go"
+expect 1 "go test с ошибкой сборки" bash "$copy/scripts/check.sh"
+if grep -q 'x.go:3:.*undefined: neOpredeleno' "$work/out"; then ok "go test: ошибка сборки в выводе"; else no "go test: ошибки сборки нет в выводе"; fi
+printf 'package x\n' >"$copy/x.go"
 rm "$copy/x_test.go"
 
 if ((fails)); then
