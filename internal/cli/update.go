@@ -11,22 +11,24 @@ import (
 func updateFlags(fs *flag.FlagSet) {
 	fs.Bool("check", false, "только проверить, есть ли новая версия")
 	fs.String("to", "", "поставить версию N.N.N, в том числе вне проверенного диапазона")
+	fs.Bool("rollback", false, "вернуть предыдущую версию Xray")
 }
 
 func runUpdate(e Env, fs *flag.FlagSet, _ []string, asJSON bool) int {
 	check, _ := fs.Lookup("check").Value.(flag.Getter).Get().(bool)
-	res, err := e.App.Update(e.Ctx, app.UpdateOptions{Check: check, To: fs.Lookup("to").Value.String()})
+	rollback, _ := fs.Lookup("rollback").Value.(flag.Getter).Get().(bool)
+	res, err := e.App.Update(e.Ctx, app.UpdateOptions{Check: check, To: fs.Lookup("to").Value.String(), Rollback: rollback})
 	if err != nil {
 		return fail(e, asJSON, err)
 	}
 	if asJSON {
 		return writeJSON(e, contract.New(e.Version, e.Clock.Now(), res))
 	}
-	printUpdate(e, res, check)
+	printUpdate(e, res, check, rollback)
 	return exitOK
 }
 
-func printUpdate(e Env, r contract.Update, check bool) {
+func printUpdate(e Env, r contract.Update, check, rollback bool) {
 	if r.Latest != "" && r.Latest != r.Target {
 		fmt.Fprintf(e.Stdout, "Последний стабильный релиз Xray %s новее проверенного диапазона %s–%s.\n", quote(r.Latest), r.Range.Min, r.Range.Max)
 	}
@@ -35,6 +37,10 @@ func printUpdate(e Env, r contract.Update, check bool) {
 			quote(r.Target), r.Range.Min, r.Range.Max)
 	}
 	switch {
+	case rollback && r.Held:
+		fmt.Fprintf(e.Stdout, "Откат на Xray %s удержан (core.hold): ничего не изменено.\n", quote(r.Target))
+	case rollback && r.Updated:
+		fmt.Fprintf(e.Stdout, "Xray возвращён на предыдущую версию: %s → %s, служба работает, контроль пройден.\nНе проверено: %s.\n", quote(r.Current), quote(r.Target), quote(r.Unchecked))
 	case r.Target == r.Current:
 		fmt.Fprintf(e.Stdout, "Xray %s — уже эта версия, ничего не изменено.\n", quote(r.Current))
 	case r.Held:

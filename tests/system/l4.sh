@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Системный тест L4 (docs/testing.md §2): настоящие install.sh и xm на чистой машине с systemd —
-# установка, повторная установка, профили, служба, права, удаление.
+# установка, повторная установка, профили, служба, права, обновление и откат Xray, снимки, удаление.
 # Запуск: sudo bash tests/system/l4.sh /путь/к/xm — только на одноразовой машине (исполнитель CI,
 # виртуальная машина): скрипт ставит службу xray и не убирает её. Печатает «ok <шаг>» и в конце
 # «l4: PASS|FAIL»; вывод xm и значения из состояния на экран не попадают (docs/security/secrets.md).
@@ -243,7 +243,53 @@ else
 	echo "env  XM_GITHUB_TOKEN не задан: проверка токена не выполнялась"
 fi
 
-# 11. Удаление (data-model.md §6, ADR-0042) — последним: дальше службы нет. Посторонние файлы
+# 11. Обновление и откат между двумя версиями Xray (updates.md §4–§6): установка стоит на
+# верхней границе проверенного диапазона, update --to ставит нижнюю (настоящая загрузка с
+# github.com и проверки xm), update --rollback возвращает верхнюю; оба раза служба проходит контроль.
+# Состояние сравнивается без applied.at: время применения пишет каждая транзакция, restore тоже.
+state_core() { jq -S 'del(.applied.at)' /etc/xm/state.json 2>/dev/null; }
+sums_core() { { state_core | sha256sum; sha256sum </usr/local/etc/xray/config.json; } | cut -d' ' -f1 | tr '\n' ' '; }
+"$xm" update --check --json >"$out/update-check" 2>&1
+hi=$(jq -r '.data.current' "$out/update-check" 2>/dev/null)
+lo=$(jq -r '.data.range.min' "$out/update-check" 2>/dev/null)
+if [[ $hi =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && $lo =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && $hi != "$lo" ]]; then
+	ok "update --check: активная $hi, нижняя граница $lo"
+else
+	bad "update --check: активная «$hi», нижняя граница «$lo»"
+fi
+"$xm" update --to "$lo" --json >"$out/update-to" 2>&1
+eq "update --to: код" "$?" 0
+eq "update --to: current" "$(readlink /usr/local/lib/xm/core/current)" "$lo"
+check "update --to: служба активна, порт слушается" bash -c "systemctl is-active --quiet xray.service && ss -ltnH 'sport = :$port' | grep -q ."
+eq "update --to: в состоянии версия и предыдущая" "$(jq -r '.core.version + " " + .core.previous' /etc/xm/state.json)" "$lo $hi"
+"$xm" update --rollback --json >"$out/update-rollback" 2>&1
+eq "update --rollback: код" "$?" 0
+check "update --rollback: итог updated" jq -e '.data.updated' "$out/update-rollback"
+eq "update --rollback: current" "$(readlink /usr/local/lib/xm/core/current)" "$hi"
+check "update --rollback: служба активна, порт слушается" bash -c "systemctl is-active --quiet xray.service && ss -ltnH 'sport = :$port' | grep -q ."
+eq "update --rollback: в состоянии версия и предыдущая" "$(jq -r '.core.version + " " + .core.previous' /etc/xm/state.json)" "$hi $lo"
+check "update --rollback: обе версии на диске" test -x "/usr/local/lib/xm/core/$lo/xray" -a -x "/usr/local/lib/xm/core/$hi/xray"
+
+# 12. Снимки (data-model.md §4): xm backup → порча состояния → xm restore возвращает его,
+# служба проходит контроль.
+before=$(sums_core)
+(umask 077 && state_core >"$out/.state-before")
+"$xm" backup --json >"$out/backup" 2>&1
+eq "backup: код" "$?" 0
+id=$(jq -r '.data.backups[0].id' "$out/backup" 2>/dev/null)
+if [[ $id =~ ^[0-9A-Za-z._-]+$ ]]; then ok "backup: id снимка"; else bad "backup: id «$id»"; fi
+printf '{испорчено' >/etc/xm/state.json
+echo restore | "$xm" restore "$id" >"$out/restore" 2>&1
+eq "restore: код" "$?" 0
+eq "restore: состояние (кроме applied.at) и конфигурация вернулись" "$(sums_core)" "$before"
+if [[ $(sums_core) != "$before" ]]; then # только имена расходящихся ключей: значения — секреты
+	echo "env  restore: расходятся ключи $(state_core | jq -r --slurpfile b "$out/.state-before" '[paths(scalars) as $p | select(getpath($p) != ($b[0] | getpath($p))) | $p | map(tostring) | join(".")] | join(", ")' 2>&1)"
+fi
+check "restore: служба активна, порт слушается" bash -c "systemctl is-active --quiet xray.service && ss -ltnH 'sport = :$port' | grep -q ."
+"$xm" status --json >"$out/status-restored" 2>&1
+check "restore: status — вердикт ok" jq -e '.data.health.verdict == "ok"' "$out/status-restored"
+
+# 13. Удаление (data-model.md §6, ADR-0042) — последним: дальше службы нет. Посторонние файлы
 # рядом с путями манифеста должны остаться.
 foreign=(/usr/local/lib/l4-foreign /usr/local/etc/l4-foreign /var/lib/l4-foreign /etc/l4-foreign)
 for f in "${foreign[@]}"; do echo l4 >"$f"; done
@@ -270,13 +316,13 @@ for f in "${foreign[@]}"; do check "посторонний файл цел: $f" 
 rm -f "${foreign[@]}"
 "$src" uninstall >"$out/uninstall-again" 2>&1
 eq "uninstall после --purge: не установлено, код" "$?" 3
-# Вывод удаления — тоже канарейка: секретов состояния и токена API в нём нет (значения сняты до удаления).
+# Вывод обновления, снимков и удаления — тоже канарейка: секретов состояния и токена API в нём нет (значения сняты до удаления).
 (umask 077 && cat "$out/.secrets" >"$out/.canary")
 [[ -s $out/.token ]] && cat "$out/.token" >>"$out/.canary"
-grep -qF -f "$out/.canary" "$out/uninstall" "$out/purge-no" "$out/purge" "$out/uninstall-again"
+grep -qF -f "$out/.canary" "$out/update-check" "$out/update-to" "$out/update-rollback" "$out/backup" "$out/restore" "$out/status-restored" "$out/uninstall" "$out/purge-no" "$out/purge" "$out/uninstall-again"
 case $? in
-0) bad "секрет состояния в выводе uninstall" ;;
-1) ok "вывод uninstall без секретов состояния" ;;
+0) bad "секрет состояния в выводе update, backup, restore или uninstall" ;;
+1) ok "вывод update, backup, restore и uninstall без секретов состояния" ;;
 *) bad "канарейка uninstall: grep не прочитал вывод" ;;
 esac
 

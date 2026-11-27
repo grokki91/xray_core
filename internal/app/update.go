@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -18,11 +19,16 @@ const updateTimeout = 15 * time.Minute
 // updateUnchecked — чего контроль после обновления не доказывает (docs/operations/updates.md §5).
 const updateUnchecked = "подключение сторонних клиентских ядер (sing-box и его форки) не проверялось: его закрывают проверенный диапазон и таблица совместимости клиентов"
 
+// ErrNoPrevious — `xm update --rollback`: предыдущей версии нет в состоянии или на диске.
+var ErrNoPrevious = errors.New("предыдущей версии Xray нет: откатывать не на что")
+
 // UpdateOptions — параметры `xm update`. To — версия N.N.N (допустима ведущая «v»); пусто —
-// последняя стабильная внутри проверенного диапазона.
+// последняя стабильная внутри проверенного диапазона. Rollback — вернуть предыдущую версию
+// (updates.md §6); с Check и To не сочетается.
 type UpdateOptions struct {
-	Check bool
-	To    string
+	Check    bool
+	To       string
+	Rollback bool
 }
 
 // Update выбирает версию Xray и, кроме --check и удержания, переключает на неё транзакцией с
@@ -34,6 +40,9 @@ func (a *App) Update(ctx context.Context, o UpdateOptions) (contract.Update, err
 		if _, err := core.ParseVersion(to); err != nil {
 			return contract.Update{}, fmt.Errorf("%w: --to: %w", ErrInput, err)
 		}
+	}
+	if o.Rollback && (o.Check || o.To != "") {
+		return contract.Update{}, fmt.Errorf("%w: --rollback не сочетается с --check и --to", ErrInput)
 	}
 	ctx, cancel := context.WithTimeout(ctx, updateTimeout)
 	defer cancel()
@@ -64,6 +73,10 @@ func (a *App) Update(ctx context.Context, o UpdateOptions) (contract.Update, err
 	rg := update.Verified()
 	res := contract.Update{Current: string(cur), Range: contract.Range{Min: rg.Min, Max: rg.Max},
 		Held: st.Core.Hold, Unchecked: updateUnchecked}
+
+	if o.Rollback {
+		return a.rollbackCore(ctx, st, cur, res)
+	}
 
 	var target update.Release
 	if to != "" {
@@ -113,6 +126,36 @@ func (a *App) Update(ctx context.Context, o UpdateOptions) (contract.Update, err
 	if err := a.s.Core.Prune(v, cur); err != nil {
 		a.s.Logging.Logger().Warn("старые версии Xray не удалены", "причина", err.Error())
 	}
+	return res, nil
+}
+
+// rollbackCore — `xm update --rollback`: та же транзакция в обратную сторону, без сети
+// (updates.md §6). Удержание соблюдается; каталоги версий не удаляются: обе остаются для
+// повторного переключения. Провал контроля — автоматический возврат на активную версию.
+func (a *App) rollbackCore(ctx context.Context, st store.State, cur core.Version, res contract.Update) (contract.Update, error) {
+	if st.Core.Previous == "" || st.Core.Previous == string(cur) {
+		return contract.Update{}, ErrNoPrevious
+	}
+	prev := core.Version(st.Core.Previous)
+	rg := update.Verified()
+	res.Target, res.InRange, res.Checked = string(prev), rg.Contains(string(prev)), a.s.Now().UTC().Format(time.RFC3339)
+	if res.Held {
+		return res, nil
+	}
+	if err := a.s.Core.Validate(ctx, prev, config.Path); err != nil {
+		if errors.Is(err, core.ErrNotStaged) {
+			return contract.Update{}, fmt.Errorf("%w: каталог версии %s удалён", ErrNoPrevious, prev)
+		}
+		return contract.Update{}, err
+	}
+	err := a.apply(ctx, Change{Reason: "rollback", Core: prev, Edit: func(st store.State) (store.State, error) {
+		st.Core.Previous, st.Core.Version = string(cur), string(prev)
+		return st, nil
+	}})
+	if err != nil {
+		return contract.Update{}, err
+	}
+	res.Updated = true
 	return res, nil
 }
 
