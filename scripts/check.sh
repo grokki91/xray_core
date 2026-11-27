@@ -137,7 +137,13 @@ if [[ -f go.mod ]]; then
     unformatted=$( ((${#gofiles[@]})) && gofmt -l "${gofiles[@]}" 2>&1)
     [[ -z $unformatted ]] || bad "gofmt: $(tr '\n' ' ' <<<"$unformatted")"
     out=$(go vet ./... 2>&1) || bad "go vet: $(head -n 5 <<<"$out")"
-    out=$(go test ./... 2>&1) || bad "go test: $(grep -m 5 -E 'FAIL|panic|error' <<<"$out" || tail -n 5 <<<"$out")"
+    # Причина провала — в строках с отступом под «--- FAIL» (t.Fatal, t.Error), в первой строке
+    # panic и в ошибках сборки «файл.go:строка:»; одних строк FAIL для разбора провала в CI мало.
+    # Вывод идёт в журнал CI без редактора: тесты не печатают значения ключей (testing.md §5).
+    out=$(go test ./... 2>&1) || bad "go test: $(awk '
+      /^(--- FAIL|panic:|FAIL\t|[^ \t]+\.go:[0-9]+:)/ { p = 1; print; next }
+      p && /^[ \t]/ { print; next }
+      { p = 0 }' <<<"$out" | head -n 30 | grep . || tail -n 5 <<<"$out")"
   else
     bad "нет утилиты go"
   fi
