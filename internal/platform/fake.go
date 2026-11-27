@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net/netip"
 	"os"
 	"slices"
 	"strings"
@@ -33,6 +34,8 @@ type Fake struct {
 	effective Owner
 	journal   *fakeJournal
 	listening map[int]bool
+	families  map[int]Families
+	connect   map[netip.AddrPort]error
 	addrs     []IfAddr
 	tls       map[string]fakeTLS
 }
@@ -51,7 +54,7 @@ type Call struct {
 func NewFake(root string, now time.Time) *Fake { return newFake(root, now, programs()) }
 
 func newFake(root string, now time.Time, progs map[string]string) *Fake {
-	f := &Fake{programs: progs, now: now, owners: map[string]Owner{}, handlers: map[string]func(Command) (Result, error){}, underRoot: map[string]bool{}, routes: map[string]fakeRoute{}, starters: map[string]func(Command) error{}, streams: map[string]func(Command) (io.Reader, error){}, users: map[string]Owner{}, listening: map[int]bool{}, tls: map[string]fakeTLS{}}
+	f := &Fake{programs: progs, now: now, owners: map[string]Owner{}, handlers: map[string]func(Command) (Result, error){}, underRoot: map[string]bool{}, routes: map[string]fakeRoute{}, starters: map[string]func(Command) error{}, streams: map[string]func(Command) (io.Reader, error){}, users: map[string]Owner{}, listening: map[int]bool{}, families: map[int]Families{}, connect: map[netip.AddrPort]error{}, tls: map[string]fakeTLS{}}
 	f.journal = &fakeJournal{f: f}
 	f.files = files{root: root, chown: f.recordOwner, ownerOf: f.ownerOf, trace: f.trace}
 	return f
@@ -122,6 +125,20 @@ func (f *Fake) SetListening(port int, on bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.listening[port] = on
+}
+
+// SetFamilies задаёт семейства, на которых «хост» слушает порт.
+func (f *Fake) SetFamilies(port int, fam Families) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.families[port] = fam
+}
+
+// SetConnect задаёт исход соединения с addr: nil — установлено. Не заданный узел — ошибка.
+func (f *Fake) SetConnect(addr netip.AddrPort, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.connect[addr] = err
 }
 
 func (f *Fake) Users() Users { return fakeUsers{f} }

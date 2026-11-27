@@ -124,6 +124,14 @@ type Net interface {
 	// Listening сообщает, слушает ли хост TCP-порт на любом адресе (IPv4 или IPv6): по таблицам
 	// сокетов ядра, без соединения. Новых портов не открывает.
 	Listening(ctx context.Context, port int) (bool, error)
+	// ListeningFamilies — на каких семействах хост слушает TCP-порт: запись /proc/net/tcp —
+	// IPv4; запись tcp6 на адресе вида ::ffff:a.b.c.d — IPv4; на `::` — оба семейства (сокет
+	// Go на любом адресе двойной: IPV6_V6ONLY=0; флаг сокета таблицы не показывают); иная — IPv6.
+	ListeningFamilies(ctx context.Context, port int) (Families, error)
+	// Connect — одно TCP-соединение к addr, закрываемое сразу после установления: данных не
+	// шлёт, прокси окружения не действует. Адрес — закрытый список потребителя; недопустимые
+	// адрес или порт — ErrURL; контекст обязан нести срок.
+	Connect(ctx context.Context, addr netip.AddrPort) error
 	// Addrs — адреса интерфейсов хоста (IPv4 и IPv6) без отбора: что из них публичное, решает
 	// потребитель. Соединений не открывает.
 	Addrs(ctx context.Context) ([]IfAddr, error)
@@ -134,6 +142,9 @@ type Net interface {
 	// рукопожатия — ошибка. Недопустимые узел или порт — ErrURL; контекст обязан нести срок.
 	TLSProbe(ctx context.Context, r TLSRequest) (TLSInfo, error)
 }
+
+// Families — семейства адресов, на которых слушается порт.
+type Families struct{ IPv4, IPv6 bool }
 
 // IfAddr — адрес интерфейса.
 type IfAddr struct {

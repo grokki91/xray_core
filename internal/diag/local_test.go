@@ -3,6 +3,7 @@ package diag
 import (
 	"context"
 	"errors"
+	"net/netip"
 	"testing"
 
 	"github.com/grokki91/xray_core/internal/platform"
@@ -13,6 +14,38 @@ type localCase struct {
 	version func(context.Context) (string, error)
 	inRange bool
 	drift   func(context.Context) (bool, error)
+	fam     platform.Families
+	served  platform.Families
+	egress  *fakeEgress
+}
+
+type famNet struct{ f platform.Families }
+
+func (n famNet) ListeningFamilies(context.Context, int) (platform.Families, error) { return n.f, nil }
+
+type fakeEgress struct {
+	addrs []platform.IfAddr
+	ok    map[netip.AddrPort]bool
+	tried []netip.AddrPort
+}
+
+func (e *fakeEgress) Addrs(context.Context) ([]platform.IfAddr, error) { return e.addrs, nil }
+func (e *fakeEgress) Connect(_ context.Context, a netip.AddrPort) error {
+	e.tried = append(e.tried, a)
+	if e.ok[a] {
+		return nil
+	}
+	return errors.New("timeout")
+}
+
+func allUp() *fakeEgress {
+	ok := map[netip.AddrPort]bool{}
+	for _, n := range append(egressNodes[false], egressNodes[true]...) {
+		ok[n] = true
+	}
+	return &fakeEgress{ok: ok, addrs: []platform.IfAddr{
+		{Addr: netip.MustParseAddr("10.0.0.5")}, {Addr: netip.MustParseAddr("2001:db8::5")},
+	}}
 }
 
 func healthyLocal() localCase {
@@ -23,6 +56,9 @@ func healthyLocal() localCase {
 		version:     func(context.Context) (string, error) { return "26.11.9", nil },
 		inRange:     true,
 		drift:       func(context.Context) (bool, error) { return false, nil },
+		fam:         platform.Families{IPv4: true, IPv6: true},
+		served:      platform.Families{IPv4: true, IPv6: true},
+		egress:      allUp(),
 	}
 }
 
@@ -33,6 +69,9 @@ func (c localCase) run(t *testing.T) Report {
 		Version:     c.version,
 		InRange:     func(string) bool { return c.inRange },
 		Drift:       c.drift,
+		Families:    famNet{c.fam},
+		Served:      func(context.Context) (platform.Families, error) { return c.served, nil },
+		Egress:      c.egress,
 	})
 	if err != nil {
 		t.Fatalf("NewLocal: %v", err)
@@ -46,7 +85,7 @@ func (c localCase) run(t *testing.T) Report {
 
 func TestLocalHealthy(t *testing.T) {
 	r := healthyLocal().run(t)
-	if r.Health != HealthOK || r.Summary.OK != 7 {
+	if r.Health != HealthOK || r.Summary.OK != 11 {
 		t.Fatalf("health %s, summary %+v", r.Health, r.Summary)
 	}
 }
@@ -65,6 +104,19 @@ func TestLocalCatalog(t *testing.T) {
 		{"перезапуски", func(c *localCase) { c.svc.st.Restarts = 3 }, CheckRestarts, StatusFail, HealthDegraded},
 		{"служба стоит", func(c *localCase) { c.svc.st.Active = "inactive" }, CheckRestarts, StatusSkip, HealthDown},
 		{"дрейф", func(c *localCase) { c.drift = func(context.Context) (bool, error) { return true, nil } }, CheckConfigDrift, StatusFail, HealthDegraded},
+		{"порт не на IPv6", func(c *localCase) { c.fam.IPv6 = false }, CheckListenIPv6, StatusFail, HealthDegraded},
+		{"порт не на IPv4", func(c *localCase) { c.fam.IPv4 = false }, CheckListenIPv4, StatusFail, HealthDegraded},
+		{"у сервера нет IPv6", func(c *localCase) { c.served.IPv6, c.fam.IPv6 = false, false }, CheckListenIPv6, StatusSkip, HealthOK},
+		{"порт закрыт", func(c *localCase) { c.net.on = false }, CheckListenIPv4, StatusSkip, HealthDown},
+		{"нет IPv4 наружу", func(c *localCase) { c.egress.ok = map[netip.AddrPort]bool{} }, CheckEgressIPv4, StatusFail, HealthDown},
+		{"нет IPv6 наружу", func(c *localCase) {
+			delete(c.egress.ok, egressNodes[true][0])
+			delete(c.egress.ok, egressNodes[true][1])
+		}, CheckEgressIPv6, StatusFail, HealthDegraded},
+		{"нет адреса IPv6", func(c *localCase) {
+			c.egress.addrs = []platform.IfAddr{{Addr: netip.MustParseAddr("10.0.0.5")}, {Addr: netip.MustParseAddr("fe80::1")}}
+		}, CheckEgressIPv6, StatusSkip, HealthOK},
+		{"второй узел IPv4", func(c *localCase) { delete(c.egress.ok, egressNodes[false][0]) }, CheckEgressIPv4, StatusOK, HealthOK},
 		{"дрейф не измерен", func(c *localCase) { c.drift = func(context.Context) (bool, error) { return false, errors.New("x") } }, CheckConfigDrift, StatusError, HealthOK},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -92,5 +144,20 @@ func TestLocalRejectsSelftest(t *testing.T) {
 	})
 	if !errors.Is(err, ErrRegistry) {
 		t.Fatalf("err %v", err)
+	}
+}
+
+// Второй узел — только при неудаче первого: к узлам без серий соединений (§5).
+func TestEgressSecondNodeOnlyOnFailure(t *testing.T) {
+	c := healthyLocal()
+	c.run(t)
+	if len(c.egress.tried) != 2 || c.egress.tried[0] != egressNodes[false][0] || c.egress.tried[1] != egressNodes[true][0] {
+		t.Fatalf("узлы при успехе: %v", c.egress.tried)
+	}
+	c = healthyLocal()
+	delete(c.egress.ok, egressNodes[false][0])
+	c.run(t)
+	if len(c.egress.tried) != 3 || c.egress.tried[1] != egressNodes[false][1] {
+		t.Fatalf("узлы при неудаче первого: %v", c.egress.tried)
 	}
 }

@@ -93,6 +93,12 @@ type Platform interface {
   (нет `tcp6` на хосте без IPv6 — не ошибка); соединений не открывает. `Clock.Sleep(ctx, d)` — ожидание
   до конца `ctx`; у подделки сдвигает часы ([ADR-0023](../adr/0023-transaction-control-and-rollback-scope.md)).
 - `Net.Addrs(ctx)` — адреса интерфейсов (`IfAddr{Iface, Addr}`) без отбора; подделка — `SetAddrs`.
+- `Net.ListeningFamilies(ctx, port)` — `Families{IPv4, IPv6}` по тем же таблицам: запись `tcp` и `tcp6` на
+  `::ffff:a.b.c.d` — IPv4, `tcp6` на `::` — оба семейства (двойной сокет; `IPV6_V6ONLY` таблицы не показывают),
+  иная `tcp6` — IPv6; подделка — `SetFamilies`.
+- `Net.Connect(ctx, addr)` — одно TCP-соединение к `netip.AddrPort`, закрывается сразу, без данных и без прокси
+  окружения; адрес не задан, не указан, вида `::ffff:` или с зоной, порт вне 1–65535 — `ErrURL`; нужен срок
+  контекста; подделка — `SetConnect`, не заданный узел — ошибка.
 - `Net.TLSProbe(ctx, TLSRequest{Host, Port, Allow})` — одно TLS-соединение на первый адрес имени,
   допустимый по `Allow` (нет такого — `ErrNotAllowed` без соединения; время — TCP и TLS без DNS): TLS 1.3,
   ALPN h2, только группа X25519MLKEM768; `TLSInfo{Version, ALPN, Curve, Addr,
@@ -118,7 +124,7 @@ type Platform interface {
 - `Users.Effective()` — эффективные uid и gid процесса `xm`; у подделки root, пока тест не назначил
   другого (`SetEffective`).
 - Фаза 1 — `Exec`, `FS`, `Clock`; фаза 2 — `Net.Get`, `xray` по версии, `Remove`, `Symlink`, `Readlink`, `Users`, `Systemd`; A4 — `ReadDir`;
-  фаза 4 — `Net.Addrs`, `Net.TLSProbe`, `ss`, `ufw`, `iptables`, `ip6tables`.
+  фаза 4 — `Net.Addrs`, `Net.TLSProbe`, `ss`, `ufw`, `iptables`, `ip6tables`; фаза 5 — `Net.ListeningFamilies`, `Net.Connect`.
 
 ### store
 
@@ -541,7 +547,7 @@ type Vantage interface { // точка наблюдения: сейчас local;
   `degraded`: зависимые не запускаются, поэтому он без проваленных зависимостей.
 - Анализ — правила «наблюдения → вывод» классов `probable | hypothesis`; факт строит проверка (ADR-0029); модель и
   каталог проверок — [diagnostics.md](../operations/diagnostics.md).
-- Отчёт всегда проходит `redact` перед сохранением и экспортом. Движок, вердикт и набор `control` есть; поле `health` схемы `status` и строка вердикта в `install` и `status` есть, поле схемы `diag-report` — с отчётом фазы 5 ([ADR-0024](../adr/0024-health-verdict-and-shared-checks.md), задача A2 в [roadmap.md](../roadmap.md) §7); каталог — фаза 5: проверки категории `xray` (`diag.NewLocal`, набор `local`) есть, остальное — по шагу 5; полностью — после MVP.
+- Отчёт всегда проходит `redact` перед сохранением и экспортом. Движок, вердикт и набор `control` есть; поле `health` схемы `status` и строка вердикта в `install` и `status` есть, поле схемы `diag-report` — с отчётом фазы 5 ([ADR-0024](../adr/0024-health-verdict-and-shared-checks.md), задача A2 в [roadmap.md](../roadmap.md) §7); каталог — фаза 5: проверки категории `xray`, `reach.listen.ipv4` и `.ipv6`, `ipv4.egress` и `ipv6.egress` (`diag.NewLocal`, набор `local`) есть, остальное — по шагу 5; полностью — после MVP.
 
 ### logging
 
