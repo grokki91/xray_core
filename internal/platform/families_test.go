@@ -80,7 +80,7 @@ func TestConnect(t *testing.T) {
 	if err := n.Connect(context.Background(), addr); err == nil {
 		t.Fatal("соединение без срока принято")
 	}
-	for _, bad := range []netip.AddrPort{{}, netip.MustParseAddrPort("0.0.0.0:443"), netip.MustParseAddrPort("[::ffff:1.1.1.1]:443"), netip.MustParseAddrPort("1.1.1.1:0")} {
+	for _, bad := range []netip.AddrPort{{}, netip.MustParseAddrPort("0.0.0.0:443"), netip.MustParseAddrPort("[::ffff:1.1.1.1]:443"), netip.MustParseAddrPort("1.1.1.1:0"), netip.MustParseAddrPort("[fe80::1%eth0]:443")} {
 		if err := n.Connect(c, bad); !errors.Is(err, ErrURL) {
 			t.Fatalf("%s: %v", bad, err)
 		}
