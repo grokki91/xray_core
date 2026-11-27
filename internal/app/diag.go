@@ -140,6 +140,15 @@ func (a *App) localEngine(port int, v4, v6 bool, drift func() (bool, error)) (*d
 				return err == nil, err
 			},
 		},
+		HostDeps: diag.HostDeps{
+			Disk: a.s.Server.Disk,
+			Memory: func(ctx context.Context) (int64, int64, error) {
+				m, err := a.s.Server.Memory(ctx)
+				return m.AvailKiB, m.TotalKiB, err
+			},
+			OOMKills:    a.s.Server.OOMKills,
+			ClockSynced: a.s.Server.ClockSynced,
+		},
 		Version: func(ctx context.Context) (string, error) {
 			v, err := a.s.Core.Current(ctx)
 			return string(v), err

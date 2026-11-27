@@ -55,6 +55,11 @@ type Process interface {
 // (docs/architecture/data-model.md §1).
 const CoreDir = "/usr/local/lib/xm/core"
 
+// DiskUsage — место файловой системы в байтах: Avail — доступно без резерва root.
+type DiskUsage struct {
+	Avail, Total uint64
+}
+
 // Result — итог завершившегося процесса.
 type Result struct {
 	ExitCode       int
@@ -78,6 +83,9 @@ type FS interface {
 	RemoveTree(path string) error
 	// ReadDir возвращает имена записей каталога по возрастанию; нет каталога — ErrNotFound.
 	ReadDir(path string) ([]string, error)
+	// Usage — место файловой системы, на которой лежит path (statfs): доступно
+	// непривилегированному процессу и всего, в байтах. Правила путей — как у ReadFile.
+	Usage(path string) (DiskUsage, error)
 	// Symlink атомарно ставит на path ссылку на target: временная ссылка в том же каталоге и
 	// rename. target — одно имя в том же каталоге (без «/», не «.» и «..»), иначе ErrPath;
 	// каталог на месте path не заменяется.

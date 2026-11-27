@@ -29,7 +29,7 @@ const (
 func programs() map[string]string {
 	return map[string]string{useradd: "/usr/sbin/useradd", userdel: "/usr/sbin/userdel", systemctl: "/usr/bin/systemctl",
 		SS: "/usr/bin/ss", UFW: "/usr/sbin/ufw", IPTables: "/usr/sbin/iptables", IP6Tables: "/usr/sbin/ip6tables",
-		Journalctl: "/usr/bin/journalctl"}
+		Journalctl: "/usr/bin/journalctl", Timedatectl: "/usr/bin/timedatectl"}
 }
 
 // childEnv — окружение процесса: ничего от родителя, секретов через окружение не передаём.
@@ -58,7 +58,8 @@ func newReal(progs map[string]string, transport http.RoundTripper) *Real {
 			}
 			return Owner{UID: -1, GID: -1}
 		},
-		trace: func(string, string) {},
+		trace:  func(string, string) {},
+		statfs: realStatfs,
 	}}
 }
 

@@ -185,6 +185,9 @@ func TestImplementationsAgree(t *testing.T) {
 			if _, err := fsys.ReadDir(dir + "/linkdir"); !errors.Is(err, ErrSymlink) {
 				t.Errorf("ReadDir через ссылку: %v, нужен ErrSymlink", err)
 			}
+			if _, err := fsys.Usage(dir + "/linkdir"); !errors.Is(err, ErrSymlink) {
+				t.Errorf("Usage через ссылку: %v, нужен ErrSymlink", err)
+			}
 			if _, err := fsys.ReadDir(dir + "/missing"); !errors.Is(err, ErrNotFound) {
 				t.Errorf("ReadDir отсутствующего: %v, нужен ErrNotFound", err)
 			}
@@ -390,5 +393,22 @@ func TestRemoveTree(t *testing.T) {
 				t.Errorf("повтор: %v", err)
 			}
 		})
+	}
+}
+
+// Usage: настоящая реализация отдаёт statfs каталога, подделка — заданное SetUsage.
+func TestUsage(t *testing.T) {
+	dir := t.TempDir()
+	u, err := newReal(programs(), nil).FS().Usage(dir)
+	if err != nil || u.Total == 0 || u.Avail > u.Total {
+		t.Errorf("Real.Usage(%s) = %+v, %v; нужно Total > 0 и Avail <= Total", dir, u, err)
+	}
+	f := NewFake(t.TempDir(), time.Unix(0, 0))
+	if _, err := f.FS().Usage("/var/lib/xm"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("Fake.Usage без SetUsage: %v, нужен ErrNotFound", err)
+	}
+	f.SetUsage("/var/lib/xm", DiskUsage{Avail: 1, Total: 2})
+	if got, err := f.FS().Usage("/var/lib/xm"); err != nil || got != (DiskUsage{Avail: 1, Total: 2}) {
+		t.Errorf("Fake.Usage = %+v, %v", got, err)
 	}
 }

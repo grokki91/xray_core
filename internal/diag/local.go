@@ -16,6 +16,7 @@ type Families = platform.Families
 // категории xray, которых контролю транзакции не нужно.
 type LocalDeps struct {
 	ControlDeps
+	HostDeps
 	// Version — версия установленного Xray; "" без ошибки — Xray не установлен.
 	Version func(ctx context.Context) (string, error)
 	// InRange — входит ли версия в проверенный диапазон этой версии xm (update.Verified).
@@ -79,12 +80,14 @@ func NewLocal(d LocalDeps) (*Engine, error) {
 	}
 	if d.Service == nil || d.Net == nil || d.Port == nil || d.Validate == nil ||
 		d.Version == nil || d.InRange == nil || d.Drift == nil ||
-		d.Families == nil || d.Served == nil || d.Egress == nil || d.Firewall == nil {
+		d.Families == nil || d.Served == nil || d.Egress == nil || d.Firewall == nil ||
+		d.Disk == nil || d.Memory == nil || d.OOMKills == nil || d.ClockSynced == nil {
 		return nil, fmt.Errorf("%w: не все измерения каталога local заданы", ErrRegistry)
 	}
 	c := d.ControlDeps
 	checks := []Check{installed{d}, versionRange{d}, serviceActive{c}, restarts{c}, listen{c}, listenFamily{d, false}, listenFamily{d, true}, firewall{d},
-		configValid{c}, configDrift{d}, egress{d, false}, egress{d, true}}
+		configValid{c}, configDrift{d}, egress{d, false}, egress{d, true},
+		disk{d.HostDeps}, memory{d.HostDeps}, oom{d.HostDeps}, clock{d.HostDeps}}
 	ids := make([]string, len(checks))
 	for i, ch := range checks {
 		ids[i] = ch.ID()

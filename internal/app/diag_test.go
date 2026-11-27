@@ -9,6 +9,7 @@ import (
 
 	"github.com/grokki91/xray_core/internal/contract"
 	"github.com/grokki91/xray_core/internal/diag"
+	"github.com/grokki91/xray_core/internal/platform"
 )
 
 // Отчёт сохраняется в историю и экспортируется одним и тем же отредактированным документом.
@@ -81,5 +82,46 @@ func TestDiagnoseInput(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(s.f.Path("/root/old.json")); string(b) != "keep" {
 		t.Fatalf("существующий файл заменён: %q", b)
+	}
+}
+
+// Категория host связана с измерениями узла: место, память, OOM службы, часы.
+func TestDiagnoseHost(t *testing.T) {
+	s := installed(t)
+	for _, p := range []string{"/var/lib/xm", "/usr/local/lib/xm"} {
+		s.f.SetUsage(p, platform.DiskUsage{Avail: 8 << 30, Total: 20 << 30})
+	}
+	if err := s.f.FS().WriteFile("/proc/meminfo", []byte("MemTotal: 2000000 kB\nMemAvailable: 1000000 kB\n"), 0o644, platform.Root()); err != nil {
+		t.Fatal(err)
+	}
+	s.f.Handle(platform.Journalctl, func(platform.Command) (platform.Result, error) {
+		return platform.Result{Stdout: []byte("xray.service: Failed with result 'oom-kill'.\n")}, nil
+	})
+	s.f.Handle(platform.Timedatectl, func(platform.Command) (platform.Result, error) {
+		return platform.Result{Stdout: []byte("yes\n")}, nil
+	})
+	env, err := s.app.Diagnose(ctx(t), DiagOptions{Only: "host"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := env.Data.(contract.DiagReport)
+	got := map[string]string{}
+	for _, o := range r.Observations {
+		got[o.Check+" "+o.Target] = o.Status
+	}
+	want := map[string]string{
+		"host.disk disk:/var/lib/xm": "ok", "host.disk disk:/usr/local/lib/xm": "ok",
+		"host.memory memory": "ok", "host.memory.oom xray.service": "fail", "host.clock clock": "ok",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("наблюдения: %v", got)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("%s: %q, нужно %q (все: %v)", k, got[k], v, got)
+		}
+	}
+	if r.Health != "degraded" {
+		t.Errorf("health %s, нужно degraded", r.Health)
 	}
 }
