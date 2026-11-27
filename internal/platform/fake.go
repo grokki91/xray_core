@@ -38,6 +38,7 @@ type Fake struct {
 	connect   map[netip.AddrPort]error
 	addrs     []IfAddr
 	tls       map[string]fakeTLS
+	usage     map[string]DiskUsage
 }
 
 // Call — записанный вызов: операция и путь, имя пользователя или программа с аргументами.
@@ -54,9 +55,9 @@ type Call struct {
 func NewFake(root string, now time.Time) *Fake { return newFake(root, now, programs()) }
 
 func newFake(root string, now time.Time, progs map[string]string) *Fake {
-	f := &Fake{programs: progs, now: now, owners: map[string]Owner{}, handlers: map[string]func(Command) (Result, error){}, underRoot: map[string]bool{}, routes: map[string]fakeRoute{}, starters: map[string]func(Command) error{}, streams: map[string]func(Command) (io.Reader, error){}, users: map[string]Owner{}, listening: map[int]bool{}, families: map[int]Families{}, connect: map[netip.AddrPort]error{}, tls: map[string]fakeTLS{}}
+	f := &Fake{programs: progs, now: now, owners: map[string]Owner{}, handlers: map[string]func(Command) (Result, error){}, underRoot: map[string]bool{}, routes: map[string]fakeRoute{}, starters: map[string]func(Command) error{}, streams: map[string]func(Command) (io.Reader, error){}, users: map[string]Owner{}, listening: map[int]bool{}, families: map[int]Families{}, connect: map[netip.AddrPort]error{}, tls: map[string]fakeTLS{}, usage: map[string]DiskUsage{}}
 	f.journal = &fakeJournal{f: f}
-	f.files = files{root: root, chown: f.recordOwner, ownerOf: f.ownerOf, trace: f.trace}
+	f.files = files{root: root, chown: f.recordOwner, ownerOf: f.ownerOf, trace: f.trace, statfs: f.statfs}
 	return f
 }
 
@@ -132,6 +133,23 @@ func (f *Fake) SetFamilies(port int, fam Families) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.families[port] = fam
+}
+
+// SetUsage задаёт место файловой системы для пути; Usage на не заданном пути — ErrNotFound.
+func (f *Fake) SetUsage(path string, u DiskUsage) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.usage[path] = u
+}
+
+func (f *Fake) statfs(_, path string) (DiskUsage, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	u, ok := f.usage[path]
+	if !ok {
+		return DiskUsage{}, fmt.Errorf("место %s: %w", path, ErrNotFound)
+	}
+	return u, nil
 }
 
 // SetConnect задаёт исход соединения с addr: nil — установлено. Не заданный узел — ошибка.

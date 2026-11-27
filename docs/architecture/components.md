@@ -33,7 +33,7 @@ type Platform interface {
     Exec(ctx context.Context, c Command) (Result, error) // Command{Program, Args, Stdin}; без оболочки
     Start(ctx context.Context, c Command) (Process, error) // процесс в фоне ([ADR-0032](../adr/0032-selftest-client-and-l3-target.md)); Process{Done, Stop}
     Stream(ctx context.Context, c Command) (io.ReadCloser, error) // stdout потоком (ADR-0044)
-    FS() FS            // ReadFile, WriteFile (temp + fchown + fchmod + fsync + rename), Mkdir, ReadDir, Remove, Symlink, Readlink, Lock (flock)
+    FS() FS            // ReadFile, WriteFile (temp + fchown + fchmod + fsync + rename), Mkdir, ReadDir, Remove, Symlink, Readlink, Lock (flock), Usage (statfs)
     Systemd() Systemd  // только xray.service: Running, Reload, Enable/Disable, Start/Stop/Restart, Status
     Net() Net          // Get по HTTPS, Listening — порт слушается (фаза 2); Addrs — адреса интерфейсов, TLSProbe — проверка TLS узла (фаза 4)
     Users() Users      // системный пользователь службы; Effective — владелец процесса xm
@@ -124,7 +124,8 @@ type Platform interface {
 - `Users.Effective()` — эффективные uid и gid процесса `xm`; у подделки root, пока тест не назначил
   другого (`SetEffective`).
 - Фаза 1 — `Exec`, `FS`, `Clock`; фаза 2 — `Net.Get`, `xray` по версии, `Remove`, `Symlink`, `Readlink`, `Users`, `Systemd`; A4 — `ReadDir`;
-  фаза 4 — `Net.Addrs`, `Net.TLSProbe`, `ss`, `ufw`, `iptables`, `ip6tables`; фаза 5 — `Net.ListeningFamilies`, `Net.Connect`.
+  фаза 4 — `Net.Addrs`, `Net.TLSProbe`, `ss`, `ufw`, `iptables`, `ip6tables`; фаза 5 — `Net.ListeningFamilies`, `Net.Connect`, `FS.Usage`, `timedatectl`.
+- `FS.Usage(путь)` — `DiskUsage{Avail, Total}` по `statfs` в байтах (`Avail` — без резерва root); правила путей и ссылок — как у `ReadFile`; подделка — `SetUsage`, не заданный путь — `ErrNotFound`. Программа `timedatectl` — в закрытом списке (`server`: только `show --property=NTPSynchronized --value`).
 
 ### store
 
@@ -356,6 +357,11 @@ type Manager interface {
     Service() Service                                    // Start, Stop, Restart, Status, CheckRunning, CheckStopped
     Unit() ([]byte, error)                               // файл юнита как есть; нет — nil
     RestoreUnit(ctx context.Context, data []byte) error  // вернуть снятый юнит; nil — удалить свой
+    // измерения категории host диагностики (ADR-0024), только чтение:
+    Disk(ctx context.Context, path string) (platform.DiskUsage, error) // FS.Usage
+    Memory(ctx context.Context) (Memory, error)                        // MemAvailable, MemTotal из /proc/meminfo
+    OOMKills(ctx context.Context) (int, error)  // journalctl --boot _PID=1 UNIT=xray.service UNIT_RESULT=oom-kill: только записи PID 1 о своём юните
+    ClockSynced(ctx context.Context) (bool, error) // timedatectl NTPSynchronized: yes | no, иное — ошибка
 }
 ```
 
@@ -366,8 +372,7 @@ type Manager interface {
   импортируют. `Preflight` возвращает все найденные `Issue{Code, Message}` сразу, любая останавливает
   установку: `preflight.not_root`, `.os_unsupported` (Ubuntu 22.04 и 24.04; прочее — до решения Q8),
   `.arch_unsupported` (только x86_64; архитектура — `runtime.GOARCH` самого `xm`), `.resources`
-  (память `MemTotal` не меньше 512 МиБ; порог — по замеру фазы 2; диск не проверяется — в порте нет
-  вызова `statfs`), `.no_systemd`, `.clock` (часы раньше 2026-11-01), `.foreign_install`.
+  (память `MemTotal` не меньше 512 МиБ; порог — по замеру фазы 2; диск установкой не проверяется; место — проверка `host.disk` диагностики), `.no_systemd`, `.clock` (часы раньше 2026-11-01), `.foreign_install`.
 - Юнит строится из фиксированной части и директив изоляции, которые приносит вызывающий
   (`security.UnitHardening`); директива, переопределяющая запуск (`Type`, `User`, `ExecStart`,
   `Restart`, `RestartSec`), перевод строки в значении или путь вне `[A-Za-z0-9._/-]` — `ErrSpec`
@@ -550,7 +555,7 @@ type Vantage interface { // точка наблюдения: сейчас local;
   `degraded`: зависимые не запускаются, поэтому он без проваленных зависимостей.
 - Анализ — правила «наблюдения → вывод» классов `probable | hypothesis`; факт строит проверка (ADR-0029); модель и
   каталог проверок — [diagnostics.md](../operations/diagnostics.md).
-- Отчёт всегда проходит `redact` перед сохранением и экспортом. Движок, вердикт и набор `control` есть; поле `health` схемы `status` и строка вердикта в `install` и `status` есть, поле схемы `diag-report` — с отчётом фазы 5 ([ADR-0024](../adr/0024-health-verdict-and-shared-checks.md), задача A2 в [roadmap.md](../roadmap.md) §7); каталог — фаза 5: проверки категории `xray`, `reach.listen.ipv4` и `.ipv6`, `ipv4.egress` и `ipv6.egress`, `reach.firewall` (`diag.NewLocal`, набор `local`) и команда `xm diag` (`app.Diagnose`: каталог из менеджеров, редактор `Redactor.JSON`, история, экспорт) есть; полностью — после MVP. Исходящая связность измеряется в `diag` через `platform.Net.Connect` к контрольным узлам, без метода `network`.
+- Отчёт всегда проходит `redact` перед сохранением и экспортом. Движок, вердикт и набор `control` есть; поле `health` схемы `status` и строка вердикта в `install` и `status` есть, поле схемы `diag-report` — с отчётом фазы 5 ([ADR-0024](../adr/0024-health-verdict-and-shared-checks.md), задача A2 в [roadmap.md](../roadmap.md) §7); каталог — фаза 5: проверки категории `xray`, `reach.listen.ipv4` и `.ipv6`, `ipv4.egress` и `ipv6.egress`, `reach.firewall`, категория `host` — `host.disk`, `host.memory`, `host.memory.oom`, `host.clock` (`diag.NewLocal`, набор `local`; измерения `HostDeps` — от `server`) и команда `xm diag` (`app.Diagnose`: каталог из менеджеров, редактор `Redactor.JSON`, история, экспорт) есть; полностью — после MVP. Исходящая связность измеряется в `diag` через `platform.Net.Connect` к контрольным узлам, без метода `network`.
 
 ### logging
 

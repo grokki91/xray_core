@@ -22,6 +22,9 @@ type files struct {
 	// ownerOf — владелец существующего пути: у Real из inode, у Fake из записанных назначений.
 	ownerOf func(path string, fi fs.FileInfo) Owner
 	trace   func(op, path string)
+	// statfs — место файловой системы по настоящему пути: у Real — вызов statfs, у Fake —
+	// заданное SetUsage.
+	statfs func(real, path string) (DiskUsage, error)
 }
 
 func (x files) real(path string) (string, error) {
@@ -302,6 +305,28 @@ func (x files) ReadDir(path string) ([]string, error) {
 		names[i] = e.Name()
 	}
 	return names, nil
+}
+
+func (x files) Usage(path string) (DiskUsage, error) {
+	x.trace("usage", path)
+	p, err := x.real(path)
+	if err != nil {
+		return DiskUsage{}, err
+	}
+	if err := x.noSymlinks(p); err != nil {
+		return DiskUsage{}, err
+	}
+	return x.statfs(p, path)
+}
+
+// realStatfs — место по statfs(2): блоки в байтах по размеру фрагмента.
+func realStatfs(p, path string) (DiskUsage, error) {
+	var st syscall.Statfs_t
+	if err := syscall.Statfs(p, &st); err != nil {
+		return DiskUsage{}, fmt.Errorf("место %s: %w", path, err)
+	}
+	bs := uint64(st.Frsize)
+	return DiskUsage{Avail: st.Bavail * bs, Total: st.Blocks * bs}, nil
 }
 
 // checkTarget — цель ссылки: одно имя в том же каталоге (ADR-0019).

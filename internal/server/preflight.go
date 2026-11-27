@@ -142,27 +142,33 @@ func (m *Manager) osRelease() (id, version string, err error) {
 
 // memMiB — MemTotal из /proc/meminfo.
 func (m *Manager) memMiB() (int64, error) {
+	kb, err := m.meminfo("MemTotal")
+	return kb / 1024, err
+}
+
+// meminfo — поле /proc/meminfo в КиБ; формат строки — «<имя>: <число> kB».
+func (m *Manager) meminfo(field string) (int64, error) {
 	data, err := m.p.FS().ReadFile("/proc/meminfo")
 	if err != nil {
 		return 0, err
 	}
 	sc := bufio.NewScanner(strings.NewReader(string(data)))
 	for sc.Scan() {
-		rest, ok := strings.CutPrefix(sc.Text(), "MemTotal:")
+		rest, ok := strings.CutPrefix(sc.Text(), field+":")
 		if !ok {
 			continue
 		}
 		f := strings.Fields(rest)
 		if len(f) != 2 || f[1] != "kB" {
-			return 0, errors.New("неожиданный формат MemTotal")
+			return 0, fmt.Errorf("неожиданный формат %s", field)
 		}
 		kb, err := strconv.ParseInt(f[0], 10, 64)
 		if err != nil || kb < 0 {
-			return 0, errors.New("неожиданный формат MemTotal")
+			return 0, fmt.Errorf("неожиданный формат %s", field)
 		}
-		return kb / 1024, nil
+		return kb, nil
 	}
-	return 0, errors.New("нет MemTotal")
+	return 0, fmt.Errorf("нет %s", field)
 }
 
 // foreign — чужая установка: файл юнита без метки xm, либо конфигурация Xray при отсутствии

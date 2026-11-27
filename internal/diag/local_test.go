@@ -19,6 +19,10 @@ type localCase struct {
 	egress  *fakeEgress
 	fw      string
 	fwErr   error
+	usage   platform.DiskUsage
+	mem     [2]int64 // доступно и всего, КиБ
+	oomN    int
+	synced  bool
 }
 
 type famNet struct{ f platform.Families }
@@ -62,6 +66,9 @@ func healthyLocal() localCase {
 		served:      platform.Families{IPv4: true, IPv6: true},
 		egress:      allUp(),
 		fw:          FirewallAllowed,
+		usage:       platform.DiskUsage{Avail: 10 << 30, Total: 20 << 30},
+		mem:         [2]int64{1 << 20, 2 << 20},
+		synced:      true,
 	}
 }
 
@@ -69,12 +76,18 @@ func (c localCase) run(t *testing.T) Report {
 	t.Helper()
 	e, err := NewLocal(LocalDeps{
 		ControlDeps: ControlDeps{Service: c.svc, Net: c.net, Port: c.port, Validate: c.validate},
-		Version:     c.version,
-		InRange:     func(string) bool { return c.inRange },
-		Drift:       c.drift,
-		Families:    famNet{c.fam},
-		Served:      func(context.Context) (platform.Families, error) { return c.served, nil },
-		Egress:      c.egress,
+		HostDeps: HostDeps{
+			Disk:        func(context.Context, string) (platform.DiskUsage, error) { return c.usage, nil },
+			Memory:      func(context.Context) (int64, int64, error) { return c.mem[0], c.mem[1], nil },
+			OOMKills:    func(context.Context) (int, error) { return c.oomN, nil },
+			ClockSynced: func(context.Context) (bool, error) { return c.synced, nil },
+		},
+		Version:  c.version,
+		InRange:  func(string) bool { return c.inRange },
+		Drift:    c.drift,
+		Families: famNet{c.fam},
+		Served:   func(context.Context) (platform.Families, error) { return c.served, nil },
+		Egress:   c.egress,
 		Firewall: func(context.Context, int) (string, string, error) {
 			return c.fw, "ufw", c.fwErr
 		},
@@ -91,7 +104,7 @@ func (c localCase) run(t *testing.T) Report {
 
 func TestLocalHealthy(t *testing.T) {
 	r := healthyLocal().run(t)
-	if r.Health != HealthOK || r.Summary.OK != 12 {
+	if r.Health != HealthOK || r.Summary.OK != 17 {
 		t.Fatalf("health %s, summary %+v", r.Health, r.Summary)
 	}
 }
@@ -126,6 +139,12 @@ func TestLocalCatalog(t *testing.T) {
 		{"фаервол запрещает", func(c *localCase) { c.fw = FirewallDenied }, CheckFirewall, StatusFail, HealthDown},
 		{"фаервол не определён", func(c *localCase) { c.fw = FirewallUnknown }, CheckFirewall, StatusSkip, HealthOK},
 		{"фаервол не прочитан", func(c *localCase) { c.fwErr = errors.New("x") }, CheckFirewall, StatusError, HealthOK},
+		{"диск < 10 %", func(c *localCase) { c.usage = platform.DiskUsage{Avail: 1 << 30, Total: 20 << 30} }, CheckDisk, StatusFail, HealthDegraded},
+		{"диск < 500 МБ", func(c *localCase) { c.usage = platform.DiskUsage{Avail: 400 << 20, Total: 1 << 30} }, CheckDisk, StatusFail, HealthDegraded},
+		{"диск ровно 10 %", func(c *localCase) { c.usage = platform.DiskUsage{Avail: 2 << 30, Total: 20 << 30} }, CheckDisk, StatusOK, HealthOK},
+		{"память < 10 %", func(c *localCase) { c.mem = [2]int64{100, 2000} }, CheckMemory, StatusFail, HealthDegraded},
+		{"OOM", func(c *localCase) { c.oomN = 1 }, CheckOOM, StatusFail, HealthDegraded},
+		{"часы", func(c *localCase) { c.synced = false }, CheckClock, StatusFail, HealthDegraded},
 		{"дрейф не измерен", func(c *localCase) { c.drift = func(context.Context) (bool, error) { return false, errors.New("x") } }, CheckConfigDrift, StatusError, HealthOK},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

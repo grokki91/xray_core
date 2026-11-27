@@ -137,3 +137,6 @@ func (s systemd) Status(ctx context.Context) (UnitStatus, error) {
 		MainPID:  pid,
 	}, nil
 }
+
+// Timedatectl — программа чтения состояния часов systemd (diag, host.clock); только чтение.
+const Timedatectl = "timedatectl"
