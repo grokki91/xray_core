@@ -25,6 +25,9 @@ type LocalDeps struct {
 	}
 	// Served — семейства адресов сервера из состояния: на них клиенты подключаются.
 	Served func(ctx context.Context) (platform.Families, error)
+	// Firewall — пропускает ли локальный фаервол порт: FirewallAllowed, FirewallDenied или
+	// FirewallUnknown и откуда взято (ufw, iptables). Фаервол хостера с сервера не виден.
+	Firewall func(ctx context.Context, port int) (state, source string, err error)
 	// Egress — исходящие соединения и адреса интерфейсов.
 	Egress interface {
 		Addrs(ctx context.Context) ([]platform.IfAddr, error)
@@ -43,8 +46,16 @@ const (
 	CheckConfigDrift  = "xray.config.drift"
 	CheckListenIPv4   = "reach.listen.ipv4"
 	CheckListenIPv6   = "reach.listen.ipv6"
+	CheckFirewall     = "reach.firewall"
 	CheckEgressIPv4   = "ipv4.egress"
 	CheckEgressIPv6   = "ipv6.egress"
+)
+
+// Состояния порта в локальном фаерволе (как network.FirewallState).
+const (
+	FirewallAllowed = "allowed"
+	FirewallDenied  = "denied"
+	FirewallUnknown = "unknown"
 )
 
 // Контрольные узлы исходящей связности (docs/dev/dependencies.md §5; 2026-11-27, ответ
@@ -65,11 +76,11 @@ func NewLocal(d LocalDeps) (*Engine, error) {
 	}
 	if d.Service == nil || d.Net == nil || d.Port == nil || d.Validate == nil ||
 		d.Version == nil || d.InRange == nil || d.Drift == nil ||
-		d.Families == nil || d.Served == nil || d.Egress == nil {
+		d.Families == nil || d.Served == nil || d.Egress == nil || d.Firewall == nil {
 		return nil, fmt.Errorf("%w: не все измерения каталога local заданы", ErrRegistry)
 	}
 	c := d.ControlDeps
-	checks := []Check{installed{d}, versionRange{d}, serviceActive{c}, restarts{c}, listen{c}, listenFamily{d, false}, listenFamily{d, true},
+	checks := []Check{installed{d}, versionRange{d}, serviceActive{c}, restarts{c}, listen{c}, listenFamily{d, false}, listenFamily{d, true}, firewall{d},
 		configValid{c}, configDrift{d}, egress{d, false}, egress{d, true}}
 	ids := make([]string, len(checks))
 	for i, ch := range checks {
@@ -265,4 +276,34 @@ func (c egress) Fact(Observation) Finding {
 		f.Impact = ImpactDown // без IPv4 наружу клиенты не достанут большую часть адресов
 	}
 	return f
+}
+
+type firewall struct{ d LocalDeps }
+
+func (firewall) ID() string         { return CheckFirewall }
+func (firewall) Requires() []string { return nil }
+
+func (c firewall) Run(ctx context.Context) []Observation {
+	port, err := c.d.Port(ctx)
+	if err != nil || port <= 0 || port > 65535 {
+		return errObs("firewall", "порт сервера из состояния недоступен")
+	}
+	state, source, err := c.d.Firewall(ctx, port)
+	if err != nil {
+		return errObs("firewall", "не удалось прочитать фаервол")
+	}
+	switch state {
+	case FirewallAllowed, FirewallDenied:
+		return obs("firewall", state == FirewallAllowed, map[string]string{"state": state, "source": source},
+			"только локальный фаервол сервера: фаервол хостера и сети клиента с сервера не видны")
+	case FirewallUnknown:
+		// Причина из network не идёт в отчёт: в ней бывает текст ошибки утилиты.
+		return []Observation{{Target: "firewall", Status: StatusSkip, Reason: "по правилам " + source + " не определено, пропускают ли они порт"}}
+	}
+	return errObs("firewall", "неизвестное состояние фаервола")
+}
+
+func (firewall) Fact(Observation) Finding {
+	return Finding{Code: "reach.firewall.denied", Title: "локальный фаервол запрещает порт сервера", Impact: ImpactDown,
+		Actions: []string{"ufw status verbose; разрешить порт: ufw allow <порт>/tcp"}}
 }
