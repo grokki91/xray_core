@@ -251,3 +251,26 @@ func TestOnlyControlSkipMakesUnknown(t *testing.T) {
 		t.Fatalf("skip вне набора control изменил вердикт: %q", r.Health)
 	}
 }
+
+// --only: проверки категории и их зависимости из других категорий; остальные не запускаются.
+func TestRunCategory(t *testing.T) {
+	svc, listen, other, v4 := ok("xray.service.active"), ok("reach.listen", "xray.service.active"), ok("xray.config.valid"), ok("ipv4.egress")
+	e := engine(t, nil, svc, listen, other, v4)
+	r, err := e.RunCategory(context.Background(), SetControl, "reach")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, o := range r.Observations {
+		got = append(got, o.Check)
+	}
+	if strings.Join(got, ",") != "xray.service.active,reach.listen" || other.runs+v4.runs != 0 {
+		t.Fatalf("наблюдения %v, лишние запуски %d", got, other.runs+v4.runs)
+	}
+	if _, err := e.RunCategory(context.Background(), SetControl, "dns"); !errors.Is(err, ErrUnknownCategory) {
+		t.Fatalf("неизвестная категория: %v", err)
+	}
+	if c := strings.Join(e.Categories(SetControl), ","); c != "xray,reach,ipv4" {
+		t.Fatalf("категории %q", c)
+	}
+}

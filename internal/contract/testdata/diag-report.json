@@ -1,0 +1,59 @@
+{
+  "schema": {
+    "name": "diag-report",
+    "major": 1,
+    "minor": 0
+  },
+  "xm": {
+    "version": "0.1.0"
+  },
+  "time": 1767225600,
+  "data": {
+    "id": "20260101T000000Z",
+    "vantage": {
+      "kind": "local",
+      "id": "server"
+    },
+    "env": {
+      "xm": "0.1.0",
+      "xray": "26.11.9",
+      "os": "ubuntu-24.04"
+    },
+    "health": "down",
+    "observations": [
+      {
+        "check": "xray.service.active",
+        "status": "fail",
+        "value": "inactive",
+        "limits": [
+          "состояние юнита, не работа протокола"
+        ]
+      },
+      {
+        "check": "reach.listen",
+        "status": "skip",
+        "reason": "не прошла зависимость xray.service.active"
+      }
+    ],
+    "findings": [
+      {
+        "code": "xray.service.inactive",
+        "class": "fact",
+        "title": "Служба Xray не активна",
+        "evidence": [
+          "xray.service.active"
+        ],
+        "actions": [
+          "xm start"
+        ],
+        "impact": "down"
+      }
+    ],
+    "summary": {
+      "ok": 0,
+      "fail": 1,
+      "skip": 1,
+      "error": 0
+    }
+  }
+}

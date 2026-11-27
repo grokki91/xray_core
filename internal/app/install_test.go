@@ -688,6 +688,8 @@ type regAdapter struct{ r *redact.Redactor }
 
 func (g regAdapter) Register(kind, value string) { g.r.Register(redact.Kind(kind), value) }
 
+func (g regAdapter) JSON(v any) (any, error) { return g.r.JSON(v) }
+
 // Секреты и данные установки регистрируются в редакторе: шаблон не ловит shortId, а ключ ловит
 // только по длине. Значение должно быть заменено, даже если его вставили в чужой текст.
 func TestInstallRegistersValuesWithRedactor(t *testing.T) {

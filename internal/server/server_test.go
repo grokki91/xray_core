@@ -297,3 +297,14 @@ func TestServiceStatus(t *testing.T) {
 		t.Fatalf("состояние %+v, %v", st, err)
 	}
 }
+
+func TestOS(t *testing.T) {
+	h := newHost(t)
+	if got := h.m.OS(); got != "ubuntu-24.04" {
+		t.Fatalf("OS %q", got)
+	}
+	h.write(t, "/usr/lib/os-release", "NAME=x\n")
+	if got := h.m.OS(); got != "" {
+		t.Fatalf("без ID: %q", got)
+	}
+}
