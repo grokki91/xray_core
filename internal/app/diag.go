@@ -164,6 +164,7 @@ func (a *App) localEngine(port int, v4, v6 bool, drift func() (bool, error)) (*d
 			return string(fw.State), fw.Source, err
 		},
 		Egress: a.s.Host.Net(),
+		Routes: a.s.Host.Net(),
 	})
 }
 

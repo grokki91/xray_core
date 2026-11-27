@@ -39,6 +39,7 @@ type Fake struct {
 	addrs     []IfAddr
 	tls       map[string]fakeTLS
 	usage     map[string]DiskUsage
+	defRoutes Families
 }
 
 // Call — записанный вызов: операция и путь, имя пользователя или программа с аргументами.
@@ -133,6 +134,13 @@ func (f *Fake) SetFamilies(port int, fam Families) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.families[port] = fam
+}
+
+// SetDefaultRoutes задаёт, по каким семействам у «хоста» есть маршрут по умолчанию.
+func (f *Fake) SetDefaultRoutes(fam Families) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.defRoutes = fam
 }
 
 // SetUsage задаёт место файловой системы для пути; Usage на не заданном пути — ErrNotFound.

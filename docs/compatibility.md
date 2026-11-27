@@ -30,7 +30,7 @@
 
 | systemd | Факт | Источник |
 |---|---|---|
-| 249, 255 | При неуспешном итоге (в том числе `oom-kill`) systemd пишет в журнал запись с `UNIT=<юнит>` и `UNIT_RESULT=<итог>` («Failed with result '…'.») до авто-перезапуска; запись идёт от PID 1, поле `_PID` ставит journald | `src/core/unit.c` (`unit_log_failure`) и `src/core/service.c` (`service_enter_dead`, `SERVICE_FAILURE_OOM_KILL`) тегов v249 и v255; по исходникам, запуском на VPS не проверено |
+| 249, 255 | При неуспешном итоге (в том числе `oom-kill`) systemd пишет в журнал запись с `UNIT=<юнит>` и `UNIT_RESULT=<итог>` («Failed with result '…'.») до авто-перезапуска; запись идёт от PID 1, поле `_PID` ставит journald | `src/core/unit.c` (`unit_log_failure`) и `src/core/service.c` (`service_enter_dead`, `SERVICE_FAILURE_OOM_KILL`) тегов v249 и v255; по исходникам; для `xray.service` на 249 и 255 подтверждено запуском — L4, шаг 12a, OOM под `MemoryMax=4M` (CI, 2026-11-27) |
 
 Архитектура arm64 — кандидат на расширение: Go собирает под неё без изменений, upstream
 публикует сборку Xray; нужна только строка в матрице тестов.

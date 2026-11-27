@@ -92,6 +92,7 @@ type Platform interface {
 - `Net.Listening(ctx, port)` — слушает ли хост TCP-порт: строки `LISTEN` в `/proc/net/tcp` и `tcp6`
   (нет `tcp6` на хосте без IPv6 — не ошибка); соединений не открывает. `Clock.Sleep(ctx, d)` — ожидание
   до конца `ctx`; у подделки сдвигает часы ([ADR-0023](../adr/0023-transaction-control-and-rollback-scope.md)).
+- `Net.DefaultRoutes(ctx)` — `Families` с маршрутом по умолчанию: действующая (`RTF_UP`) запись `0.0.0.0/0` в `/proc/net/route` и `::/0` в `/proc/net/ipv6_route`, кроме отказов (`RTF_REJECT`: ядро без IPv6 держит `::/0` через `lo`) и петли; нет `ipv6_route` — IPv6 нет; подделка — `SetDefaultRoutes`.
 - `Net.Addrs(ctx)` — адреса интерфейсов (`IfAddr{Iface, Addr}`) без отбора; подделка — `SetAddrs`.
 - `Net.ListeningFamilies(ctx, port)` — `Families{IPv4, IPv6}` по тем же таблицам: запись `tcp` и `tcp6` на
   `::ffff:a.b.c.d` — IPv4, `tcp6` на `::` — оба семейства (двойной сокет; `IPV6_V6ONLY` таблицы не показывают),
@@ -124,7 +125,7 @@ type Platform interface {
 - `Users.Effective()` — эффективные uid и gid процесса `xm`; у подделки root, пока тест не назначил
   другого (`SetEffective`).
 - Фаза 1 — `Exec`, `FS`, `Clock`; фаза 2 — `Net.Get`, `xray` по версии, `Remove`, `Symlink`, `Readlink`, `Users`, `Systemd`; A4 — `ReadDir`;
-  фаза 4 — `Net.Addrs`, `Net.TLSProbe`, `ss`, `ufw`, `iptables`, `ip6tables`; фаза 5 — `Net.ListeningFamilies`, `Net.Connect`, `FS.Usage`, `timedatectl`.
+  фаза 4 — `Net.Addrs`, `Net.TLSProbe`, `ss`, `ufw`, `iptables`, `ip6tables`; фаза 5 — `Net.ListeningFamilies`, `Net.Connect`, `Net.DefaultRoutes`, `FS.Usage`, `timedatectl`.
 - `FS.Usage(путь)` — `DiskUsage{Avail, Total}` по `statfs` в байтах (`Avail` — без резерва root); правила путей и ссылок — как у `ReadFile`; подделка — `SetUsage`, не заданный путь — `ErrNotFound`. Программа `timedatectl` — в закрытом списке (`server`: только `show --property=NTPSynchronized --value`).
 
 ### store
@@ -555,7 +556,7 @@ type Vantage interface { // точка наблюдения: сейчас local;
   `degraded`: зависимые не запускаются, поэтому он без проваленных зависимостей.
 - Анализ — правила «наблюдения → вывод» классов `probable | hypothesis`; факт строит проверка (ADR-0029); модель и
   каталог проверок — [diagnostics.md](../operations/diagnostics.md).
-- Отчёт всегда проходит `redact` перед сохранением и экспортом. Движок, вердикт и набор `control` есть; поле `health` схемы `status` и строка вердикта в `install` и `status` есть, поле схемы `diag-report` — с отчётом фазы 5 ([ADR-0024](../adr/0024-health-verdict-and-shared-checks.md), задача A2 в [roadmap.md](../roadmap.md) §7); каталог — фаза 5: проверки категории `xray`, `reach.listen.ipv4` и `.ipv6`, `ipv4.egress` и `ipv6.egress`, `reach.firewall`, категория `host` — `host.disk`, `host.memory`, `host.memory.oom`, `host.clock` (`diag.NewLocal`, набор `local`; измерения `HostDeps` — от `server`) и команда `xm diag` (`app.Diagnose`: каталог из менеджеров, редактор `Redactor.JSON`, история, экспорт) есть; полностью — после MVP. Исходящая связность измеряется в `diag` через `platform.Net.Connect` к контрольным узлам, без метода `network`.
+- Отчёт всегда проходит `redact` перед сохранением и экспортом. Движок, вердикт и набор `control` есть; поле `health` схемы `status` и строка вердикта в `install` и `status` есть, поле схемы `diag-report` — с отчётом фазы 5 ([ADR-0024](../adr/0024-health-verdict-and-shared-checks.md), задача A2 в [roadmap.md](../roadmap.md) §7); каталог — фаза 5: проверки категории `xray`, `reach.listen.ipv4` и `.ipv6`, `ipv4.route` и `ipv6.route`, `ipv4.egress` и `ipv6.egress`, `reach.firewall`, категория `host` — `host.disk`, `host.memory`, `host.memory.oom`, `host.clock` (`diag.NewLocal`, набор `local`; измерения `HostDeps` — от `server`) и команда `xm diag` (`app.Diagnose`: каталог из менеджеров, редактор `Redactor.JSON`, история, экспорт) есть; полностью — после MVP. Исходящая связность измеряется в `diag` через `platform.Net.Connect` к контрольным узлам, без метода `network`.
 
 ### logging
 
