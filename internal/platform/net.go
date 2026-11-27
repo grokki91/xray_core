@@ -237,6 +237,125 @@ func (realNet) Listening(ctx context.Context, port int) (bool, error) {
 	return false, nil
 }
 
+func (realNet) ListeningFamilies(ctx context.Context, port int) (Families, error) {
+	var fam Families
+	if err := checkPort(port); err != nil {
+		return fam, err
+	}
+	if err := ctx.Err(); err != nil {
+		return fam, err
+	}
+	for i, path := range procTCP {
+		f, err := os.Open(path)
+		if errors.Is(err, fs.ErrNotExist) && i == 1 {
+			continue
+		}
+		if err != nil {
+			return fam, fmt.Errorf("таблица сокетов %s: %w", path, err)
+		}
+		got, err := scanFamilies(f, port, i == 1)
+		f.Close()
+		if err != nil {
+			return fam, fmt.Errorf("таблица сокетов %s: %w", path, err)
+		}
+		fam.IPv4, fam.IPv6 = fam.IPv4 || got.IPv4, fam.IPv6 || got.IPv6
+	}
+	return fam, nil
+}
+
+// v4mapped — адрес ::ffff:0:0/96 в записи tcp6: четыре слова в порядке хоста (little-endian).
+const v4mappedPrefix = "0000000000000000FFFF0000"
+
+// scanFamilies — семейства сокетов LISTEN на порту port в одной таблице (правило — у
+// ListeningFamilies).
+func scanFamilies(r io.Reader, port int, v6table bool) (Families, error) {
+	var fam Families
+	sc := bufio.NewScanner(r)
+	sc.Scan() // заголовок
+	for sc.Scan() {
+		f := strings.Fields(sc.Text())
+		if len(f) < 4 || f[3] != "0A" {
+			continue
+		}
+		addr, hex, ok := strings.Cut(f[1], ":")
+		if !ok {
+			return fam, errors.New("строка таблицы без порта")
+		}
+		p, err := strconv.ParseUint(hex, 16, 16)
+		if err != nil {
+			return fam, errors.New("порт в таблице не число")
+		}
+		if int(p) != port {
+			continue
+		}
+		switch {
+		case !v6table:
+			fam.IPv4 = true
+		case len(addr) != 32:
+			return fam, errors.New("адрес в таблице tcp6 не 128 бит")
+		case addr == strings.Repeat("0", 32):
+			fam.IPv4, fam.IPv6 = true, true
+		case strings.HasPrefix(addr, v4mappedPrefix):
+			fam.IPv4 = true
+		default:
+			fam.IPv6 = true
+		}
+	}
+	return fam, sc.Err()
+}
+
+func checkConnect(addr netip.AddrPort) error {
+	a := addr.Addr()
+	if !a.IsValid() || a.Zone() != "" || a.Is4In6() || a.IsUnspecified() || checkPort(int(addr.Port())) != nil {
+		return fmt.Errorf("%w: адрес соединения %s", ErrURL, addr)
+	}
+	return nil
+}
+
+func (realNet) Connect(ctx context.Context, addr netip.AddrPort) error {
+	if err := checkConnect(addr); err != nil {
+		return err
+	}
+	if _, ok := ctx.Deadline(); !ok {
+		return errors.New("соединение без срока")
+	}
+	var d net.Dialer
+	c, err := d.DialContext(ctx, "tcp", addr.String())
+	if err != nil {
+		return fmt.Errorf("соединение с %s: %w", addr, err)
+	}
+	return c.Close()
+}
+
+func (n fakeNet) ListeningFamilies(ctx context.Context, port int) (Families, error) {
+	if err := checkPort(port); err != nil {
+		return Families{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return Families{}, err
+	}
+	n.f.mu.Lock()
+	defer n.f.mu.Unlock()
+	n.f.calls = append(n.f.calls, Call{Op: "listening-families", Path: strconv.Itoa(port)})
+	return n.f.families[port], nil
+}
+
+func (n fakeNet) Connect(ctx context.Context, addr netip.AddrPort) error {
+	if err := checkConnect(addr); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	n.f.mu.Lock()
+	defer n.f.mu.Unlock()
+	n.f.calls = append(n.f.calls, Call{Op: "connect", Path: addr.String()})
+	if err, ok := n.f.connect[addr]; ok {
+		return err
+	}
+	return fmt.Errorf("соединение с %s: узел не задан подделке", addr)
+}
+
 // scanListening ищет в таблице /proc/net/tcp* сокет в состоянии LISTEN на порту port.
 func scanListening(r io.Reader, port int) (bool, error) {
 	sc := bufio.NewScanner(r)
