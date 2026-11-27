@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Системный тест L4 (docs/testing.md §2): настоящие install.sh и xm на чистой машине с systemd —
-# установка, повторная установка, профили, служба, права, обновление и откат Xray, снимки, удаление.
+# установка, повторная установка, профили, служба, права, обновление и откат Xray, снимки,
+# измерения узла (diag host), удаление.
 # Запуск: sudo bash tests/system/l4.sh /путь/к/xm — только на одноразовой машине (исполнитель CI,
 # виртуальная машина): скрипт ставит службу xray и не убирает её. Печатает «ok <шаг>» и в конце
 # «l4: PASS|FAIL»; вывод xm и значения из состояния на экран не попадают (docs/security/secrets.md).
@@ -290,6 +291,44 @@ check "restore: служба активна, порт слушается" bash -
 "$xm" status --json >"$out/status-restored" 2>&1
 check "restore: status — вердикт ok" jq -e '.data.health.verdict == "ok"' "$out/status-restored"
 
+# 12a. Категория host (шаг 5.5 фазы 5): измерения узла на настоящем systemd — место (statfs),
+# память, часы (timedatectl) и завершения xray по нехватке памяти: запись systemd с
+# UNIT_RESULT=oom-kill (compatibility.md §1). OOM вызывается ограничением памяти службы только на
+# время выполнения (--runtime, /run), затем ограничение снимается.
+diag_host() { "$xm" diag --only host --json >"$out/$1" 2>&1; }
+obs() { jq -c --arg c "$2" '[.data.observations[] | select(.check == $c)]' "$out/$1" 2>/dev/null; }
+measured() { jq -e 'length > 0 and all(.status == "ok" or .status == "fail")' <<<"$1" >/dev/null 2>&1; }
+oomcount() { journalctl --no-pager --quiet --boot --output=cat _PID=1 UNIT=xray.service UNIT_RESULT=oom-kill | grep -c .; }
+diag_host diag-host
+code=$?
+if ((code == 0 || code == 4)); then ok "diag --only host: код $code"; else bad "diag --only host: код $code"; fi
+eq "host.disk: два раздела" "$(obs diag-host host.disk | jq length 2>/dev/null)" 2
+for c in host.disk host.memory host.clock; do
+	if measured "$(obs diag-host "$c")"; then ok "$c: измерено"; else bad "$c: не измерено: $(obs diag-host "$c" | jq -c 'map(.status)' 2>/dev/null)"; fi
+done
+echo "env  NTPSynchronized: $(timedatectl show --property=NTPSynchronized --value 2>&1)"
+eq "host.memory.oom до OOM: ok" "$(obs diag-host host.memory.oom | jq -r '.[0].status + " " + (.[0].value|tostring)' 2>/dev/null)" "ok 0"
+# shellcheck disable=SC2317 # вызывается через check
+oom() { # oom — служба падает по нехватке памяти, systemd пишет итог oom-kill (не дольше 30 с)
+	systemctl set-property --runtime xray.service MemoryMax=4M MemorySwapMax=0 || return 1
+	systemctl restart xray.service
+	for _ in $(seq 60); do
+		(($(oomcount) > 0)) && return 0
+		sleep 0.5
+	done
+	return 1
+}
+check "OOM: systemd записал итог oom-kill службы xray" oom
+systemctl set-property --runtime xray.service MemoryMax=infinity MemorySwapMax=infinity
+systemctl reset-failed xray.service
+systemctl restart xray.service
+check "OOM: служба снова активна без ограничения" systemctl is-active --quiet xray.service
+diag_host diag-oom
+eq "diag после OOM: код 4" "$?" 4
+want=$(oomcount)
+eq "host.memory.oom после OOM: fail и число записей" "$(obs diag-oom host.memory.oom | jq -r '.[0].status + " " + (.[0].value|tostring)' 2>/dev/null)" "fail $want"
+check "diag после OOM: вывод host.memory.oom" jq -e '.data.findings | any(.code == "host.memory.oom")' "$out/diag-oom"
+
 # 13. Удаление (data-model.md §6, ADR-0042) — последним: дальше службы нет. Посторонние файлы
 # рядом с путями манифеста должны остаться.
 foreign=(/usr/local/lib/l4-foreign /usr/local/etc/l4-foreign /var/lib/l4-foreign /etc/l4-foreign)
@@ -320,7 +359,7 @@ eq "uninstall после --purge: не установлено, код" "$?" 3
 # Вывод обновления, снимков и удаления — тоже канарейка: секретов состояния и токена API в нём нет (значения сняты до удаления).
 (umask 077 && cat "$out/.secrets" >"$out/.canary")
 [[ -s $out/.token ]] && cat "$out/.token" >>"$out/.canary"
-grep -qF -f "$out/.canary" "$out/update-check" "$out/update-to" "$out/update-rollback" "$out/backup" "$out/restore" "$out/status-restored" "$out/uninstall" "$out/purge-no" "$out/purge" "$out/uninstall-again"
+grep -qF -f "$out/.canary" "$out/update-check" "$out/update-to" "$out/update-rollback" "$out/backup" "$out/restore" "$out/status-restored" "$out/diag-host" "$out/diag-oom" "$out/uninstall" "$out/purge-no" "$out/purge" "$out/uninstall-again"
 case $? in
 0) bad "секрет состояния в выводе update, backup, restore или uninstall" ;;
 1) ok "вывод update, backup, restore и uninstall без секретов состояния" ;;
