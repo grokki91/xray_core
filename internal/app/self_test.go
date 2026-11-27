@@ -183,3 +183,29 @@ func TestUpdateSelfNotNewerAndFlags(t *testing.T) {
 		t.Fatalf("--self --check: %v", err)
 	}
 }
+
+// Недопустимая --previous — ошибка ввода до всякого изменения: бинарник не заменён.
+func TestSelfApplyRejectsBadPrevious(t *testing.T) {
+	for _, prev := range []string{"", "../x", "0.1.0 x", "0.1.0\n", strings.Repeat("1", 65)} {
+		s := selfReady(t)
+		if _, err := s.app.SelfApply(ctx(t), prev); !errors.Is(err, ErrInput) {
+			t.Fatalf("%q: ошибка %v", prev, err)
+		}
+		if !bytes.Equal(s.file(t, update.BinPath), oldXM) || s.file(t, update.PrevPath) != nil {
+			t.Fatalf("%q: бинарник тронут", prev)
+		}
+	}
+}
+
+// Запись нового бинарника не удалась после копии прежнего — прежний на месте, без ErrRollbackFailed.
+func TestSelfApplyInstallFailureKeepsBinary(t *testing.T) {
+	s := selfReady(t)
+	s.fs.path, s.fs.exact, s.fs.armed = update.BinPath, true, true
+	_, err := s.app.SelfApply(ctx(t), "0.0.3")
+	if err == nil || errors.Is(err, ErrRollbackFailed) {
+		t.Fatalf("ошибка %v", err)
+	}
+	if !bytes.Equal(s.file(t, update.BinPath), oldXM) || !bytes.Equal(s.file(t, update.PrevPath), oldXM) || s.fs.armed {
+		t.Fatal("прежний xm не на месте или сбой не сработал")
+	}
+}

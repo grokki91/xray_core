@@ -41,11 +41,12 @@ type armedFS struct {
 	platform.FS
 	path       string // запись по пути с этим началом
 	removePath string // удаление этого пути
+	exact      bool   // запись только по пути path, а не по началу
 	armed      bool
 }
 
 func (a *armedFS) WriteFile(path string, data []byte, perm os.FileMode, o platform.Owner) error {
-	if a.armed && strings.HasPrefix(path, a.path) {
+	if a.armed && (path == a.path || !a.exact && strings.HasPrefix(path, a.path)) {
 		a.armed = false
 		return errors.New("сбой записи (тест)")
 	}
