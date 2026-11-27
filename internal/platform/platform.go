@@ -140,6 +140,10 @@ type Net interface {
 	// шлёт, прокси окружения не действует. Адрес — закрытый список потребителя; недопустимые
 	// адрес или порт — ErrURL; контекст обязан нести срок.
 	Connect(ctx context.Context, addr netip.AddrPort) error
+	// DefaultRoutes — по каким семействам у хоста есть маршрут по умолчанию: действующая (флаг
+	// RTF_UP) запись 0.0.0.0/0 в /proc/net/route и ::/0 в /proc/net/ipv6_route, кроме
+	// маршрутов-отказов (RTF_REJECT) и петли; нет таблицы IPv6 — IPv6 нет. Соединений не открывает.
+	DefaultRoutes(ctx context.Context) (Families, error)
 	// Addrs — адреса интерфейсов хоста (IPv4 и IPv6) без отбора: что из них публичное, решает
 	// потребитель. Соединений не открывает.
 	Addrs(ctx context.Context) ([]IfAddr, error)

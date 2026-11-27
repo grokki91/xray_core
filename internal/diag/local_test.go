@@ -23,7 +23,12 @@ type localCase struct {
 	mem     [2]int64 // доступно и всего, КиБ
 	oomN    int
 	synced  bool
+	routes  platform.Families
 }
+
+type routesNet struct{ f platform.Families }
+
+func (n routesNet) DefaultRoutes(context.Context) (platform.Families, error) { return n.f, nil }
 
 type famNet struct{ f platform.Families }
 
@@ -69,6 +74,7 @@ func healthyLocal() localCase {
 		usage:       platform.DiskUsage{Avail: 10 << 30, Total: 20 << 30},
 		mem:         [2]int64{1 << 20, 2 << 20},
 		synced:      true,
+		routes:      platform.Families{IPv4: true, IPv6: true},
 	}
 }
 
@@ -88,6 +94,7 @@ func (c localCase) run(t *testing.T) Report {
 		Families: famNet{c.fam},
 		Served:   func(context.Context) (platform.Families, error) { return c.served, nil },
 		Egress:   c.egress,
+		Routes:   routesNet{c.routes},
 		Firewall: func(context.Context, int) (string, string, error) {
 			return c.fw, "ufw", c.fwErr
 		},
@@ -104,7 +111,7 @@ func (c localCase) run(t *testing.T) Report {
 
 func TestLocalHealthy(t *testing.T) {
 	r := healthyLocal().run(t)
-	if r.Health != HealthOK || r.Summary.OK != 17 {
+	if r.Health != HealthOK || r.Summary.OK != 19 {
 		t.Fatalf("health %s, summary %+v", r.Health, r.Summary)
 	}
 }
@@ -135,6 +142,12 @@ func TestLocalCatalog(t *testing.T) {
 		{"нет адреса IPv6", func(c *localCase) {
 			c.egress.addrs = []platform.IfAddr{{Addr: netip.MustParseAddr("10.0.0.5")}, {Addr: netip.MustParseAddr("fe80::1")}}
 		}, CheckEgressIPv6, StatusSkip, HealthOK},
+		{"нет маршрута IPv4", func(c *localCase) { c.routes.IPv4 = false }, CheckRouteIPv4, StatusFail, HealthDown},
+		{"нет маршрута IPv6", func(c *localCase) { c.routes.IPv6 = false }, CheckRouteIPv6, StatusFail, HealthDegraded},
+		{"нет адреса IPv6 — маршрут не меряется", func(c *localCase) {
+			c.routes.IPv6 = false
+			c.egress.addrs = []platform.IfAddr{{Addr: netip.MustParseAddr("10.0.0.5")}}
+		}, CheckRouteIPv6, StatusSkip, HealthOK},
 		{"второй узел IPv4", func(c *localCase) { delete(c.egress.ok, egressNodes[false][0]) }, CheckEgressIPv4, StatusOK, HealthOK},
 		{"фаервол запрещает", func(c *localCase) { c.fw = FirewallDenied }, CheckFirewall, StatusFail, HealthDown},
 		{"фаервол не определён", func(c *localCase) { c.fw = FirewallUnknown }, CheckFirewall, StatusSkip, HealthOK},

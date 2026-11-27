@@ -308,6 +308,12 @@ for c in host.disk host.memory host.clock; do
 done
 echo "env  NTPSynchronized: $(timedatectl show --property=NTPSynchronized --value 2>&1)"
 eq "host.memory.oom до OOM: ok" "$(obs diag-host host.memory.oom | jq -r '.[0].status + " " + (.[0].value|tostring)' 2>/dev/null)" "ok 0"
+# Маршрут по умолчанию (шаг 5.6): у исполнителя CI маршрут IPv4 есть — ipv4.route по настоящей
+# таблице ядра должен быть ok; IPv6 у исполнителя зависит от сети — только строка env.
+"$xm" diag --only ipv4 --json >"$out/diag-ipv4" 2>&1
+eq "ipv4.route: маршрут по умолчанию" "$(obs diag-ipv4 ipv4.route | jq -r '.[0].status' 2>/dev/null)" ok
+"$xm" diag --only ipv6 --json >"$out/diag-ipv6" 2>&1
+echo "env  ipv6.route: $(obs diag-ipv6 ipv6.route | jq -r '.[0].status' 2>/dev/null)"
 # shellcheck disable=SC2317 # вызывается через check
 oom() { # oom — служба падает по нехватке памяти, systemd пишет итог oom-kill (не дольше 30 с)
 	systemctl set-property --runtime xray.service MemoryMax=4M MemorySwapMax=0 || return 1
@@ -359,7 +365,7 @@ eq "uninstall после --purge: не установлено, код" "$?" 3
 # Вывод обновления, снимков и удаления — тоже канарейка: секретов состояния и токена API в нём нет (значения сняты до удаления).
 (umask 077 && cat "$out/.secrets" >"$out/.canary")
 [[ -s $out/.token ]] && cat "$out/.token" >>"$out/.canary"
-grep -qF -f "$out/.canary" "$out/update-check" "$out/update-to" "$out/update-rollback" "$out/backup" "$out/restore" "$out/status-restored" "$out/diag-host" "$out/diag-oom" "$out/uninstall" "$out/purge-no" "$out/purge" "$out/uninstall-again"
+grep -qF -f "$out/.canary" "$out/update-check" "$out/update-to" "$out/update-rollback" "$out/backup" "$out/restore" "$out/status-restored" "$out/diag-host" "$out/diag-oom" "$out/diag-ipv4" "$out/diag-ipv6" "$out/uninstall" "$out/purge-no" "$out/purge" "$out/uninstall-again"
 case $? in
 0) bad "секрет состояния в выводе update, backup, restore или uninstall" ;;
 1) ok "вывод update, backup, restore и uninstall без секретов состояния" ;;

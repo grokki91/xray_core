@@ -340,6 +340,107 @@ func (n fakeNet) ListeningFamilies(ctx context.Context, port int) (Families, err
 	return n.f.families[port], nil
 }
 
+func (n fakeNet) DefaultRoutes(ctx context.Context) (Families, error) {
+	if err := ctx.Err(); err != nil {
+		return Families{}, err
+	}
+	n.f.mu.Lock()
+	defer n.f.mu.Unlock()
+	n.f.calls = append(n.f.calls, Call{Op: "default-routes"})
+	return n.f.defRoutes, nil
+}
+
+// procRoute — таблицы маршрутов ядра IPv4 и IPv6.
+var procRoute = []string{"/proc/net/route", "/proc/net/ipv6_route"}
+
+func (realNet) DefaultRoutes(ctx context.Context) (Families, error) {
+	var fam Families
+	if err := ctx.Err(); err != nil {
+		return fam, err
+	}
+	for i, path := range procRoute {
+		f, err := os.Open(path)
+		// Без IPv6 в ядре таблицы ipv6_route нет: маршрута IPv6 нет.
+		if errors.Is(err, fs.ErrNotExist) && i == 1 {
+			continue
+		}
+		if err != nil {
+			return fam, fmt.Errorf("таблица маршрутов %s: %w", path, err)
+		}
+		var on bool
+		if i == 0 {
+			on, err = scanDefault4(f)
+		} else {
+			on, err = scanDefault6(f)
+		}
+		f.Close()
+		if err != nil {
+			return fam, fmt.Errorf("таблица маршрутов %s: %w", path, err)
+		}
+		if i == 0 {
+			fam.IPv4 = on
+		} else {
+			fam.IPv6 = on
+		}
+	}
+	return fam, nil
+}
+
+// Флаги маршрута ядра (linux/route.h).
+const (
+	rtfUp     = 0x0001
+	rtfReject = 0x0200
+)
+
+// usableRoute — действующий маршрут не через петлю и не отказ.
+func usableRoute(iface, flagsHex string) (bool, error) {
+	fl, err := strconv.ParseUint(flagsHex, 16, 32)
+	if err != nil {
+		return false, errors.New("флаги маршрута не число")
+	}
+	return fl&rtfUp != 0 && fl&rtfReject == 0 && iface != "lo", nil
+}
+
+// scanDefault4 — /proc/net/route: заголовок; Iface Destination Gateway Flags … Mask … (hex).
+func scanDefault4(r io.Reader) (bool, error) {
+	sc := bufio.NewScanner(r)
+	sc.Scan() // заголовок
+	for sc.Scan() {
+		f := strings.Fields(sc.Text())
+		if len(f) < 8 {
+			return false, errors.New("строка таблицы маршрутов короче 8 полей")
+		}
+		if f[1] != "00000000" || f[7] != "00000000" {
+			continue
+		}
+		ok, err := usableRoute(f[0], f[3])
+		if err != nil || ok {
+			return ok, err
+		}
+	}
+	return false, sc.Err()
+}
+
+// scanDefault6 — /proc/net/ipv6_route без заголовка: назначение (32 hex), длина префикса (hex),
+// источник, его длина, следующий узел, метрика, счётчики, флаги, интерфейс.
+func scanDefault6(r io.Reader) (bool, error) {
+	sc := bufio.NewScanner(r)
+	for sc.Scan() {
+		f := strings.Fields(sc.Text())
+		if len(f) < 10 {
+			return false, errors.New("строка таблицы маршрутов IPv6 короче 10 полей")
+		}
+		if f[0] != strings.Repeat("0", 32) || f[1] != "00" {
+			continue
+		}
+		ok, err := usableRoute(f[9], f[8])
+		if err != nil || ok {
+			return ok, err
+		}
+	}
+	return false, sc.Err()
+}
+
 func (n fakeNet) Connect(ctx context.Context, addr netip.AddrPort) error {
 	if err := checkConnect(addr); err != nil {
 		return err

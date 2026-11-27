@@ -32,6 +32,10 @@ type LocalDeps struct {
 	// Firewall — пропускает ли локальный фаервол порт: FirewallAllowed, FirewallDenied или
 	// FirewallUnknown и откуда взято (ufw, iptables). Фаервол хостера с сервера не виден.
 	Firewall func(ctx context.Context, port int) (state, source string, err error)
+	// Routes — по каким семействам есть маршрут по умолчанию.
+	Routes interface {
+		DefaultRoutes(ctx context.Context) (platform.Families, error)
+	}
 	// Egress — исходящие соединения и адреса интерфейсов.
 	Egress interface {
 		Addrs(ctx context.Context) ([]platform.IfAddr, error)
@@ -51,6 +55,8 @@ const (
 	CheckListenIPv4   = "reach.listen.ipv4"
 	CheckListenIPv6   = "reach.listen.ipv6"
 	CheckFirewall     = "reach.firewall"
+	CheckRouteIPv4    = "ipv4.route"
+	CheckRouteIPv6    = "ipv6.route"
 	CheckEgressIPv4   = "ipv4.egress"
 	CheckEgressIPv6   = "ipv6.egress"
 )
@@ -80,13 +86,13 @@ func NewLocal(d LocalDeps) (*Engine, error) {
 	}
 	if d.Service == nil || d.Net == nil || d.Port == nil || d.Validate == nil ||
 		d.Version == nil || d.InRange == nil || d.Drift == nil ||
-		d.Families == nil || d.Served == nil || d.Egress == nil || d.Firewall == nil ||
+		d.Families == nil || d.Served == nil || d.Egress == nil || d.Routes == nil || d.Firewall == nil ||
 		d.Disk == nil || d.Memory == nil || d.OOMKills == nil || d.ClockSynced == nil {
 		return nil, fmt.Errorf("%w: не все измерения каталога local заданы", ErrRegistry)
 	}
 	c := d.ControlDeps
 	checks := []Check{installed{d}, versionRange{d}, serviceActive{c}, restarts{c}, listen{c}, listenFamily{d, false}, listenFamily{d, true}, firewall{d},
-		configValid{c}, configDrift{d}, egress{d, false}, egress{d, true},
+		configValid{c}, configDrift{d}, route{d, false}, route{d, true}, egress{d, false}, egress{d, true},
 		disk{d.HostDeps}, memory{d.HostDeps}, oom{d.HostDeps}, clock{d.HostDeps}}
 	ids := make([]string, len(checks))
 	for i, ch := range checks {
@@ -246,18 +252,64 @@ func usable(a netip.Addr, v6 bool) bool {
 	return !v6 || a.IsGlobalUnicast() && !a.IsPrivate()
 }
 
-func (c egress) Run(ctx context.Context) []Observation {
-	target := "egress." + map[bool]string{false: "ipv4", true: "ipv6"}[c.v6]
-	addrs, err := c.d.Egress.Addrs(ctx)
+type route struct {
+	d  LocalDeps
+	v6 bool
+}
+
+func (c route) ID() string {
+	if c.v6 {
+		return CheckRouteIPv6
+	}
+	return CheckRouteIPv4
+}
+func (route) Requires() []string { return nil }
+
+// needAddr — наблюдение, если семейство не измерить: адреса не прочитать (error) или пригодного
+// адреса семейства нет (skip); nil — адрес есть.
+func needAddr(ctx context.Context, d LocalDeps, target string, v6 bool) []Observation {
+	addrs, err := d.Egress.Addrs(ctx)
 	if err != nil {
 		return errObs(target, "не удалось прочитать адреса интерфейсов")
 	}
-	has := false
 	for _, a := range addrs {
-		has = has || usable(a.Addr, c.v6)
+		if usable(a.Addr, v6) {
+			return nil
+		}
 	}
-	if !has {
-		return []Observation{{Target: target, Status: StatusSkip, Reason: "на интерфейсах нет адреса " + family(c.v6)}}
+	return []Observation{{Target: target, Status: StatusSkip, Reason: "на интерфейсах нет адреса " + family(v6)}}
+}
+
+func (c route) Run(ctx context.Context) []Observation {
+	target := "route." + map[bool]string{false: "ipv4", true: "ipv6"}[c.v6]
+	if o := needAddr(ctx, c.d, target, c.v6); o != nil {
+		return o
+	}
+	fam, err := c.d.Routes.DefaultRoutes(ctx)
+	if err != nil {
+		return errObs(target, "не удалось прочитать таблицу маршрутов")
+	}
+	on := fam.IPv4
+	if c.v6 {
+		on = fam.IPv6
+	}
+	return obs(target, on, on,
+		"читается основная таблица маршрутов; правила policy routing и достижимость шлюза не проверяются")
+}
+
+func (c route) Fact(Observation) Finding {
+	f := Finding{Code: c.ID() + ".missing", Title: "нет маршрута по умолчанию для " + family(c.v6), Impact: ImpactDegraded,
+		Actions: []string{"ip route; ip -6 route — проверить настройку сети у хостера"}}
+	if !c.v6 {
+		f.Impact = ImpactDown // как у ipv4.egress: без IPv4 наружу клиенты не достанут большую часть адресов
+	}
+	return f
+}
+
+func (c egress) Run(ctx context.Context) []Observation {
+	target := "egress." + map[bool]string{false: "ipv4", true: "ipv6"}[c.v6]
+	if o := needAddr(ctx, c.d, target, c.v6); o != nil {
+		return o
 	}
 	for _, node := range egressNodes[c.v6] {
 		cctx, cancel := context.WithTimeout(ctx, egressTimeout)
