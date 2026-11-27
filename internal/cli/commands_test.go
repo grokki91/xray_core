@@ -38,6 +38,14 @@ type fakeApp struct {
 	restored string
 	// журнал
 	logs app.LogsOptions
+	// диагностика
+	diag     contract.DiagReport
+	diagOpts app.DiagOptions
+}
+
+func (f *fakeApp) Diagnose(_ context.Context, o app.DiagOptions) (contract.Envelope, error) {
+	f.diagOpts = o
+	return contract.New("1.2.3", fixedClock{}.Now(), f.diag), f.err
 }
 
 func (f *fakeApp) Logs(_ context.Context, o app.LogsOptions, w io.Writer) error {

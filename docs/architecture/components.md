@@ -532,8 +532,11 @@ type Vantage interface { // точка наблюдения: сейчас local;
   завершился, сокет не убрать, срок контроля вышел. Транзакцию откатывают `fail` и `error`, а `skip` — нет. Клиент останавливается, сокет убирается.
   Измерения — `SelftestDeps{Host, Socket, Start}`: `Host` (`FS`, `Net`, `Clock`) и `Process` объявлены
   в `diag`, чтобы `app` не импортировал `platform`; подставляет `cmd/xm`.
-- Время наблюдения и точка наблюдения (`vantage`) войдут в отчёт вместе со схемой `diag-report`;
-  сейчас отчёт живёт только внутри процесса.
+- `RunCategory(ctx, set, category)` — проверки одной категории набора и их зависимости из
+  других категорий (`xm diag --only`); категории нет — `ErrUnknownCategory`.
+- История — `diag.History`: `Free` (свободное имя `<время>[-N]`), `Save` (файл в
+  `/var/lib/xm/diag`, хранение 50), `Export` (файл владельца); пишет уже отредактированный
+  документ. Точка наблюдения и окружение ставит `app` в схеме `diag-report`.
 - Реестр проверяется в `New`: ID по правилу и без повторов;
   зависимость зарегистрирована раньше зависимой и входит в те же наборы; набор `control` есть.
   Нарушение — `ErrRegistry`.
@@ -547,7 +550,7 @@ type Vantage interface { // точка наблюдения: сейчас local;
   `degraded`: зависимые не запускаются, поэтому он без проваленных зависимостей.
 - Анализ — правила «наблюдения → вывод» классов `probable | hypothesis`; факт строит проверка (ADR-0029); модель и
   каталог проверок — [diagnostics.md](../operations/diagnostics.md).
-- Отчёт всегда проходит `redact` перед сохранением и экспортом. Движок, вердикт и набор `control` есть; поле `health` схемы `status` и строка вердикта в `install` и `status` есть, поле схемы `diag-report` — с отчётом фазы 5 ([ADR-0024](../adr/0024-health-verdict-and-shared-checks.md), задача A2 в [roadmap.md](../roadmap.md) §7); каталог — фаза 5: проверки категории `xray`, `reach.listen.ipv4` и `.ipv6`, `ipv4.egress` и `ipv6.egress`, `reach.firewall` (`diag.NewLocal`, набор `local`) есть, остальное — по шагу 5; полностью — после MVP. Исходящая связность измеряется в `diag` через `platform.Net.Connect` к контрольным узлам, без метода `network`.
+- Отчёт всегда проходит `redact` перед сохранением и экспортом. Движок, вердикт и набор `control` есть; поле `health` схемы `status` и строка вердикта в `install` и `status` есть, поле схемы `diag-report` — с отчётом фазы 5 ([ADR-0024](../adr/0024-health-verdict-and-shared-checks.md), задача A2 в [roadmap.md](../roadmap.md) §7); каталог — фаза 5: проверки категории `xray`, `reach.listen.ipv4` и `.ipv6`, `ipv4.egress` и `ipv6.egress`, `reach.firewall` (`diag.NewLocal`, набор `local`) и команда `xm diag` (`app.Diagnose`: каталог из менеджеров, редактор `Redactor.JSON`, история, экспорт) есть; полностью — после MVP. Исходящая связность измеряется в `diag` через `platform.Net.Connect` к контрольным узлам, без метода `network`.
 
 ### logging
 
@@ -681,7 +684,7 @@ type App interface {
     ProfileRemove(ctx context.Context, name string) error
     UpdateCheck(ctx context.Context) (UpdateInfo, error)
     Update(ctx context.Context, o UpdateOptions) (UpdateResult, error)
-    Diagnose(ctx context.Context, sel Selector) (Report, error)
+    Diagnose(ctx context.Context, o DiagOptions) (contract.Envelope, error) // документ diag-report
     Logs(ctx context.Context, q Query) (io.ReadCloser, error)
     BackupCreate(ctx context.Context) (Snapshot, error)
     BackupList(ctx context.Context) ([]Snapshot, error)

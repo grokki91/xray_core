@@ -38,6 +38,17 @@ func TestGolden(t *testing.T) {
 			{ID: "20260101T000000Z-manual", Created: 1767225600, Kind: "manual", XM: "0.1.0", Xray: "26.11.9", Valid: true},
 			{ID: "20260101T010000Z-profile-add", Created: 1767229200, Kind: "auto"},
 		}}),
+		"diag-report": New("0.1.0", at, DiagReport{
+			ID: "20260101T000000Z", Vantage: DiagVantage{Kind: "local", ID: "server"},
+			Env: DiagEnv{XM: "0.1.0", Xray: "26.11.9", OS: "ubuntu-24.04"}, Health: "down",
+			Observations: []DiagObservation{
+				{Check: "xray.service.active", Status: "fail", Value: "inactive", Limits: []string{"состояние юнита, не работа протокола"}},
+				{Check: "reach.listen", Status: "skip", Reason: "не прошла зависимость xray.service.active"},
+			},
+			Findings: []DiagFinding{{Code: "xray.service.inactive", Class: "fact", Title: "Служба Xray не активна",
+				Evidence: []string{"xray.service.active"}, Actions: []string{"xm start"}, Impact: "down"}},
+			Summary: DiagSummary{Fail: 1, Skip: 1},
+		}),
 		"profiles": New("0.1.0", at, Profiles{Profiles: []ProfileItem{
 			{Name: "phone", Created: 1767225600, Enabled: true},
 			{Name: "laptop", Created: 1767229200},

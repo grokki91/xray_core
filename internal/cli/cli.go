@@ -46,6 +46,7 @@ type App interface {
 	BackupList(ctx context.Context) (contract.Backups, error)
 	Restore(ctx context.Context, id string) error
 	Logs(ctx context.Context, o app.LogsOptions, w io.Writer) error
+	Diagnose(ctx context.Context, o app.DiagOptions) (contract.Envelope, error)
 }
 
 // Env — то, что получает команда: потоки вывода, версия сборки, часы и прикладной слой. Ctx
@@ -98,6 +99,8 @@ func commands() []command {
 			json: true, flags: backupFlags, run: runBackup},
 		{name: "restore", usage: "xm restore <id> [--yes]", summary: "восстановить состояние из снимка",
 			flags: restoreFlags, minArgs: 1, maxArgs: 1, run: runRestore},
+		{name: "diag", usage: "xm diag [--only <категория>] [--export <файл>] [--json]",
+			summary: "диагностика с самого сервера; проблемы — код 4", json: true, flags: diagFlags, run: runDiag},
 		{name: "logs", usage: "xm logs [-f] [--since <время>]", summary: "журнал Xray и xm без данных установки",
 			flags: logsFlags, run: runLogs},
 		{name: "version", usage: "xm version [--json]", summary: "версия xm", json: true, run: runVersion},

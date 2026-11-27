@@ -32,6 +32,8 @@ type registry struct{ r *redact.Redactor }
 
 func (g registry) Register(kind, value string) { g.r.Register(redact.Kind(kind), value) }
 
+func (g registry) JSON(v any) (any, error) { return g.r.JSON(v) }
+
 func main() {
 	// Ctrl-C отменяет команду, но не откат транзакции: он идёт под собственным сроком. Убитый
 	// процесс оставляет журнал, и следующий запуск откатит транзакцию (ADR-0005).

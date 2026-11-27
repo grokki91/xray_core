@@ -388,8 +388,12 @@ func (a *App) loadPrev() (st store.State, had bool, err error) {
 }
 
 // Redactor — реестр точных значений редактора (kind — вид значения: key, short-id, server-ip,
-// domain). Нужен, чтобы шаблоны не были единственной защитой: shortId шаблон не ловит.
-type Redactor interface{ Register(kind, value string) }
+// domain). Нужен, чтобы шаблоны не были единственной защитой: shortId шаблон не ловит. JSON —
+// копия значения, каждая строка которой прошла редактор (отчёт диагностики).
+type Redactor interface {
+	Register(kind, value string)
+	JSON(v any) (any, error)
+}
 
 // register вносит в редактор секреты и данные установки из состояния.
 func (a *App) register(st store.State) {

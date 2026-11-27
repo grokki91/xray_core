@@ -9,6 +9,9 @@ import (
 	"github.com/grokki91/xray_core/internal/platform"
 )
 
+// Families — семейства адресов (platform.Families): app называет тип, не импортируя platform.
+type Families = platform.Families
+
 // LocalDeps — измерения каталога точки наблюдения local (фаза 5): набор control и проверки
 // категории xray, которых контролю транзакции не нужно.
 type LocalDeps struct {
@@ -24,7 +27,7 @@ type LocalDeps struct {
 		ListeningFamilies(ctx context.Context, port int) (platform.Families, error)
 	}
 	// Served — семейства адресов сервера из состояния: на них клиенты подключаются.
-	Served func(ctx context.Context) (platform.Families, error)
+	Served func(ctx context.Context) (Families, error)
 	// Firewall — пропускает ли локальный фаервол порт: FirewallAllowed, FirewallDenied или
 	// FirewallUnknown и откуда взято (ufw, iptables). Фаервол хостера с сервера не виден.
 	Firewall func(ctx context.Context, port int) (state, source string, err error)

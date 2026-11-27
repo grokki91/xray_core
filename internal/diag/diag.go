@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 )
 
 var (
@@ -19,6 +20,8 @@ var (
 	ErrUnknownSet = errors.New("diag: неизвестный набор проверок")
 	// ErrRule — правило анализа вернуло вывод, нарушающий модель (ADR-0011).
 	ErrRule = errors.New("diag: правило анализа нарушает модель выводов")
+	// ErrUnknownCategory — в наборе нет проверок такой категории.
+	ErrUnknownCategory = errors.New("diag: в наборе нет проверок этой категории")
 )
 
 // SetControl — набор контроля транзакции; его skip и error дают вердикт unknown (ADR-0024).
@@ -180,6 +183,62 @@ func (e *Engine) Run(ctx context.Context, set string) (Report, error) {
 	if !ok {
 		return Report{}, fmt.Errorf("%w: %q", ErrUnknownSet, set)
 	}
+	return e.run(ctx, set, ids)
+}
+
+// Category — категория проверки: первая часть ID.
+func Category(id string) string { cat, _, _ := strings.Cut(id, "."); return cat }
+
+// RunCategory выполняет проверки набора одной категории (`xm diag --only`) и их зависимости
+// из других категорий: без них проверка не измеряет, а skip «не прошла зависимость» скрыл бы
+// настоящую причину. Порядок — порядок реестра. Категории в наборе нет — ErrUnknownCategory.
+func (e *Engine) RunCategory(ctx context.Context, set, category string) (Report, error) {
+	ids, ok := e.sets[set]
+	if !ok {
+		return Report{}, fmt.Errorf("%w: %q", ErrUnknownSet, set)
+	}
+	need := map[string]bool{}
+	var mark func(id string)
+	mark = func(id string) {
+		if need[id] {
+			return
+		}
+		need[id] = true
+		for _, r := range e.byID[id].Requires() {
+			mark(r)
+		}
+	}
+	for _, id := range ids {
+		if Category(id) == category {
+			mark(id)
+		}
+	}
+	if len(need) == 0 {
+		return Report{}, fmt.Errorf("%w: %q", ErrUnknownCategory, category)
+	}
+	var sel []string
+	for _, id := range ids {
+		if need[id] {
+			sel = append(sel, id)
+		}
+	}
+	return e.run(ctx, set, sel)
+}
+
+// Categories — категории проверок набора в порядке реестра.
+func (e *Engine) Categories(set string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, id := range e.sets[set] {
+		if c := Category(id); !seen[c] {
+			seen[c] = true
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func (e *Engine) run(ctx context.Context, set string, ids []string) (Report, error) {
 	r := Report{Set: set}
 	passed := map[string]bool{}
 	unknown := false

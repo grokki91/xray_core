@@ -256,6 +256,7 @@ if [[ $hi =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && $lo =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && $hi 
 	ok "update --check: активная $hi, нижняя граница $lo"
 else
 	bad "update --check: активная «$hi», нижняя граница «$lo»"
+	sed 's/^/     | /' "$out/update-check" # ответ xm уже прошёл редактор: без него причину не найти
 fi
 "$xm" update --to "$lo" --json >"$out/update-to" 2>&1
 eq "update --to: код" "$?" 0
