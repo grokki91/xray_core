@@ -603,6 +603,12 @@ NewChecks(p).Save(Check) / Load() (Check, bool, error)        // итог пос
   действующей конфигурации → транзакция `Change{Core}` → `core.Prune(новая, прежняя)`) — `app.Update`; `--rollback` — та же
   транзакция на `core.previous` без сети и без `Prune`; удалённый каталог версии — `core.ErrNotStaged`.
 - Проверка целостности, диапазон проверенных версий, откат — [updates.md](../operations/updates.md).
+- `NewSelf(p, token)` — релизы самого `xm` ([ADR-0045](../adr/0045-self-update-via-staged-binary.md)):
+  `Latest`; `Stage` — `xm-linux-amd64` и `SHA256SUMS` того же релиза, сверка SHA-256, файл в
+  `platform.XMNextPath`; `Probe`, `Apply` — `xm-next version` и `xm-next self-apply` программой
+  закрытого списка; `Install`, `Restore`, `Discard` — замена и возврат `/usr/local/bin/xm`.
+  Сценарий — `app.Update` с `Self` (старый `xm`) и `app.SelfApply` (новый): транзакция
+  `Change{XMReplaced}`, журнал `xm_replaced`, откат возвращает прежний бинарник после снятия журнала.
 - `NewGitHub(p, token)`: `token` — значение `XM_GITHUB_TOKEN`, его читает `cmd/xm` и
   регистрирует в редакторе (вид `token`), если `ValidToken`; `Latest` проверяет формат до сети и шлёт токен только в
   API, `Fetch` — без него ([ADR-0031](../adr/0031-github-api-token.md)).

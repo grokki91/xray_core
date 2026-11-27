@@ -10,6 +10,8 @@
 | Путь | Владелец | Права | Секреты | Назначение |
 |---|---|---|---|---|
 | `/usr/local/bin/xm` | root:root | 0755 | нет | менеджер |
+| `/usr/local/bin/xm.previous` | root:root | 0755 | нет | прежний `xm` после `xm update --self`; его версия — `xm.previous` в состоянии ([ADR-0045](../adr/0045-self-update-via-staged-binary.md)) |
+| `/usr/local/lib/xm/xm.next` | root:root | 0755 | нет | новый `xm` на время `xm update --self`: выложен после сверки SHA-256, убирается в конце команды ([ADR-0045](../adr/0045-self-update-via-staged-binary.md)) |
 | `/usr/local/lib/xm/`, `core/`, `core/<версия>/` | root:root | 0755 | нет | каталоги версий Xray; создаёт `core.Stage` |
 | `/usr/local/lib/xm/core/<версия>/xray` | root:root | 0755 | нет | бинарники Xray (две версии) |
 | `/usr/local/lib/xm/core/current` | root:root | ссылка | нет | активная версия: цель — имя каталога версии ([ADR-0019](../adr/0019-versioned-xray-exec-and-current-link.md)) |
@@ -35,7 +37,7 @@
 
 ```json
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "server": {
     "addresses": {"ipv4": "203.0.113.10", "ipv6": "2001:db8::10", "domain": ""},
     "port": 443
@@ -60,6 +62,7 @@
   "dns": {"doh": ["https://1.1.1.1/dns-query"], "strategy": "UseIP"},
   "firewall": {"ufw_rule": false},
   "core": {"version": "26.11.9", "previous": "26.10.21", "hold": false},
+  "xm": {"version": "0.1.0", "previous": "0.0.3"},
   "applied": {"config_sha256": "<sha256 последнего применённого config.json>", "at": "2026-01-01T00:00:00Z"}
 }
 ```
@@ -71,6 +74,9 @@
   `profiles`); `config` отрисовывает его в клиентах входящего последним. Пустой id — клиента нет:
   миграция 1 → 2 оставляет его пустым, а любая транзакция `app` с пустым id создаёт UUID через
   `security.NewClientID` (установка — тоже). Секрет класса S1: в снимках, в редакторе — UUID.
+- `xm.version` — версия `xm`, применившая последнюю транзакцию: её правила отрисовали
+  конфигурацию; `xm.previous` — версия до последнего `xm update --self`
+  ([ADR-0045](../adr/0045-self-update-via-staged-binary.md)). Миграция 3 → 4 ставит пустые строки.
 - `firewall.ufw_rule` — правило UFW для порта сервера поставил `xm` ([ADR-0041](../adr/0041-ufw-rule-in-install-transaction.md)):
   снимает правило только `xm` и только по этой метке. Миграция 2 → 3 ставит `false`.
 - `inbounds` — список, в MVP ровно один элемент: второй пресет добавляется без миграции.

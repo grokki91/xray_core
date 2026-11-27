@@ -134,10 +134,15 @@ func (g *GitHub) Tag(ctx context.Context, version string) (Release, error) {
 
 // release запрашивает и разбирает один релиз; предварительный и черновик — ошибка.
 func (g *GitHub) release(ctx context.Context, url, what string) (Release, error) {
-	if g.token != "" && !ValidToken(g.token) {
+	return fetchRelease(ctx, g.p, g.token, url, what)
+}
+
+// fetchRelease — общий для релизов Xray и xm (ADR-0045) запрос к API.
+func fetchRelease(ctx context.Context, p platform.Platform, token, url, what string) (Release, error) {
+	if token != "" && !ValidToken(token) {
 		return Release{}, fmt.Errorf("%s: %s: допустимы 40–4096 символов A-Z, a-z, 0-9, «.», «-», «_»", what, TokenEnv)
 	}
-	body, err := g.p.Net().Get(ctx, platform.Request{URL: url, Hosts: apiHosts, Max: maxRelease, Token: g.token})
+	body, err := p.Net().Get(ctx, platform.Request{URL: url, Hosts: apiHosts, Max: maxRelease, Token: token})
 	if err != nil {
 		return Release{}, fmt.Errorf("%s: %w", what, err)
 	}

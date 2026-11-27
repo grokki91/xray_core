@@ -110,6 +110,9 @@ func (m *Manager) EnsureBaseline(ctx context.Context) error {
 // XMBinary — бинарник менеджера (docs/architecture/data-model.md §1).
 const XMBinary = "/usr/local/bin/xm"
 
+// XMPrevious — прежний бинарник после `xm update --self` (ADR-0045).
+const XMPrevious = "/usr/local/bin/xm.previous"
+
 // Корни манифеста для удаления (ADR-0042): binaries — всегда, purgeTrees — только с --purge;
 // /etc/xm удаляется последним: пока состояние есть, повтор uninstall видит установку.
 var (
@@ -129,8 +132,10 @@ func (m *Manager) Remove(ctx context.Context, purge bool) error {
 			return fmt.Errorf("удаление: %w", err)
 		}
 	}
-	if err := f.Remove(XMBinary); err != nil && !errors.Is(err, platform.ErrNotFound) {
-		return fmt.Errorf("удаление: %w", err)
+	for _, b := range []string{XMPrevious, XMBinary} {
+		if err := f.Remove(b); err != nil && !errors.Is(err, platform.ErrNotFound) {
+			return fmt.Errorf("удаление: %w", err)
+		}
 	}
 	if !purge {
 		return nil

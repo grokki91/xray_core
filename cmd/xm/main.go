@@ -60,6 +60,7 @@ func run(ctx context.Context) int {
 		Redactor: registry{reg},
 		Host:     p,
 		Releases: update.NewGitHub(p, token),
+		Self:     update.NewSelf(p, token),
 		Checks:   update.NewChecks(p),
 		XM:       version,
 		Now:      p.Clock().Now,

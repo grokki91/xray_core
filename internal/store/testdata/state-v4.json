@@ -1,0 +1,63 @@
+{
+  "schema_version": 4,
+  "server": {
+    "addresses": {
+      "ipv4": "203.0.113.10",
+      "ipv6": "2001:db8::10",
+      "domain": ""
+    },
+    "port": 443
+  },
+  "inbounds": [
+    {
+      "preset": "reality-xhttp",
+      "reality": {
+        "target": "example.com:443",
+        "server_names": [
+          "example.com"
+        ],
+        "private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "public_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "short_ids": [
+          "0123456789abcdef"
+        ]
+      },
+      "params": {
+        "path": "/example"
+      }
+    }
+  ],
+  "profiles": [
+    {
+      "name": "phone",
+      "id": "00000000-0000-4000-8000-000000000001",
+      "created": "2026-01-01T00:00:00Z",
+      "enabled": true
+    }
+  ],
+  "selftest": {
+    "id": ""
+  },
+  "dns": {
+    "doh": [
+      "https://1.1.1.1/dns-query"
+    ],
+    "strategy": "UseIP"
+  },
+  "firewall": {
+    "ufw_rule": false
+  },
+  "core": {
+    "version": "26.11.9",
+    "previous": "26.10.21",
+    "hold": false
+  },
+  "xm": {
+    "version": "",
+    "previous": ""
+  },
+  "applied": {
+    "config_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "at": "2026-01-01T00:00:00Z"
+  }
+}

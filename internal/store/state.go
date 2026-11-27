@@ -14,6 +14,7 @@ type State struct {
 	DNS           DNS       `json:"dns"`
 	Firewall      Firewall  `json:"firewall"`
 	Core          Core      `json:"core"`
+	XM            XM        `json:"xm"`
 	Applied       Applied   `json:"applied"`
 }
 
@@ -72,6 +73,13 @@ type Core struct {
 	Version  string `json:"version"`
 	Previous string `json:"previous"`
 	Hold     bool   `json:"hold"`
+}
+
+// XM — версии самого xm (ADR-0045): Version — применившая последнюю транзакцию; Previous —
+// версия до последнего `xm update --self`, её бинарник — /usr/local/bin/xm.previous.
+type XM struct {
+	Version  string `json:"version"`
+	Previous string `json:"previous"`
 }
 
 // Applied — что последним применено к Xray: сравнение суммы с файлом выявляет дрейф.

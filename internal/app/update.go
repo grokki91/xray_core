@@ -29,6 +29,7 @@ type UpdateOptions struct {
 	Check    bool
 	To       string
 	Rollback bool
+	Self     bool // обновить сам xm (ADR-0045); ни с чем не сочетается
 }
 
 // Update выбирает версию Xray и, кроме --check и удержания, переключает на неё транзакцией с
@@ -40,6 +41,14 @@ func (a *App) Update(ctx context.Context, o UpdateOptions) (contract.Update, err
 		if _, err := core.ParseVersion(to); err != nil {
 			return contract.Update{}, fmt.Errorf("%w: --to: %w", ErrInput, err)
 		}
+	}
+	if o.Self {
+		if o.Check || o.To != "" || o.Rollback {
+			return contract.Update{}, fmt.Errorf("%w: --self не сочетается с --check, --to и --rollback", ErrInput)
+		}
+		ctx, cancel := context.WithTimeout(ctx, updateTimeout)
+		defer cancel()
+		return a.updateSelf(ctx)
 	}
 	if o.Rollback && (o.Check || o.To != "") {
 		return contract.Update{}, fmt.Errorf("%w: --rollback не сочетается с --check и --to", ErrInput)
@@ -71,7 +80,7 @@ func (a *App) Update(ctx context.Context, o UpdateOptions) (contract.Update, err
 		return contract.Update{}, err
 	}
 	rg := update.Verified()
-	res := contract.Update{Current: string(cur), Range: contract.Range{Min: rg.Min, Max: rg.Max},
+	res := contract.Update{Component: contract.ComponentXray, Current: string(cur), Range: contract.Range{Min: rg.Min, Max: rg.Max},
 		Held: st.Core.Hold, Unchecked: updateUnchecked}
 
 	if o.Rollback {

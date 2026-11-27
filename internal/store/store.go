@@ -22,7 +22,7 @@ const (
 )
 
 // SchemaVersion — версия схемы, которую пишет эта сборка.
-const SchemaVersion = 3
+const SchemaVersion = 4
 
 var (
 	ErrNoState     = errors.New("состояния нет: xm не установлен")
@@ -35,7 +35,9 @@ var (
 type migration func(doc map[string]any) (map[string]any, error)
 
 // migrations — шаги миграции по исходной версии.
-func migrations() map[int]migration { return map[int]migration{1: addSelftest, 2: addFirewall} }
+func migrations() map[int]migration {
+	return map[int]migration{1: addSelftest, 2: addFirewall, 3: addXM}
+}
 
 // addSelftest: версия 2 добавляет служебного клиента самопроверки; поле пустое, id создаёт
 // следующая транзакция app (ADR-0032).
@@ -54,6 +56,16 @@ func addFirewall(doc map[string]any) (map[string]any, error) {
 		return nil, errors.New("в версии 2 уже есть firewall")
 	}
 	doc["firewall"] = map[string]any{"ufw_rule": false}
+	return doc, nil
+}
+
+// addXM: версия 4 добавляет версию xm, применившую последнюю транзакцию, и прежнюю версию
+// после `xm update --self` (ADR-0045); до версии 4 их не записывали.
+func addXM(doc map[string]any) (map[string]any, error) {
+	if _, ok := doc["xm"]; ok {
+		return nil, errors.New("в версии 3 уже есть xm")
+	}
+	doc["xm"] = map[string]any{"version": "", "previous": ""}
 	return doc, nil
 }
 

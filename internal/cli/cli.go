@@ -38,6 +38,7 @@ type App interface {
 	Service(ctx context.Context, a app.Action) error
 	Status(ctx context.Context) (contract.Status, error)
 	Update(ctx context.Context, o app.UpdateOptions) (contract.Update, error)
+	SelfApply(ctx context.Context, previous string) (contract.Update, error)
 	ProfileAdd(ctx context.Context, name string, o app.ShareOptions) (app.ProfileView, error)
 	ProfileList(ctx context.Context) (contract.Profiles, error)
 	ProfileShow(ctx context.Context, name string, o app.ShareOptions) (app.ProfileView, error)
@@ -68,6 +69,7 @@ type command struct {
 	usage   string
 	summary string
 	json    bool                   // команда поддерживает --json
+	hidden  bool                   // служебная: нет в справке (self-apply, ADR-0045)
 	flags   func(fs *flag.FlagSet) // объявление собственных флагов
 	// args — позиционные аргументы: сколько обязательных и сколько допустимых; флаги можно
 	// ставить до, между и после них.
@@ -87,8 +89,10 @@ func commands() []command {
 		{name: "restart", usage: "xm restart", summary: "перезапустить службу Xray", run: service(app.Restart)},
 		{name: "status", usage: "xm status [--json]", summary: "состояние службы, версии, адреса, порт",
 			json: true, run: runStatus},
-		{name: "update", usage: "xm update [--check] [--to <версия>] [--json]",
+		{name: "update", usage: "xm update [--check] [--to <версия>] [--rollback] [--self] [--json]",
 			summary: "обновить Xray до последней проверенной версии с контролем и откатом", json: true, flags: updateFlags, run: runUpdate},
+		{name: "self-apply", usage: "xm self-apply --previous <версия> --json",
+			summary: "служебная: новый xm применяет себя при xm update --self", json: true, hidden: true, flags: selfApplyFlags, run: runSelfApply},
 		{name: "add", usage: "xm add [имя] [--client <id>] [--address <адрес>] [--json]",
 			summary: "создать профиль, показать ссылки и QR", json: true, flags: shareFlags, maxArgs: 1, run: runAdd},
 		{name: "list", usage: "xm list [--json]", summary: "профили: имя, дата, состояние", json: true, run: runList},
@@ -184,6 +188,9 @@ func writeUsage(w io.Writer) {
 	var b strings.Builder
 	b.WriteString("Использование: xm <команда> [флаги]\n\nКоманды:\n")
 	for _, c := range commands() {
+		if c.hidden {
+			continue
+		}
 		fmt.Fprintf(&b, "  %-8s %s\n", c.name, c.summary)
 	}
 	b.WriteString("\nСправка по команде: xm <команда> -h\n")

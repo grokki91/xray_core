@@ -108,7 +108,7 @@ func newFresh(t *testing.T) *sys { return build(t, false) }
 func build(t *testing.T, installed bool) *sys {
 	t.Helper()
 	root := t.TempDir()
-	for _, d := range []string{"/etc/systemd/system", "/usr/lib", "/usr/local/lib", "/usr/local/etc", "/var/lib", "/run", "/proc"} {
+	for _, d := range []string{"/etc/systemd/system", "/usr/lib", "/usr/local/bin", "/usr/local/lib", "/usr/local/etc", "/var/lib", "/run", "/proc"} {
 		if err := os.MkdirAll(root+d, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -234,7 +234,7 @@ func build(t *testing.T, installed bool) *sys {
 		Store: store.New(p.FS()), Backup: backup.New(p), Config: config.New(p), Core: core.New(p),
 		Server: server.New(p, cfgPath), Logging: logging.New(p, reg, slog.LevelInfo), Profile: profile.New(),
 		Network:  network.New(p),
-		Security: security.New(p), Releases: s.rel, Checks: update.NewChecks(p), Redactor: regAdapter{reg},
+		Security: security.New(p), Releases: s.rel, Self: update.NewSelf(p, ""), Checks: update.NewChecks(p), Redactor: regAdapter{reg},
 		XM: "0.1.0", Now: f.Clock().Now, ControlTimeout: 150 * time.Millisecond, Host: p,
 	})
 	return s
