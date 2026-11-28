@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -36,6 +37,24 @@ func TestHelpListsEveryCommand(t *testing.T) {
 	for _, c := range commands() {
 		if listed := strings.Contains(stdout, "\n  "+c.name+" "); listed == c.hidden {
 			t.Errorf("команда %q: в справке %v, служебная %v:\n%s", c.name, listed, c.hidden, stdout)
+		}
+	}
+}
+
+// README и руководство владельца называют каждую команду из справки и не называют служебные:
+// документ владельца не отстаёт от CLI (критерий MVP 12, docs/roadmap.md §4).
+func TestOwnerDocsListEveryCommand(t *testing.T) {
+	for _, doc := range []string{"../../README.md", "../../docs/guide/usage.md"} {
+		b, err := os.ReadFile(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range commands() {
+			// «xm stop», «xm start|stop|restart», «xm version|help».
+			re := regexp.MustCompile(`(?m)xm (?:[a-z-]+\|)*` + regexp.QuoteMeta(c.name) + "(?:[\\s|`\\]]|$)")
+			if named := re.Match(b); named == c.hidden {
+				t.Errorf("%s: команда %q названа %v, служебная %v", doc, c.name, named, c.hidden)
+			}
 		}
 	}
 }

@@ -1,7 +1,6 @@
 # xm — менеджер Xray-core
 
-> **Состояние: выпуски 0.0.x.** Работают установка, удаление, профили и управление службой;
-> остальное — план до выпуска 0.1.0 ([docs/roadmap.md](docs/roadmap.md)).
+> **Состояние: выпуски 0.0.x, готовится 0.1.0** — MVP без Web UI ([docs/roadmap.md](docs/roadmap.md)).
 
 Простой и безопасный способ поднять и обслуживать официальный
 [Xray-core](https://github.com/XTLS/Xray-core) на своём VPS: одна команда — и на выходе ссылка
@@ -15,10 +14,9 @@ VLESS и QR-код. Разбираться в сетевой конфигура�
 - IPv4 и IPv6, DNS over HTTPS.
 - Диагностика сервера и сети, которая отделяет факты от гипотез.
 - Резервные копии и восстановление.
-- Локальный Web UI через SSH-туннель; в интернет не открывается.
+- Локальный Web UI через SSH-туннель — после 0.1.0; в интернет не открывается.
 - Секреты создаются и хранятся только на сервере.
-
-Проект не обещает обход DPI и блокировок.
+- Обход DPI и блокировок проект не обещает.
 
 ## Стек
 
@@ -28,9 +26,7 @@ VLESS и QR-код. Разбираться в сетевой конфигура�
 | Xray-core (upstream) | VPN-сервер; ставится из официальных релизов |
 | systemd | служба Xray, таймеры |
 | HTML, CSS, JavaScript без сборки | Web UI, встроен в `xm` |
-| Bash | только загрузчик `install.sh` |
-
-Docker не нужен.
+| Bash | только загрузчик `install.sh`; Docker не нужен |
 
 ## Требования к VPS
 
@@ -39,40 +35,46 @@ Ubuntu Server 22.04 или 24.04, x86_64, доступ root или `sudo`. Ра�
 
 ## Установка
 
-В одну строку — последний выпуск, сумма SHA-256 сверяется до запуска:
+В одну строку — последний выпуск:
 
 ```bash
 curl -fsSL https://github.com/grokki91/xray_core/releases/latest/download/install.sh | sudo bash
 ```
 
-Скачать и прочитать загрузчик, затем `sudo bash install.sh`; фиксированная версия —
-`sudo XM_VERSION=vX.Y.Z bash`. Все три варианта, флаги и что меняется на сервере —
-[руководство по установке](docs/guide/install.md). Сборка из исходников (Go — версия из `go.mod`):
+Загрузчик сверяет SHA-256 и запускает `xm install`. Прочитать его до запуска, фиксированная
+версия, флаги, что меняется на сервере — [руководство по установке](docs/guide/install.md).
+Сборка из исходников (Go — версия из `go.mod`):
 `CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=0.0.0-dev" -o xm ./cmd/xm`.
 
 ## Команды
 
 ```bash
-xm status             # состояние сервера, Xray и сети
-xm add [имя]          # создать профиль: ссылка и QR
-xm list               # профили
-xm show <имя>         # ссылка и QR повторно
-xm rm <имя>           # удалить профиль
-xm backup [--list]    # снимок состояния; список снимков
-xm restore <id>       # восстановить из снимка
-xm start|stop|restart # служба Xray
-xm uninstall          # удаление
+# от root (sudo); кроме version и help
+xm status                  # служба, версии, адреса, вердикт здоровья
+xm add [имя]               # создать профиль: ссылка и QR
+xm list                    # профили без секретов
+xm show <имя>              # ссылка и QR повторно
+xm rm <имя>                # удалить профиль
+xm update [--check]        # обновить Xray: контроль и автоматический откат
+xm update --rollback       # вернуть предыдущую версию Xray
+xm update --self           # обновить сам xm
+xm diag [--export <файл>]  # диагностика; проблемы — код 4
+xm logs [-f] [--since 1h]  # журнал Xray и xm
+xm backup [--list]         # снимок состояния; список снимков
+xm restore <id>            # восстановить из снимка
+xm start|stop|restart      # служба Xray
+xm uninstall [--purge]     # удаление; --purge — и состояние со снимками
+xm version|help            # версия xm; справка
 ```
 
-План: `xm update`, `xm diag`, `xm logs`, `xm ui`. Все команды и
-флаги — [docs/architecture/interfaces.md](docs/architecture/interfaces.md).
+Как этим пользоваться — [руководство по эксплуатации](docs/guide/usage.md); все флаги и коды
+выхода — [docs/architecture/interfaces.md](docs/architecture/interfaces.md).
 
 ## Диагностика
 
-`xm diag` (в плане) проверяет Xray, порты, IPv4 и IPv6, DNS, TLS, соединения и маршрутизацию. Отчёт
-разделяет подтверждённые факты, вероятные причины и гипотезы и называет пределы каждого
-измерения. `xm diag --export` сохраняет отчёт без адресов, ключей и идентификаторов. Подробнее —
-[docs/operations/diagnostics.md](docs/operations/diagnostics.md).
+`xm diag` с самого сервера проверяет Xray, порт и локальный фаервол, IPv4 и IPv6, ресурсы узла; отчёт
+разделяет факты, вероятные причины и гипотезы, доступность извне не доказывает. `--export` пишет
+его без адресов, ключей и идентификаторов — [docs/operations/diagnostics.md](docs/operations/diagnostics.md).
 
 ## Репозиторий
 
