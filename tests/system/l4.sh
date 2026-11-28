@@ -335,6 +335,34 @@ want=$(oomcount)
 eq "host.memory.oom после OOM: fail и число записей" "$(obs diag-oom host.memory.oom | jq -r '.[0].status + " " + (.[0].value|tostring)' 2>/dev/null)" "fail $want"
 check "diag после OOM: вывод host.memory.oom" jq -e '.data.findings | any(.code == "host.memory.oom")' "$out/diag-oom"
 
+# 12b. Бюджеты (overview.md §8, шаг 8 фазы 5). Память разовой команды — пик VmHWM самого xm (без
+# дочерних xray), снятый опросом /proc, пока процесс жив: нижняя оценка пика; итог печатается
+# строкой env для записи замера. Нет ни одного отсчёта — провал, а не ноль.
+peak() { # peak ВЫВОД КОМАНДА… — пик RSS xm в КБ на stdout
+	local pid hwm last=""
+	"$xm" "${@:2}" >"$out/$1" 2>&1 </dev/null &
+	pid=$!
+	while hwm=$(awk '/^VmHWM:/ {print $2}' "/proc/$pid/status" 2>/dev/null) && [[ -n $hwm ]]; do
+		last=$hwm
+		sleep 0.01
+	done
+	wait "$pid"
+	echo "$last"
+}
+for c in "status --json" "diag --json" "add budget --json" "backup --json" "update --check --json" "logs"; do
+	read -ra argv <<<"$c"
+	kb=$(peak "budget-${argv[0]}" "${argv[@]}")
+	echo "env  память xm ${argv[0]}: ${kb:-нет отсчёта} КБ"
+	if [[ $kb =~ ^[0-9]+$ ]] && ((kb <= 20480)); then ok "бюджет памяти: xm ${argv[0]} ≤ 20 МБ"; else bad "бюджет памяти: xm ${argv[0]} — «$kb» КБ"; fi
+done
+size=$(stat -c %s "$xm")
+echo "env  размер xm (сборка CI, без -s -w): $size байт"
+if ((size <= 15 * 1024 * 1024)); then ok "бюджет: размер xm ≤ 15 МБ"; else bad "бюджет: размер xm $size"; fi
+if pgrep -x xm >/dev/null; then bad "бюджет: процессы xm в простое"; else ok "бюджет: процессов xm в простое нет"; fi
+data=$(du -sk /var/lib/xm | cut -f1)
+echo "env  данные /var/lib/xm: $data КБ"
+if [[ $data =~ ^[0-9]+$ ]] && ((data <= 102400)); then ok "бюджет: /var/lib/xm ≤ 100 МБ"; else bad "бюджет: /var/lib/xm «$data» КБ"; fi
+
 # 13. Удаление (data-model.md §6, ADR-0042) — последним: дальше службы нет. Посторонние файлы
 # рядом с путями манифеста должны остаться.
 foreign=(/usr/local/lib/l4-foreign /usr/local/etc/l4-foreign /var/lib/l4-foreign /etc/l4-foreign)
@@ -365,7 +393,7 @@ eq "uninstall после --purge: не установлено, код" "$?" 3
 # Вывод обновления, снимков и удаления — тоже канарейка: секретов состояния и токена API в нём нет (значения сняты до удаления).
 (umask 077 && cat "$out/.secrets" >"$out/.canary")
 [[ -s $out/.token ]] && cat "$out/.token" >>"$out/.canary"
-grep -qF -f "$out/.canary" "$out/update-check" "$out/update-to" "$out/update-rollback" "$out/backup" "$out/restore" "$out/status-restored" "$out/diag-host" "$out/diag-oom" "$out/diag-ipv4" "$out/diag-ipv6" "$out/uninstall" "$out/purge-no" "$out/purge" "$out/uninstall-again"
+grep -qF -f "$out/.canary" "$out/update-check" "$out/update-to" "$out/update-rollback" "$out/backup" "$out/restore" "$out/status-restored" "$out/diag-host" "$out/diag-oom" "$out/diag-ipv4" "$out/diag-ipv6" "$out/budget-status" "$out/budget-diag" "$out/budget-backup" "$out/budget-update" "$out/budget-logs" "$out/uninstall" "$out/purge-no" "$out/purge" "$out/uninstall-again"
 case $? in
 0) bad "секрет состояния в выводе update, backup, restore или uninstall" ;;
 1) ok "вывод update, backup, restore и uninstall без секретов состояния" ;;
