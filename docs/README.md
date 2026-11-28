@@ -7,6 +7,7 @@
 | Нужно понять | Документ |
 |---|---|
 | как поставить `xm` на VPS (владельцу) | [guide/install.md](guide/install.md) |
+| как пользоваться: профили, обновление, снимки, диагностика, журналы (владельцу) | [guide/usage.md](guide/usage.md) |
 | что это за система и из чего состоит | [architecture/overview.md](architecture/overview.md) |
 | за что отвечает компонент и какой у него интерфейс | [architecture/components.md](architecture/components.md) |
 | команды, машинный контракт, HTTP API, мост | [architecture/interfaces.md](architecture/interfaces.md) |
