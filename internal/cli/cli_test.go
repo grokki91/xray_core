@@ -34,8 +34,8 @@ func TestHelpListsEveryCommand(t *testing.T) {
 		t.Fatalf("help: код %d, stderr %q", code, stderr)
 	}
 	for _, c := range commands() {
-		if !strings.Contains(stdout, "\n  "+c.name+" ") {
-			t.Errorf("в справке нет команды %q:\n%s", c.name, stdout)
+		if listed := strings.Contains(stdout, "\n  "+c.name+" "); listed == c.hidden {
+			t.Errorf("команда %q: в справке %v, служебная %v:\n%s", c.name, listed, c.hidden, stdout)
 		}
 	}
 }

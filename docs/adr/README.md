@@ -60,3 +60,4 @@
 | [0042](0042-uninstall-ordered-idempotent.md) | `uninstall` — упорядоченные идемпотентные шаги без отката | Принято |
 | [0043](0043-verified-range-and-update-check.md) | Проверенный диапазон версий Xray и итог проверки обновления | Принято |
 | [0044](0044-journal-read-via-journalctl-stream.md) | Чтение журнала — `journalctl` через `platform.Stream` | Принято |
+| [0045](0045-self-update-via-staged-binary.md) | `xm update --self` — новый бинарник применяет себя сам | Принято |

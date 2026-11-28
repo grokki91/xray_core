@@ -2,13 +2,14 @@
   "schema": {
     "name": "update",
     "major": 1,
-    "minor": 0
+    "minor": 1
   },
   "xm": {
     "version": "0.1.0"
   },
   "time": 1767225600,
   "data": {
+    "component": "xray",
     "current": "26.10.21",
     "target": "26.11.9",
     "latest": "26.12.1",

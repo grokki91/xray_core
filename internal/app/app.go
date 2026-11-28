@@ -51,6 +51,8 @@ type Services struct {
 	Network *network.Manager
 	// Security — базовая защита в начале каждой транзакции и ключи установки.
 	Security *security.Manager
+	// Self — релизы и бинарник самого xm (`xm update --self`, ADR-0045).
+	Self Self
 	// Releases — источник релизов Xray для установки.
 	Releases Releases
 	// Checks — итог последней проверки обновления: пишет Update, читает Status.
@@ -98,6 +100,8 @@ type Change struct {
 	// UFWPort — порт, для которого транзакция добавляет правило UFW (ADR-0041); 0 — не
 	// добавляет. Правило входит в журнал, и откат его снимает.
 	UFWPort int
+	// XMReplaced — бинарник xm уже заменён (`self-apply`, ADR-0045): откат возвращает прежний.
+	XMReplaced bool
 }
 
 // Apply выполняет изменение транзакцией: блокировка → базовая защита → (откат незавершённой) →
@@ -172,6 +176,8 @@ func (a *App) apply(ctx context.Context, ch Change) (err error) {
 			return err
 		}
 	}
+	// Версия xm, применившая транзакцию (ADR-0045): правила отрисовки — её.
+	ch.State.XM.Version = a.s.XM
 	a.register(ch.State)
 	coreBefore, err := a.s.Core.Current(ctx)
 	if err != nil {
@@ -199,7 +205,7 @@ func (a *App) apply(ctx context.Context, ch Change) (err error) {
 	if err != nil {
 		return err
 	}
-	tx := store.Tx{CoreBefore: string(coreBefore), UnitBefore: unitBefore, WasActive: status.Active == "active", Started: a.s.Now().UTC(), UFWPort: ch.UFWPort}
+	tx := store.Tx{CoreBefore: string(coreBefore), UnitBefore: unitBefore, WasActive: status.Active == "active", Started: a.s.Now().UTC(), UFWPort: ch.UFWPort, XMReplaced: ch.XMReplaced}
 	// Запускаем службу, что работала, и службу новой установки; остановленную владельцем — нет.
 	run := tx.WasActive || unitBefore == nil
 	if hadState {
@@ -448,6 +454,22 @@ func (a *App) recover(ctx context.Context) (bool, error) {
 // юнит, состояние и конфигурация; служба, что работала, поднимается и проходит контроль.
 // Отмена ctx откат не прерывает: он идёт под собственным сроком.
 func (a *App) rollback(ctx context.Context, tx store.Tx) error {
+	if err := a.rollbackSystem(ctx, tx); err != nil {
+		return err
+	}
+	// Прежний бинарник xm — после снятия журнала (ADR-0045): старый xm журнала с полем
+	// xm_replaced не читает; обрыв между шагами оставляет новый xm над прежним состоянием, а его
+	// он читает миграцией.
+	if tx.XMReplaced {
+		if err := a.s.Self.Restore(); err != nil {
+			return fmt.Errorf("прежний xm: %w", err)
+		}
+	}
+	return nil
+}
+
+// rollbackSystem — откат всего, кроме бинарника xm, со снятием журнала.
+func (a *App) rollbackSystem(ctx context.Context, tx store.Tx) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), rollbackTimeout)
 	defer cancel()
 	arch, err := a.s.Backup.Read(ctx, tx.Snapshot)
@@ -501,6 +523,7 @@ func (a *App) rollback(ctx context.Context, tx store.Tx) error {
 			return err
 		}
 	}
+
 	if tx.UnitBefore != nil && tx.WasActive {
 		// Службы без состояния не бывает; порта нет — поднимать и проверять нечего, служба
 		// остаётся остановленной (ADR-0023).

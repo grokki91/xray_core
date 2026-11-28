@@ -51,6 +51,13 @@ type Process interface {
 	Stop()
 }
 
+// XMNext — новый бинарник xm на время `xm update --self` (ADR-0045): программа закрытого
+// списка с путём XMNextPath; кладёт и сверяет его update.
+const (
+	XMNext     = "xm-next"
+	XMNextPath = "/usr/local/lib/xm/xm.next"
+)
+
 // CoreDir — каталог версий Xray: <CoreDir>/<версия>/xray и ссылка <CoreDir>/current
 // (docs/architecture/data-model.md §1).
 const CoreDir = "/usr/local/lib/xm/core"

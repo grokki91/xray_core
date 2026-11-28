@@ -33,6 +33,7 @@ type fakeApp struct {
 	// обновление
 	upd     contract.Update
 	updOpts app.UpdateOptions
+	prevXM  string // --previous у self-apply
 	// снимки
 	backups  contract.Backups
 	restored string
@@ -61,6 +62,11 @@ func (f *fakeApp) Backup(context.Context) (contract.BackupItem, error) {
 func (f *fakeApp) BackupList(context.Context) (contract.Backups, error) { return f.backups, f.err }
 
 func (f *fakeApp) Restore(_ context.Context, id string) error { f.restored = id; return f.err }
+
+func (f *fakeApp) SelfApply(_ context.Context, previous string) (contract.Update, error) {
+	f.prevXM = previous
+	return f.upd, f.err
+}
 
 func (f *fakeApp) Update(_ context.Context, o app.UpdateOptions) (contract.Update, error) {
 	f.updOpts = o
@@ -429,7 +435,7 @@ func TestVerdictLineEndsStatusAndInstall(t *testing.T) {
 }
 
 var updated = contract.Update{
-	Current: "26.10.21", Target: "26.11.9", Latest: "26.12.1",
+	Component: contract.ComponentXray, Current: "26.10.21", Target: "26.11.9", Latest: "26.12.1",
 	Range: contract.Range{Min: "26.10.21", Max: "26.11.9"}, InRange: true, Updated: true,
 	Checked: "2026-01-01T00:00:00Z", Unchecked: "сторонние клиентские ядра не проверялись",
 }
@@ -469,5 +475,19 @@ func TestUpdateHuman(t *testing.T) {
 				t.Errorf("%v: нет %q:\n%s", c.args, w, stdout)
 			}
 		}
+	}
+}
+
+// update --self доходит до app; self-apply передаёт --previous; вывод называет xm.
+func TestUpdateSelf(t *testing.T) {
+	done := contract.Update{Component: contract.ComponentXM, Current: "0.1.0", Target: "0.2.0", Updated: true, Unchecked: "подлинность"}
+	f := &fakeApp{upd: done}
+	code, stdout, _ := runWith(f, "update", "--self")
+	if code != exitOK || !f.updOpts.Self || !strings.Contains(stdout, "xm обновлён: 0.1.0 → 0.2.0") {
+		t.Fatalf("код %d, опции %+v:\n%s", code, f.updOpts, stdout)
+	}
+	code, stdout, _ = runWith(f, "self-apply", "--previous", "0.1.0", "--json")
+	if code != exitOK || f.prevXM != "0.1.0" || !strings.Contains(stdout, `"component": "xm"`) {
+		t.Fatalf("self-apply: код %d, previous %q:\n%s", code, f.prevXM, stdout)
 	}
 }

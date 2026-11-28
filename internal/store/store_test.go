@@ -29,7 +29,7 @@ func fakeStore(t *testing.T) (*Store, *platform.Fake) {
 
 func golden(t *testing.T) []byte {
 	t.Helper()
-	b, err := os.ReadFile("testdata/state-v3.json")
+	b, err := os.ReadFile("testdata/state-v4.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestLoadRejects(t *testing.T) {
 		{"нет файла", "", ErrNoState},
 		{"не JSON", "{", ErrSchema},
 		{"нет schema_version", `{"server":{}}`, ErrSchema},
-		{"новее сборки", `{"schema_version":4}`, ErrNewerSchema},
+		{"новее сборки", `{"schema_version":5}`, ErrNewerSchema},
 		{"старее без миграции", `{"schema_version":0}`, ErrSchema},
 		{"неизвестное поле", strings.Replace(cur, `"server"`, `"bogus":1,"server"`, 1), ErrSchema},
 		{"данные после документа", cur + "{}", ErrSchema},
@@ -131,7 +131,7 @@ func TestSaveRejectsForeignSchema(t *testing.T) {
 // Миграции (ADR-0032, ADR-0041): старый файл любой версии → Load → Save → файл текущей схемы;
 // служебный клиент остаётся пустым — его заполняет транзакция app, метка правила UFW — ложь.
 func TestMigrationOldFileToNewFile(t *testing.T) {
-	for _, name := range []string{"state-v1.json", "state-v2.json"} {
+	for _, name := range []string{"state-v1.json", "state-v2.json", "state-v3.json"} {
 		t.Run(name, func(t *testing.T) {
 			s, f := fakeStore(t)
 			old, err := os.ReadFile("testdata/" + name)
@@ -143,7 +143,7 @@ func TestMigrationOldFileToNewFile(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if st.SchemaVersion != 3 || st.Selftest.ID != "" || st.Firewall.UFWRule {
+			if st.SchemaVersion != 4 || st.XM != (XM{}) || st.Selftest.ID != "" || st.Firewall.UFWRule {
 				t.Fatalf("после миграции: версия %d, selftest %q, firewall %+v", st.SchemaVersion, st.Selftest.ID, st.Firewall)
 			}
 			if err := s.Save(st); err != nil {

@@ -163,7 +163,7 @@ func TestRemoveFollowsManifest(t *testing.T) {
 	if err := f.FS().Mkdir("/usr/local/bin", 0o755, platform.Root()); err != nil {
 		t.Fatal(err)
 	}
-	for _, p := range []string{XMBinary, "/usr/local/bin/other", "/etc/xm/state.json", "/var/lib/xm/backups/a.tar", "/usr/local/lib/xm/core/x"} {
+	for _, p := range []string{XMBinary, XMPrevious, "/usr/local/bin/other", "/etc/xm/state.json", "/var/lib/xm/backups/a.tar", "/usr/local/lib/xm/core/x"} {
 		if err := f.FS().WriteFile(p, []byte("x"), 0o600, platform.Root()); err != nil {
 			t.Fatal(err)
 		}
@@ -175,7 +175,7 @@ func TestRemoveFollowsManifest(t *testing.T) {
 	if err := m.Remove(ctx(t), false); err != nil {
 		t.Fatal(err)
 	}
-	for _, p := range []string{XMBinary, "/usr/local/lib/xm"} {
+	for _, p := range []string{XMBinary, XMPrevious, "/usr/local/lib/xm"} {
 		if !gone(p) {
 			t.Errorf("без purge: %s остался", p)
 		}
